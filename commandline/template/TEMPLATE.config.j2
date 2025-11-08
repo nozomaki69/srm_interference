@@ -1,0 +1,226 @@
+{% set band_name = band_name | default("DrIotTestBand") %}
+{% set is_enabled_suspended_csma = is_enabled_suspended_csma | default(False) %}
+
+#Instance general
+#Component Simulation
+{% if seed is defined %}
+seed = {{ seed }}
+{% endif %}
+mobility-seed = {{ mobility_seed }}
+simulation-time = {{ sim_time }}
+time-step-event-synchronization-step = 0.1
+trace-output-mode = Text
+trace-index-output = false
+trace-output-file = {{ label }}.trace
+statistics-output-file = {{ label }}.stat
+statistics-output-for-no-data = true
+statistics-configuration-file = {{ label }}.statconfig
+allow-node-re-creation = false
+network-static-route-file = ref/empty.txt
+network-terminate-sim-when-routing-fails = false
+progress-sim-time-output-interval-percents = 0.0
+enable-unused-parameter-warnings = true
+
+#Component GIS
+gis-road-driving-side = Left
+gis-los-break-down-cureved-road-into-straight-roads = true
+gis-number-entrances-to-building = 0
+gis-number-entrances-to-station = 0
+gis-number-entrances-to-busstop = 0
+gis-number-entrances-to-park = 0
+gis-road-set-intersection-margin = false
+gis-object-position-in-latlong-degree = false
+
+#Component Antenna/Propagation
+number-data-parallel-threads-for-propagation = 1
+custom-antenna-file = ref/empty.txt
+antenna-pattern-two-2d-to-3d-interpolation-algorithm-number = 1
+antenna-patterns-are-in-legacy-format = false
+material-file = ref/empty.txt
+moving-object-shape-file = ref/empty.txt
+
+#Component DrIot
+{% set is_6lowpan_enabled = is_6lowpan_enabled | default(True) %}
+{% if is_6lowpan_enabled %}
+driot-6lowpan-model-is-on = true
+{% else %}
+driot-6lowpan-model-is-on = false
+{% endif %}
+driot-bit-error-rate-curve-file = ref/driotmodes.ber
+
+#Instance general
+#Component SimulationObject
+[1-{{ nodes | length }}] trace-start-time = 0.0
+{% if trace_tags is defined and trace_tags | length > 0 %}
+[1-{{ nodes | length }}] trace-enabled-tags = {{ trace_tags | join(' ') }}
+{% endif %}
+
+#Component Mobility
+[1-{{ nodes | length }}] mobility-model = TRACE-FILE
+[1-{{ nodes | length }}] mobility-granularity-meters = 1.0
+[1-{{ nodes | length }}] mobility-trace-file-supports-creation-and-deletion = true
+[1-{{ nodes | length }}] mobility-trace-file = {{ label }}.pos
+[1-{{ nodes | length }}] mobility-need-to-add-ground-height = true
+
+{% for node in nodes %}
+#Instance driot_{{ node.id }}
+#Component DrIot (Node)
+{% if node.mode | lower == 'coordinator' %}{# コーディネータ #}
+[{{ node.id }}] driot-advertising-interval = 3.0
+[{{ node.id }}] driot-mode = Coordinator
+{% if node.associated_device_table | length > 0 or node.init_block_index is defined or  node.init_block_count is defined %}
+[{{ node.id }}] driot-enable-dynamic-block-select = false
+[{{ node.id }}] driot-initial-block-number = {{ node.init_block_index }}
+[{{ node.id }}] driot-initial-block-count = {{ node.init_block_count }}
+{%     if node.associated_device_table | length > 0 %}
+[{{ node.id }}] driot-associated-device-table = {{ node.associated_device_table | join(',') }}
+{%    endif %}
+{% else %}
+[{{ node.id }}] driot-enable-dynamic-block-select = true
+[{{ node.id }}] driot-block-selection-method = {{ block_selection_method }}
+{% endif %}
+[{{ node.id }}] driot-desired-channel-bandwidth-khz = {{ node.desired_channel_bandwidth }}
+[{{ node.id }}] driot-desired-block-count = {{ node.desired_block_count }}
+{% else %}{# デバイス #}
+[{{ node.id }}] driot-mode = Device
+{% if node.associated %}
+[{{ node.id }}] driot-associated-with-pancoordinator = true
+{% else %}
+[{{ node.id }}] driot-association-response-timeout = 1.0
+[{{ node.id }}] driot-associated-with-pancoordinator = false
+{% endif %}
+{% endif %}{# if node.mode #}
+[{{ node.id }}] driot-advertising-scan-duration = 6.0
+[{{ node.id }}] driot-advertising-channel-number = {{ advertising_channel_number }}
+[{{ node.id }}] driot-pan-id = {{ node.pan_id }}
+
+{% for interface in node.interfaces %}
+{% set interface_name= 'driot_' ~ node.id ~ '_' ~ loop.index %}
+#Component Antenna/Propagation (Interface): {{ interface_name }}
+[{{ node.id }};{{ interface_name }}] channel-instance-id = {{ band_name }}
+[{{ node.id }};{{ interface_name }}] antenna-model = Omnidirectional
+[{{ node.id }};{{ interface_name }}] antenna-gain-dbi = 2.15
+[{{ node.id }};{{ interface_name }}] antenna-height-meters = 2.0
+[{{ node.id }};{{ interface_name }}] antenna-azimuth-degrees = 0.0
+[{{ node.id }};{{ interface_name }}] antenna-elevation-degrees = 0.0
+[{{ node.id }};{{ interface_name }}] antenna-offset-meters = 0.0
+[{{ node.id }};{{ interface_name }}] antenna-offset-degrees = 0.0
+
+#Component Network (Interface): {{ interface_name }}
+[{{ node.id }};{{ interface_name }}] network-address = 10.0.0.0 + $n
+[{{ node.id }};{{ interface_name }}] network-prefix-length-bits = 16
+[{{ node.id }};{{ interface_name }}] network-subnet-is-multihop = false
+[{{ node.id }};{{ interface_name }}] network-address-is-primary = false
+[{{ node.id }};{{ interface_name }}] network-allow-routing-back-out-same-interface = true
+[{{ node.id }};{{ interface_name }}] network-ignore-unregistered-protocol = false
+[{{ node.id }};{{ interface_name }}] network-mtu-bytes = 1500
+[{{ node.id }};{{ interface_name }}] mac-protocol = DrIot
+[{{ node.id }};{{ interface_name }}] network-enable-dhcp-client = false
+[{{ node.id }};{{ interface_name }}] network-enable-dhcp-server = false
+[{{ node.id }};{{ interface_name }}] network-enable-ndp = false
+[{{ node.id }};{{ interface_name }}] network-enable-arp = false
+
+#Component DrIotMac (Interface): {{ interface_name }}
+[{{ node.id }};{{ interface_name }}] driot-addressing-mode = Short
+[{{ node.id }};{{ interface_name }}] driot-max-sifs-frame-size-bytes = 18
+[{{ node.id }};{{ interface_name }}] driot-max-backoff-exponent = 5
+[{{ node.id }};{{ interface_name }}] driot-min-backoff-exponent = 3
+[{{ node.id }};{{ interface_name }}] driot-max-csma-backoffs = 4
+[{{ node.id }};{{ interface_name }}] driot-max-frame-retries = 3
+[{{ node.id }};{{ interface_name }}] driot-initial-channel-number = {{ interface.init_ch }}
+[{{ node.id }};{{ interface_name }}] driot-operating-mode = {{ interface.mode }}
+{% if is_enabled_suspended_csma %}
+[{{ node.id }};{{ interface_name }}] driot-suspended-csma = false
+[{{ node.id }};{{ interface_name }}] driot-suspended-csma-max-time = 32
+{% endif %}
+
+#Component DrIotPhy (Interface): {{ interface_name }}
+[{{ node.id }};{{ interface_name }}] driot-phy-protocol = DR-IoT
+[{{ node.id }};{{ interface_name }}] driot-tx-power-dbm = {{ tx_power | default(19.0) }}
+[{{ node.id }};{{ interface_name }}] driot-preamble-detection-power-threshold-dbm = {{ node.preamble_power }}
+[{{ node.id }};{{ interface_name }}] driot-energy-detection-power-threshold-dbm = -75.000000000
+[{{ node.id }};{{ interface_name }}] driot-radio-noise-figure-db = 6.000000000
+[{{ node.id }};{{ interface_name }}] driot-rx-tx-turnaround-time = 0.001
+[{{ node.id }};{{ interface_name }}] driot-phy-cca-mode = CS_ONLY
+
+{# チャネルは2種類 #}
+[{{ node.id }};{{ interface_name }}] driot-symbol-rate-map = 200.0 50000 600.0 200000
+[{{ node.id }};{{ interface_name }}] driot-symbol-duration-type = Auto
+[{{ node.id }};{{ interface_name }}] driot-phy-parameter-type = Fixed
+[{{ node.id }};{{ interface_name }}] driot-max-frame-size = 2047
+[{{ node.id }};{{ interface_name }}] driot-sifs-periods = 12
+[{{ node.id }};{{ interface_name }}] driot-lifs-periods = 40
+[{{ node.id }};{{ interface_name }}] driot-cca-periods = 8
+[{{ node.id }};{{ interface_name }}] driot-phy-modulation-type = GMSK
+[{{ node.id }};{{ interface_name }}] driot-aifs-time = 0.001
+[{{ node.id }};{{ interface_name }}] driot-fsk-preamble-repetion-number = 4
+{% endfor %}{# for interface #}
+
+{% if node.cbr_applications is defined %}
+{% for cbr_app in node.cbr_applications %}
+{% set cbr_index = loop.index %}
+
+{# 6lowpanが無効の場合 (driotcbr) #}
+{%   if not is_6lowpan_enabled %}
+#Component driotcbr{{ cbr_index }} App
+[{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-destination-addressing-mode = Short
+[{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-destination = {{ cbr_app.dst }}
+[{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-traffic-start-time = {{ cbr_app.start }}
+[{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-traffic-end-time = {{ cbr_app.end }}
+[{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-traffic-start-time-max-jitter  = {{ cbr_app.jitter }}
+[{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-payload-size-bytes = {{ cbr_app.payload_size | int}}
+[{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-enable-ack-request = {{ cbr_app.is_ack_required }}
+[{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-traffic-defined-by = BitsPerSecond
+[{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-traffic-bps = {{ cbr_app.bps | int }}
+[{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-auto-port-mode = true
+[{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-use-virtual-payload = false
+{%   else %}
+{# 6lowpanが有効の場合 (cbr) #}
+#Component cbr{{ cbr_index }} App
+[{{ node.id }};cbr_{{ node.id }}_{{ cbr_index }}] cbr-destination = {{ cbr_app.dst }}
+[{{ node.id }};cbr_{{ node.id }}_{{ cbr_index }}] cbr-start-time = {{ cbr_app.start }}
+[{{ node.id }};cbr_{{ node.id }}_{{ cbr_index }}] cbr-end-time = {{ cbr_app.end }}
+[{{ node.id }};cbr_{{ node.id }}_{{ cbr_index }}] cbr-start-time-max-jitter = {{ cbr_app.jitter }}
+[{{ node.id }};cbr_{{ node.id }}_{{ cbr_index }}] cbr-payload-size-bytes = {{ cbr_app.payload_size }}
+[{{ node.id }};cbr_{{ node.id }}_{{ cbr_index }}] cbr-traffic-defined-by = BitsPerSecond
+[{{ node.id }};cbr_{{ node.id }}_{{ cbr_index }}] cbr-traffic-bps = {{ cbr_app.bps | int }}
+[{{ node.id }};cbr_{{ node.id }}_{{ cbr_index }}] cbr-priority = 0
+[{{ node.id }};cbr_{{ node.id }}_{{ cbr_index }}] cbr-auto-port-mode = true
+[{{ node.id }};cbr_{{ node.id }}_{{ cbr_index }}] cbr-use-virtual-payload = false
+{%   endif %}
+{% endfor %}{# for cbr_app #}
+{% endif %}{# if node.cbr_applications #}
+
+{% endfor %}{# for node #}
+
+{% if band_name == "DrIotTestBand" %}
+#Instance DrIotTestBand
+#Component Channel
+[DrIotTestBand] channel-count = 3
+[DrIotTestBand] channel-0-frequency-mhz = 920
+[DrIotTestBand] channel-0-bandwidth-mhz = 0.2
+[DrIotTestBand] channel-0-transmit-spectral-mask-mhz-dbr = 0.1 0
+[DrIotTestBand] channel-0-channel-interference-nominal-transmit-width-mhz = 0.2
+[DrIotTestBand] channel-0-channel-interference-receive-width-mhz = 0.2
+[DrIotTestBand] channel-1-frequency-mhz = 921
+[DrIotTestBand] channel-1-bandwidth-mhz = 0.2
+[DrIotTestBand] channel-1-transmit-spectral-mask-mhz-dbr = 0.1 0
+[DrIotTestBand] channel-1-channel-interference-nominal-transmit-width-mhz = 0.2
+[DrIotTestBand] channel-1-channel-interference-receive-width-mhz = 0.2
+[DrIotTestBand] channel-2-frequency-mhz = 920
+[DrIotTestBand] channel-2-bandwidth-mhz = 0.6
+[DrIotTestBand] channel-2-transmit-spectral-mask-mhz-dbr = 0.3 0
+[DrIotTestBand] channel-2-channel-interference-nominal-transmit-width-mhz = 0.6
+[DrIotTestBand] channel-2-channel-interference-receive-width-mhz = 0.6
+[DrIotTestBand] propagation-enable-mask-calculated-channel-interference = true
+[DrIotTestBand] propagation-enable-inter-model-propagation-delay = true
+[DrIotTestBand] enable-propagation-delay = true
+[DrIotTestBand] max-signal-propagation-meters = 100000000.0
+[DrIotTestBand] propagation-allow-multiple-interfaces-on-same-channel = true
+[DrIotTestBand] fading-model = Off
+
+{% endif %}
+
+# end of file
+
+

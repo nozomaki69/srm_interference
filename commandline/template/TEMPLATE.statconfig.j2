@@ -1,0 +1,8 @@
+{# {% for node in nodes %} #}
+{# {%   if node.mode | lower == 'coordinator' %} #}
+{# {{node.id}} DrIotMac_* INF_TIME {{ measure_start }} {{ measure_end }} #}
+{# {%   endif %} #}
+{# {% endfor %} #}
+* DrIotMac_* INF_TIME {{ measure_start }} {{ measure_end }}
+* DrIotCbr_* INF_TIME {{ measure_start }} {{ measure_end }}
+{# * * INF_TIME {{ measure_start }} {{ measure_end }} #}

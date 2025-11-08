@@ -1,0 +1,8 @@
+{% for node in nodes %}
+{% for pos in node.pos_list%}
+{{ node.id }} {{pos.time}} {{pos.x}} {{pos.y}} 0.0 0 0
+{% if loop.last %}
+{{ node.id }} INF_TIME {{pos.x}} {{pos.y}} 0.0 0 0
+{% endif %}
+{% endfor %}
+{% endfor %}
