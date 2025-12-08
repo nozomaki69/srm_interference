@@ -138,10 +138,10 @@ driot-bit-error-rate-curve-file = ref/driotmodes.ber
 [{{ node.id }};{{ interface_name }}] driot-phy-protocol = DR-IoT
 [{{ node.id }};{{ interface_name }}] driot-tx-power-dbm = {{ tx_power | default(19.0) }}
 [{{ node.id }};{{ interface_name }}] driot-preamble-detection-power-threshold-dbm = {{ node.preamble_power }}
-[{{ node.id }};{{ interface_name }}] driot-energy-detection-power-threshold-dbm = -75.000000000
+[{{ node.id }};{{ interface_name }}] driot-energy-detection-power-threshold-dbm = {{ node.ed_threshold_dbm }}
 [{{ node.id }};{{ interface_name }}] driot-radio-noise-figure-db = 6.000000000
 [{{ node.id }};{{ interface_name }}] driot-rx-tx-turnaround-time = 0.001
-[{{ node.id }};{{ interface_name }}] driot-phy-cca-mode = CS_ONLY
+[{{ node.id }};{{ interface_name }}] driot-phy-cca-mode = {{ cca_mode }}
 
 {# チャネルは2種類 #}
 [{{ node.id }};{{ interface_name }}] driot-symbol-rate-map = 200.0 50000 600.0 200000

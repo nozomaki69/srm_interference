@@ -14,21 +14,20 @@ import random
 import numpy as np
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-
 # --- パラメータ定義 ---
 
 CHANNELS = {
-    0:  {"ch": 0, "bandwidth": 150.0, "bitrate": 50e3,   "frame_size": 255,  "preamble_power": -97.0, "range_km": 1.4414098800604656}, #周波数920MHz
-    1:  {"ch": 1, "bandwidth": 150.0, "bitrate": 50e3,   "frame_size": 255,  "preamble_power": -97.0, "range_km": 1.4414098800604656}, #周波数921MHz
-    2:  {"ch": 2, "bandwidth": 600.0, "bitrate": 200e3,  "frame_size": 511,  "preamble_power": -90.97940008672037, "range_km": 1.0192307006600434},#周波数920MHz
+    0:  {"ch": 0, "bandwidth": 150.0, "bitrate": 50e3,   "frame_size": 255,  "preamble_power": -97.0, "range_km": 1.4414098800604656, "ed_threshold_dbm": -87.0}, #周波数920MHz
+    1:  {"ch": 1, "bandwidth": 150.0, "bitrate": 50e3,   "frame_size": 255,  "preamble_power": -97.0, "range_km": 1.4414098800604656, "ed_threshold_dbm": -87.0}, #周波数921MHz
+    2:  {"ch": 2, "bandwidth": 600.0, "bitrate": 200e3,  "frame_size": 511,  "preamble_power": -90.97940008672037, "range_km": 1.0192307006600434, "ed_threshold_dbm": -80.97940008672037},#周波数920MHz
 }
 TARGET_BANDWIDTH_PATTERNS = [[0, 2],[1, 2]]
 NUM_DEVICE = 12
 DEVICE_ID_1 = list(range(3, NUM_DEVICE + 3))
 DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
 
-DISTANCES_KM = np.round(np.arange(0.0, 2.5, 0.1),1)
-SIMULATION_SEEDS = 3
+DISTANCES_KM = np.round(np.arange(0.0, 2.0, 0.1),1)
+SIMULATION_SEEDS = 20
 OFFERED_LOAD = 0.7
  
 MEASURE_START_SEC = 10.0
@@ -111,6 +110,7 @@ def main():
                     "desired_block_count": 1,
                     "cbr_applications": [],
                     "preamble_power": c1_info["preamble_power"],
+                    "ed_threshold_dbm": c1_info["ed_threshold_dbm"],
                 }
                 for dev_id in DEVICE_ID_1:
                     coordinator_node_1["cbr_applications"].append({
@@ -137,6 +137,7 @@ def main():
                     "desired_block_count": 1,
                     "cbr_applications": [],
                     "preamble_power": c2_info["preamble_power"],
+                    "ed_threshold_dbm": c2_info["ed_threshold_dbm"],
                 }
                 for dev_id in DEVICE_ID_2:
                     coordinator_node_2["cbr_applications"].append({
@@ -168,6 +169,7 @@ def main():
                             "is_ack_required": True,
                         }],
                         "preamble_power": c1_info["preamble_power"],
+                        "ed_threshold_dbm": c1_info["ed_threshold_dbm"],
                     }
                     all_nodes.append(device_node_1)
 
@@ -190,6 +192,7 @@ def main():
                             "is_ack_required": True,
                         }],
                         "preamble_power": c2_info["preamble_power"],
+                        "ed_threshold_dbm": c2_info["ed_threshold_dbm"],
                     }
                     all_nodes.append(device_node_2)
 
@@ -209,6 +212,7 @@ def main():
                     "nodes": all_nodes,
                     "tx_power": 13.010299956639813, # dBm
                     "trace_tags": MY_TRACE_TAGS,
+                    "cca_mode": "ED_or_CS",
                 }
 
                 # --- ファイル生成 ---
