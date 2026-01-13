@@ -7,8 +7,10 @@ import re
 import collections
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
 from collections import defaultdict
-
+from sklearn.kernel_ridge import KernelRidge
+from statsmodels.nonparametric.smoothers_lowess import lowess
 
 # ★修正：scipyのインポートを削除
 # from scipy import stats 
@@ -19,169 +21,368 @@ STATS_DIR = os.path.join(SCRIPT_DIR, "..")  # commandline/
 PLOT_OUTPUT_DIR = os.path.join(STATS_DIR, "plots")
 
 # Regular expression to parse parameters from filenames
-FILENAME_STAT = re.compile(r"dist_([\d.]+)m_bw_([\d.]+?)and([\d.]+)khz_num_device(\d+)_seed(\d+)\.stat")
-FILENAME_TRACE = re.compile(r"dist_([\d.]+)m_bw_([\d.]+?)and([\d.]+)khz_num_device(\d+)_seed(\d+)\.trace")
-FILENAME_POS = re.compile(r"dist_([\d.]+)m_bw_([\d.]+?)and([\d.]+)khz_num_device(\d+)_seed(\d+)\.pos")
+#interf_coord_dist_([\d.]+)m_off_load([\d.]+)_seed(\d+)
+FILENAME_STAT = re.compile(r"coord_dist_([\d.]+)m_off_load([\d.]+)_seed(\d+)\.stat")
+FILENAME_TRACE = re.compile(r"coord_dist_([\d.]+)m_off_load([\d.]+)_seed(\d+)\.trace")
+FILENAME_POS = re.compile(r"coord_dist_([\d.]+)m_off_load([\d.]+)_seed(\d+)\.pos")
 
 # 新しいリスト定義
-FILE_PREFIXES = ["interference", "non_interference"]
+FILE_PREFIXES = ["interf", "no_interf"]
 # --- Main Logic ---
 
 NUM_COORD = 2
 NUM_DEV_GROUP = 12 # 各グループのデバイス数
 C1_DEV_RANGE = range(NUM_COORD + 1, NUM_COORD + NUM_DEV_GROUP + 1)  # 3 ~ 14
 C2_DEV_RANGE = range(NUM_COORD + NUM_DEV_GROUP + 1, NUM_COORD + (2 * NUM_DEV_GROUP) + 1) # 15 ~ 26
-
+BW1_kHZ = 150.0
+BW2_kHZ = 600.0
+FONT_SIZE = 45
 PATTERN =2
 
 def main():
     for prefix_name in FILE_PREFIXES:
+
         print(f"\n===== Processing {prefix_name} files =====\n")
-        bw1_khz = 0.0
-        bw2_khz = 0.0
 
         """Main execution function."""
         print("--- Starting Result Aggregation and Plotting ---")
 
-        if not os.path.isdir(STATS_DIR):
-            print(
-                f"Error: Statistics directory not found at '{STATS_DIR}'", file=sys.stderr
+        corr_up1_list = []
+        corr_down1_list = []
+        corr_up2_list = []
+        corr_down2_list = []
+
+        for off_load in np.round(np.arange(0.1, 1.1, 0.1),1):
+            print("start offered_load:", off_load)
+            distance_to_interference_pan1 = []
+            up_per_all_pan1 = []
+            down_per_all_pan1 = []
+            
+            distance_to_interference_pan2 = []
+            up_per_all_pan2 = []
+            down_per_all_pan2 = []
+
+            if not os.path.isdir(STATS_DIR):
+                print(
+                    f"Error: Statistics directory not found at '{STATS_DIR}'", file=sys.stderr
+                )
+                sys.exit(1)
+
+            # Find all .stat files
+            stat_files = [f for f in os.listdir(STATS_DIR) 
+                                if f.endswith(".stat") and f.startswith(prefix_name) and f"off_load{off_load}" in f]
+            trace_files = [f for f in os.listdir(STATS_DIR) 
+                                    if f.endswith(".trace") and f.startswith(prefix_name) and f"off_load{off_load}" in f]
+            pos_files = [f for f in os.listdir(STATS_DIR) 
+                                if f.endswith(".pos") and f.startswith(prefix_name) and f"off_load{off_load}" in f]
+            if not (stat_files or trace_files or pos_files):
+                print("Warning: No .stat, .trace, or _seed0.pos files found. Nothing to plot.", file=sys.stderr)
+                return
+
+            print(f"Found {len(stat_files)} stat files to process.")
+            print(f"Found {len(trace_files)} trace files to process.")
+            print(f"Found {len(pos_files)} pos files to process.")
+
+            # Data container for all runs
+            results = {
+                "up_data_pdr_list":collections.defaultdict(list),
+                "down_data_pdr_list":collections.defaultdict(list),
+            }
+
+            #seedごとの統計情報をtraceファイルから取り、perを計算し格納
+            for filename in trace_files:
+                match = FILENAME_TRACE.match(filename.replace(f"{prefix_name}_", ""))
+                if not match:
+                    print(f"Skipping file with unexpected name format: {filename}")
+                    continue
+                off_load = round(float(match.group(2)), 1)
+                seed = int(match.group(3))
+
+                filepath = os.path.join(STATS_DIR, filename)
+                #print(filepath)
+                up_data_pdr_list, down_data_pdr_list= node_parse_trace_file(filepath, NUM_DEV_GROUP)
+                #print(up_data_pdr_list, down_data_pdr_list)
+                results["up_data_pdr_list"][seed]=up_data_pdr_list
+                results["down_data_pdr_list"][seed]=down_data_pdr_list
+
+            #print(filename)
+            #print(results)
+            #print(results["up_data_pdr_list"])    
+            """
+            距離ごとのシミュレーション回数分の結果が出ているので、距離ごとで平均をとる
+            """
+            # average_up_data_pdr_dict = calculate_node_seed_average(
+            #         results["up_data_pdr_list"]
+            # )
+            # average_down_data_pdr_dict = calculate_node_seed_average(
+            #         results["down_data_pdr_list"]
+            # )
+
+            """
+            pdrの比
+            """
+            # up_down_pdr_diff = defaultdict(list)
+            # for seed in list(range(10)):
+            #     for node_id in range(33):
+            #         diff = round(average_down_data_pdr_dict[seed][node_id]/average_up_data_pdr_dict[seed][node_id],2)
+            #         up_down_pdr_diff[seed].append(diff)
+
+
+            #求めた距離ごとのノードの平均を二次元平面上にプロット
+            #print(results)
+            for filename in pos_files:
+                print(filename)
+                match = FILENAME_POS.match(filename.replace(f"{prefix_name}_", ""))
+                if not match:
+                    print(f"Skipping file with unexpected name format: {filename}")
+                    continue
+
+                off_load = round(float(match.group(2)), 1)
+                seed = int(match.group(3))
+
+                #posファイルから場所を特定
+                positions = parse_pos_file(filename)
+                # print(positions)
+                for device_id in C1_DEV_RANGE:
+                    d = np.sqrt((positions[device_id][0] - positions[2][0])**2 + (positions[device_id][1] - positions[2][1])**2)
+                    distance_to_interference_pan1.append(d)
+                    up_per_all_pan1.append(results["up_data_pdr_list"][seed][device_id])
+                    down_per_all_pan1.append(results["down_data_pdr_list"][seed][device_id])
+
+                # print("seed:",seed)
+                # print(positions)
+                # print(distance_to_interference_pan1)
+                # print(per_all_pan1)
+                
+                for device_id in C2_DEV_RANGE:
+                    d = np.sqrt((positions[device_id][0] - positions[1][0])**2 + (positions[device_id][1] - positions[1][1])**2)
+                    distance_to_interference_pan2.append(d)
+                    up_per_all_pan2.append(results["up_data_pdr_list"][seed][device_id])
+                    down_per_all_pan2.append(results["down_data_pdr_list"][seed][device_id])
+
+                #print(distance_to_interference_pan2)
+
+                """
+                グラフのプロット
+                """
+                # plot_positions_and_values(positions, f"{prefix_name}_seed{seed}_up_data_pdr_plot.png", average_up_data_pdr_dict[seed], BW1_kHZ, BW2_kHZ)
+                # plot_positions_and_values(positions, f"{prefix_name}_seed{seed}_down_data_pdr_plot.png", average_down_data_pdr_dict[seed], BW1_kHZ, BW2_kHZ)
+                #plot_positions_and_values(positions, f"{prefix_name}_seed{seed}_pdr_diff_plot.png", up_down_pdr_diff[seed], BW1_kHZ, BW2_kHZ)
+            
+            plot_distance_vs_per(distance_to_interference_pan1, up_per_all_pan1, f"{off_load}_{prefix_name}_up_data_per_pan1.png","blue")
+            plot_distance_vs_per(distance_to_interference_pan1, down_per_all_pan1, f"{off_load}_{prefix_name}_down_data_per_pan1.png", "red")
+            plot_distance_vs_per_up_down(distance_to_interference_pan1,up_per_all_pan1,down_per_all_pan1,f"{off_load}_{prefix_name}_per_pan1.png")
+            plot_distance_vs_per(distance_to_interference_pan2, up_per_all_pan2, f"{off_load}_{prefix_name}_up_data_per_pan2.png", "blue")
+            plot_distance_vs_per(distance_to_interference_pan2, down_per_all_pan2, f"{off_load}_{prefix_name}_down_data_per_pan2.png", "red")
+            plot_distance_vs_per_up_down(distance_to_interference_pan2,up_per_all_pan2,down_per_all_pan2,f"{off_load}_{prefix_name}_per_pan2.png")
+            
+            distance_to_interference_pan1 = np.asarray(distance_to_interference_pan1)
+            up_per_all_pan1 = np.asarray(up_per_all_pan1)
+            down_per_all_pan1 = np.asarray(down_per_all_pan1)
+
+            idx = np.argsort(distance_to_interference_pan1)
+            distance_pan1_sorted = distance_to_interference_pan1[idx]
+            up_per_pan1_sorted = up_per_all_pan1[idx]
+            down_per_pan1_sorted = down_per_all_pan1[idx]
+
+
+            plot_distance_vs_per_lowess(
+                distance_pan1_sorted,
+                up_per_pan1_sorted,
+                down_per_pan1_sorted,
+                f"{off_load}_{prefix_name}_pan1_lowess.png"
             )
-            sys.exit(1)
-
-        # Find all .stat files
-        stat_files = [f for f in os.listdir(STATS_DIR) 
-                               if f.endswith(".stat") and f.startswith(prefix_name)]
-        trace_files = [f for f in os.listdir(STATS_DIR) 
-                                if f.endswith(".trace") and f.startswith(prefix_name)]
-        pos_files = [f for f in os.listdir(STATS_DIR) 
-                              if f.endswith(".pos") and f.startswith(prefix_name)]
-
-        if not (stat_files or trace_files or pos_files):
-            print("Warning: No .stat, .trace, or _seed0.pos files found. Nothing to plot.", file=sys.stderr)
-            return
-
-        print(f"Found {len(stat_files)} stat files to process.")
-        print(f"Found {len(trace_files)} trace files to process.")
-        print(f"Found {len(pos_files)} pos files to process.")
-
-        # Data container for all runs
-        results = {
-            "up_data_pdr_list":collections.defaultdict(list),
-            "down_data_pdr_list":collections.defaultdict(list),
-        }
-
-        #Nodeごとの統計情報をtraceファイルから取り、距離ごとにseed値全ての配列を格納
-        for filename in trace_files:
-            match = FILENAME_TRACE.match(filename.replace(f"{prefix_name}_", ""))
-            if not match:
-                print(f"Skipping file with unexpected name format: {filename}")
-                continue
-
-            seed = int(match.group(5))
-            num_device = int(match.group(4))
-
-            filepath = os.path.join(STATS_DIR, filename)
-            up_data_pdr_list, down_data_pdr_list= node_parse_trace_file(filepath, num_device)
-
-            results["up_data_pdr_list"][seed].append(up_data_pdr_list)
-            results["down_data_pdr_list"][seed].append(down_data_pdr_list)
-
-        #print(filename)
-        #print(results)
-        #print(results["up_data_pdr_list"])    
-
-        #距離ごとのシミュレーション回数分の結果が出ているので、距離ごとで平均をとる
-        average_up_data_pdr_dict = calculate_node_seed_average(
-                results["up_data_pdr_list"]
-        )
-        average_down_data_pdr_dict = calculate_node_seed_average(
-                results["down_data_pdr_list"]
-        )
-
-        """
-        pdrの比
-        """
-        # up_down_pdr_diff = defaultdict(list)
-        # for seed in list(range(10)):
-        #     for node_id in range(33):
-        #         diff = round(average_down_data_pdr_dict[seed][node_id]/average_up_data_pdr_dict[seed][node_id],2)
-        #         up_down_pdr_diff[seed].append(diff)
+            distance_to_interference_pan2 = np.asarray(distance_to_interference_pan2)
+            up_per_all_pan2 = np.asarray(up_per_all_pan2)
+            down_per_all_pan2 = np.asarray(down_per_all_pan2)
+            idx = np.argsort(distance_to_interference_pan2)
+            distance_pan2_sorted = distance_to_interference_pan2[idx]
+            up_per_pan2_sorted = up_per_all_pan2[idx]
+            down_per_pan2_sorted = down_per_all_pan2[idx]
+            plot_distance_vs_per_lowess(
+                distance_pan2_sorted,
+                up_per_pan2_sorted,
+                down_per_pan2_sorted,
+                f"{off_load}_{prefix_name}_pan2_lowess.png"
+            )
 
 
-        #求めた距離ごとのノードの平均を二次元平面上にプロット
-        distance_to_interference_pan1 = []
-        up_per_all_pan1 = []
-        down_per_all_pan1 = []
 
-        distance_to_interference_pan2 = []
-        up_per_all_pan2 = []
-        down_per_all_pan2 = []
-
-        for filename in pos_files:
-            match = FILENAME_POS.match(filename.replace(f"{prefix_name}_", ""))
-            if not match:
-                print(f"Skipping file with unexpected name format: {filename}")
-                continue
-
-            bw1_khz = float(match.group(2))
-            bw2_khz = float(match.group(3))
-            num_device = int(match.group(4))
-            seed = int(match.group(5))
-
-
-            #posファイルから場所を特定
-            positions = parse_pos_file(filename)
-
-            for device_id in C1_DEV_RANGE:
-                d = np.sqrt((positions[device_id][0] - positions[2][0])**2 + (positions[device_id][1] - positions[2][1])**2)
-                distance_to_interference_pan1.append(d)
-                up_per_all_pan1.append(average_up_data_pdr_dict[seed][device_id])
-                down_per_all_pan1.append(average_down_data_pdr_dict[seed][device_id])
-
-            # print("seed:",seed)
-            # print(positions)
-            # print(distance_to_interference_pan1)
-            # print(per_all_pan1)
+            corr = np.corrcoef(distance_to_interference_pan1, up_per_all_pan1)[0, 1]
+            corr_up1_list.append(corr)
             
-            for device_id in C2_DEV_RANGE:
-                d = np.sqrt((positions[device_id][0] - positions[1][0])**2 + (positions[device_id][1] - positions[1][1])**2)
-                distance_to_interference_pan2.append(d)
-                up_per_all_pan2.append(average_up_data_pdr_dict[seed][device_id])
-                down_per_all_pan2.append(average_down_data_pdr_dict[seed][device_id])
+            corr = np.corrcoef(distance_to_interference_pan1, down_per_all_pan1)[0, 1]
+            corr_down1_list.append(corr)
 
-            #print(distance_to_interference_pan2)
+            corr = np.corrcoef(distance_to_interference_pan2, up_per_all_pan2)[0, 1]
+            corr_up2_list.append(corr)
 
-            #plot
-            plot_positions_and_values(positions, f"{prefix_name}_seed{seed}_up_data_pdr_plot.png", average_up_data_pdr_dict[seed], bw1_khz, bw2_khz)
-            plot_positions_and_values(positions, f"{prefix_name}_seed{seed}_down_data_pdr_plot.png", average_down_data_pdr_dict[seed], bw1_khz, bw2_khz)
-            
-            #plot_positions_and_values(positions, f"{prefix_name}_seed{seed}_pdr_diff_plot.png", up_down_pdr_diff[seed], bw1_khz, bw2_khz)
+            corr = np.corrcoef(distance_to_interference_pan2, down_per_all_pan2)[0, 1]
+            corr_down2_list.append(corr)
 
-        plot_distance_vs_per(distance_to_interference_pan1, up_per_all_pan1, f"{prefix_name}_up_data_per_pan1.png")
-        plot_distance_vs_per(distance_to_interference_pan1, down_per_all_pan1, f"{prefix_name}_down_data_per_pan1.png")
-        plot_distance_vs_per(distance_to_interference_pan2, up_per_all_pan2, f"{prefix_name}_up_data_per_pan2.png")
-        plot_distance_vs_per(distance_to_interference_pan2, down_per_all_pan2, f"{prefix_name}_down_data_per_pan2.png")
-        corr = np.corrcoef(distance_to_interference_pan1, up_per_all_pan1)[0, 1]
-        print("pan1_up_corr:", corr)
-        corr = np.corrcoef(distance_to_interference_pan1, down_per_all_pan1)[0, 1]
-        print("pan1_down_corr:", corr)
+            print(f"{off_load}_{prefix_name}__per.png finish")
 
-        corr = np.corrcoef(distance_to_interference_pan2, up_per_all_pan2)[0, 1]
-        print("pan2_up_corr:", corr)
-        corr = np.corrcoef(distance_to_interference_pan2, down_per_all_pan2)[0, 1]
-        print("pan1_down_corr:", corr)
+        x = np.arange(0.1, 1.1, 0.1)
+
+        plt.figure(figsize=(8, 6))
+
+        plt.plot(x, corr_up1_list, marker='o', label='corr_up1_list')
+        plt.plot(x, corr_down1_list, marker='s', label='corr_down1_list')
+        plt.plot(x, corr_up2_list, marker='^', label='corr_up2_list')
+        plt.plot(x, corr_down2_list, marker='x', label='corr_down2_list')
+
+        plt.xlabel("Offered Load")
+        plt.ylabel("Correlation Coefficient")
+        plt.title("Correlation vs Offered Load")
+
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+
+        plt.savefig(f"{prefix_name}__correlation_vs_offered_load.png", dpi=300)
+        plt.show()
 
 
-def plot_distance_vs_per(distance_to_interference_pan1, per_all_pan1, filename):
-    plt.figure()
-    plt.scatter(distance_to_interference_pan1, per_all_pan1, marker='o')
-    plt.xlabel("Distance to Interference")
-    plt.ylabel("PER")
-    plt.title(filename)
+def plot_distance_vs_per_lowess(
+    distance,
+    up_per,
+    down_per,
+    filename,
+    frac=0.2,
+    point_size=50,
+    alpha=0.2
+):
+    """
+    距離 vs PER の散布図と LOWESS 曲線（uplink / downlink）を描画する
+
+    Parameters
+    ----------
+    distance : array-like
+        距離データ（x軸）
+    up_per : array-like
+        uplink PER
+    down_per : array-like
+        downlink PER
+    filename : str
+        出力ファイル名
+    frac : float
+        LOWESS の平滑化パラメータ
+    point_size : int
+        散布図の点サイズ
+    alpha : float
+        散布図の透過率
+    """
+    
+
+
+    # LOWESS
+    lowess_ul = lowess(up_per, distance, frac=frac, return_sorted=True)
+    lowess_dl = lowess(down_per, distance, frac=frac, return_sorted=True)
+
+    plt.figure(figsize=(13, 10))
+
+    # Scatter
+    plt.scatter(distance, up_per,
+                s=point_size, alpha=alpha, color="blue", label="Uplink")
+    plt.scatter(distance, down_per,
+                s=point_size, alpha=alpha, color="red", label="Downlink")
+
+    # LOWESS lines
+    plt.plot(lowess_ul[:, 0], lowess_ul[:, 1],
+             color="blue", linewidth=2, label="Uplink (LOWESS)")
+    plt.plot(lowess_dl[:, 0], lowess_dl[:, 1],
+             color="red", linewidth=2, label="Downlink (LOWESS)")
+
+    #plt.xlabel("d [m]", fontsize=FONT_SIZE + 20)
+    #plt.ylabel("PER",fontsize=FONT_SIZE+20)
+    plt.ylim(0.0, 1.0)
+    plt.xticks(fontsize=FONT_SIZE)
+    plt.yticks(fontsize=FONT_SIZE)
+    leg = plt.legend(fontsize=FONT_SIZE)
+    leg.get_frame().set_linewidth(1.8)
+    plt.tight_layout()
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['bottom'].set_linewidth(3.0)
+    plt.gca().spines['left'].set_linewidth(3.0)
+    plt.tick_params(axis="both", width=3.0, which="major", length=20)
+    plt.gca().xaxis.set_major_formatter(
+    mtick.StrMethodFormatter('{x:,.0f}')
+    )
+    plt.gca().xaxis.set_major_locator(
+    mtick.MultipleLocator(400)
+    )
+
+    os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
+    output_path = os.path.join(PLOT_OUTPUT_DIR, filename)
+    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
+    plt.close()
+
+
+def plot_distance_vs_per_up_down(distance, up_per, down_per, filename):
+    plt.figure(figsize=(13, 10))
+    plt.scatter(distance, up_per, color='blue', marker='o', s=50, label='UpLink')
+    plt.scatter(distance, down_per, color='red', marker='o', s=50, label='DownLink')
+
+    #plt.xlabel("d [m]",fontsize=65)
+    #plt.ylabel("PER",fontsize=65)
+    #plt.title(filename)
+
+    plt.ylim(0.0, 1.0)
+    plt.xticks(fontsize=FONT_SIZE)
+    plt.yticks(fontsize=FONT_SIZE)
+    leg = plt.legend(fontsize=FONT_SIZE)
+    leg.get_frame().set_linewidth(1.8)
+
+    plt.tight_layout()
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['bottom'].set_linewidth(3.0)
+    plt.gca().spines['left'].set_linewidth(3.0)
+    plt.tick_params(axis="both",width=3.0, which="major", length=20)
+    plt.gca().xaxis.set_major_formatter(
+    mtick.StrMethodFormatter('{x:,.0f}')
+    )
+    plt.gca().xaxis.set_major_locator(
+    mtick.MultipleLocator(400)
+    )
+    output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
+    os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
+
+    plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
+    plt.close()
+
+
+def plot_distance_vs_per(distance, per, filename, color):
+    plt.figure(figsize=(13, 10))
+    plt.scatter(distance, per, color = f"{color}",marker='o', s=50)
+    #plt.xlabel("d [m]",fontsize=FONT_SIZE+20)
+    #plt.ylabel("PER",fontsize=FONT_SIZE+20)
+    #plt.title(filename)
     plt.tight_layout()
     plt.ylim(0.0, 1.0)
-    plt.savefig(filename, bbox_inches='tight', pad_inches=0.05)
+    plt.xticks(fontsize=FONT_SIZE)
+    plt.yticks(fontsize=FONT_SIZE)
+    leg = plt.legend(fontsize=FONT_SIZE)
+    leg.get_frame().set_linewidth(1.8)
+    plt.tick_params(axis="both",width=3.0, which="major", length=20)
+    plt.gca().xaxis.set_major_formatter(
+    mtick.StrMethodFormatter('{x:,.0f}')
+    )
+    plt.gca().xaxis.set_major_locator(
+    mtick.MultipleLocator(400)
+    )
+
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['bottom'].set_linewidth(3.0)
+    plt.gca().spines['left'].set_linewidth(3.0)
+
+    output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
+    os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
+    
+    plt.tight_layout()
+    plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
    
@@ -291,6 +492,7 @@ def node_parse_trace_file(filepath,num_device):
             if device_dequed_list[device_id]  != 0 and coordinator_dequed_list[device_id] != 0:
                 up_data_pdr_list[device_id] =  round((device_dequed_list[device_id] - coordinator_receive_list[device_id])/device_dequed_list[device_id],3)
                 down_data_pdr_list[device_id] =  round((coordinator_dequed_list[device_id] - device_receive_list[device_id])/coordinator_dequed_list[device_id],3)
+        
         return up_data_pdr_list, down_data_pdr_list
 
 
