@@ -1,23 +1,16 @@
 #!/bin/bash
-#SBATCH -J sim_test
-#SBATCH -t 01:00:00
-#SBATCH -c 1
-#SBATCH --mem=2G
+#SBATCH -o /home/arimoto/opt/scensim_env/scenargie_simulator/2.2/scenarios_linux/srm_interference/commandline/logs/%x_%j.out
+#SBATCH -e /home/arimoto/opt/scensim_env/scenargie_simulator/2.2/scenarios_linux/srm_interference/commandline/logs/%x_%j.err
 
-# ====== 引数チェック ======
-if [ $# -ne 1 ]; then
-  echo "Usage: sbatch run_one_sim.slurm <config file>"
-  exit 1
-fi
-
-CONFIG=$1
-
-# ====== ディレクトリ設定 ======
 CMD_DIR=/home/arimoto/opt/scensim_env/scenargie_simulator/2.2/scenarios_linux/srm_interference/commandline
+SCRIPT_DIR="$CMD_DIR/script"
 
-cd "$CMD_DIR" || exit
+cd "$CMD_DIR" || exit 1
 
-# ====== 実行 ======
-echo "対象ディレクトリ: $CMD_DIR"
-echo "Running simulation with config: $CONFIG"
-./sim "$CONFIG"
+for config in *.config; do
+  [ -e "$config" ] || continue
+  sbatch "$SCRIPT_DIR/run_one_sim.slurm" "$config"
+  echo "submitted: $config"
+done
+
+echo "全てのジョブを投入しました"
