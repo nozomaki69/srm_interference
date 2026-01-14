@@ -1,7 +1,5 @@
 #!/bin/bash
 #SBATCH -J sim_test
-#SBATCH -o logs/%x_%j.out
-#SBATCH -e logs/%x_%j.err
 #SBATCH -t 01:00:00
 #SBATCH -c 1
 #SBATCH --mem=2G
