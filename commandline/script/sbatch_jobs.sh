@@ -13,7 +13,7 @@ for config in *.config; do
   # *.config が1つも無いときの対策
   [ -e "$config" ] || continue
 
-  sbatch run_one_sim.slurm.sh "$(SCRIPT_DIR "$config")"
+  sbatch "$SCRIPT_DIR/run_one_sim.slurm.sh" "$config"
   echo "submitted: $config"
 
   count=$((count + 1))
