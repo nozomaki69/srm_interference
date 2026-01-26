@@ -43,7 +43,6 @@ PATTERN =2
 
 def main():
     for prefix_name in FILE_PREFIXES:
-
         print(f"\n===== Processing {prefix_name} files =====\n")
 
         """Main execution function."""
@@ -71,6 +70,21 @@ def main():
                     )
                     sys.exit(1)
 
+                base_plot_dir = "plots"
+                
+                if prefix_name == "interf":
+                    plot_dir = os.path.join(
+                        base_plot_dir,
+                        "interf",
+                        f"pan1_{off_load_pan1}_pan2_{off_load_pan2}"
+
+                    )
+                else:
+                    plot_dir = os.path.join(
+                        base_plot_dir,
+                        "no_interf",
+                        f"pan1_{off_load_pan1}_pan2_{off_load_pan2}"
+                    )
                 # Find all .stat files
                 stat_files = [f for f in os.listdir(STATS_DIR)
                                 if f.endswith(".stat")
@@ -188,12 +202,13 @@ def main():
                     # plot_positions_and_values(positions, f"{prefix_name}_seed{seed}_down_data_pdr_plot.png", average_down_data_pdr_dict[seed], BW1_kHZ, BW2_kHZ)
                     #plot_positions_and_values(positions, f"{prefix_name}_seed{seed}_pdr_diff_plot.png", up_down_pdr_diff[seed], BW1_kHZ, BW2_kHZ)
                 
-                plot_distance_vs_per(distance_to_interference_pan1, up_per_all_pan1, f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}_up_data_per_pan1.png","blue", "UpLink")
-                plot_distance_vs_per(distance_to_interference_pan1, down_per_all_pan1, f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}_down_data_per_pan1.png", "red", "DownLink")
-                plot_distance_vs_per_up_down(distance_to_interference_pan1,up_per_all_pan1,down_per_all_pan1,f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}_per_pan1.png")
-                plot_distance_vs_per(distance_to_interference_pan2, up_per_all_pan2, f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}_up_data_per_pan2.png", "blue", "UpLink")
-                plot_distance_vs_per(distance_to_interference_pan2, down_per_all_pan2, f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}_down_data_per_pan2.png", "red", "DownLink")
-                plot_distance_vs_per_up_down(distance_to_interference_pan2,up_per_all_pan2,down_per_all_pan2,f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}__per_pan2.png")
+
+                plot_distance_vs_per(distance_to_interference_pan1, up_per_all_pan1, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan1_up.png","blue", "UpLink",plot_dir)
+                plot_distance_vs_per(distance_to_interference_pan1, down_per_all_pan1, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan1_down.png", "red", "DownLink",plot_dir)
+                plot_distance_vs_per_up_down(distance_to_interference_pan1,up_per_all_pan1,down_per_all_pan1,f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_per_pan1.png",plot_dir)
+                plot_distance_vs_per(distance_to_interference_pan2, up_per_all_pan2, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan2_up.png", "blue", "UpLink",plot_dir)
+                plot_distance_vs_per(distance_to_interference_pan2, down_per_all_pan2, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan2_down.png", "red", "DownLink",plot_dir)
+                plot_distance_vs_per_up_down(distance_to_interference_pan2,up_per_all_pan2,down_per_all_pan2,f"pan1_{off_load_pan1}_pan2_{off_load_pan2}__per_pan2.png",plot_dir)
                 
                 distance_to_interference_pan1 = np.asarray(distance_to_interference_pan1)
                 up_per_all_pan1 = np.asarray(up_per_all_pan1)
@@ -209,7 +224,8 @@ def main():
                     distance_pan1_sorted,
                     up_per_pan1_sorted,
                     down_per_pan1_sorted,
-                    f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}_pan1_lowess.png"
+                    f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_lowess_pan1.png",
+                    plot_dir
                 )
                 distance_to_interference_pan2 = np.asarray(distance_to_interference_pan2)
                 up_per_all_pan2 = np.asarray(up_per_all_pan2)
@@ -222,7 +238,8 @@ def main():
                     distance_pan2_sorted,
                     up_per_pan2_sorted,
                     down_per_pan2_sorted,
-                    f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}_pan2_lowess.png"
+                    f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_lowess_pan2.png",
+                    plot_dir
                 )
 
 
@@ -267,9 +284,10 @@ def plot_distance_vs_per_lowess(
     up_per,
     down_per,
     filename,
+    plot_dir,
     frac=0.2,
     point_size=50,
-    alpha=0.2
+    alpha=0.2,
 ):
     """
     距離 vs PER の散布図と LOWESS 曲線（uplink / downlink）を描画する
@@ -332,13 +350,13 @@ def plot_distance_vs_per_lowess(
     mtick.MultipleLocator(400)
     )
 
-    os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
-    output_path = os.path.join(PLOT_OUTPUT_DIR, filename)
+    os.makedirs(plot_dir, exist_ok=True)
+    output_path = os.path.join(plot_dir, filename)
     plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
 
-def plot_distance_vs_per_up_down(distance, up_per, down_per, filename):
+def plot_distance_vs_per_up_down(distance, up_per, down_per, filename, plot_dir):
     plt.figure(figsize=(13, 10))
     plt.scatter(distance, up_per, color='blue', marker='o', s=50, label='UpLink')
     plt.scatter(distance, down_per, color='red', marker='o', s=50, label='DownLink')
@@ -365,14 +383,14 @@ def plot_distance_vs_per_up_down(distance, up_per, down_per, filename):
     plt.gca().xaxis.set_major_locator(
     mtick.MultipleLocator(400)
     )
-    output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
-    os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
 
-    plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
+    os.makedirs(plot_dir, exist_ok=True)
+    output_path = os.path.join(plot_dir, filename)
+    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
 
-def plot_distance_vs_per(distance, per, filename, color, legend_name):
+def plot_distance_vs_per(distance, per, filename, color, legend_name, plot_dir):
     plt.figure(figsize=(13, 10))
     plt.scatter(distance, per, color = f"{color}",marker='o', s=50,label = f"{legend_name}")
     #plt.xlabel("d [m]",fontsize=FONT_SIZE+20)
@@ -397,11 +415,9 @@ def plot_distance_vs_per(distance, per, filename, color, legend_name):
     plt.gca().spines['bottom'].set_linewidth(3.0)
     plt.gca().spines['left'].set_linewidth(3.0)
 
-    output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
-    os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
-    
-    plt.tight_layout()
-    plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
+    os.makedirs(plot_dir, exist_ok=True)
+    output_path = os.path.join(plot_dir, filename)
+    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
    
