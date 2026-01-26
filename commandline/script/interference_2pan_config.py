@@ -69,7 +69,24 @@ STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 #         return points
 
 def main():
-    
+    try:
+        # undefined=StrictUndefined: 未定義変数があればエラーで停止
+        # lstrip_blocks=True: タグの前の空白を削除し、不要��空行を抑制
+        env = Environment(
+            loader=FileSystemLoader(TEMPLATE_DIR),
+            trim_blocks=True,
+            lstrip_blocks=True,
+            undefined=StrictUndefined,
+        )
+        config_template = env.get_template(CONFIG_TEMPLATE)
+        pos_template = env.get_template(POS_TEMPLATE)
+        stat_template = env.get_template(STAT_TEMPLATE)
+    except Exception as e:
+        print(
+            f"Error: Failed to load template files.\n  Location: {TEMPLATE_DIR}\n  Details: {e}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     """メイン処理"""
     for bandwidth_pattern in TARGET_BANDWIDTH_PATTERNS:
         c1_info = CHANNELS[bandwidth_pattern[0]]
@@ -79,7 +96,7 @@ def main():
         else:
             interference = 0
         
-        for offered_load_pan2 in np.arange(0.1, 1.1, 0.1): 
+        for offered_load_pan2 in np.arange(0.1, 1.1, 0.1): #1.1
             OFFERED_LOAD_PAN2 = round(float(offered_load_pan2), 1)
 
             for offered_load_pan1 in np.arange(0.1, 1.1, 0.1):
@@ -87,24 +104,6 @@ def main():
 
                 for seed in range(SIMULATION_SEEDS):
                     np.random.seed(seed)
-                    try:
-                        # undefined=StrictUndefined: 未定義変数があればエラーで停止
-                        # lstrip_blocks=True: タグの前の空白を削除し、不要��空行を抑制
-                        env = Environment(
-                            loader=FileSystemLoader(TEMPLATE_DIR),
-                            trim_blocks=True,
-                            lstrip_blocks=True,
-                            undefined=StrictUndefined,
-                        )
-                        config_template = env.get_template(CONFIG_TEMPLATE)
-                        pos_template = env.get_template(POS_TEMPLATE)
-                        stat_template = env.get_template(STAT_TEMPLATE)
-                    except Exception as e:
-                        print(
-                            f"Error: Failed to load template files.\n  Location: {TEMPLATE_DIR}\n  Details: {e}",
-                            file=sys.stderr,
-                        )
-                        sys.exit(1)
 
                     # print(
                     #     f"Starting to generate configuration files...\nOutput directory: {os.path.abspath(OUTPUT_DIR)}"
@@ -133,7 +132,8 @@ def main():
                         prefix = f"no_interf_coord_dist_{DISTANCES_M}m_off_load_pan1_{OFFERED_LOAD_PAN1}_pan2_{OFFERED_LOAD_PAN2}_seed{seed}"
                     all_nodes = [] # 新しいノードリストを初期化
 
-                    print(f"{prefix}")
+                    print(prefix)
+
                     # Coordinatorノードの定義
                     coordinator_node_1= {
                         "id": 1,
@@ -274,9 +274,6 @@ def main():
                         print(f"  Details: {e}", file=sys.stderr)
                         sys.exit(1)
 
-                    print(
-                        f"\nCompleted: Generated total {total_files} files."
-                    )
 
 if __name__ == "__main__":
     main()
