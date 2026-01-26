@@ -241,25 +241,25 @@ def main():
 
                 print(f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}_per.png finish")
 
-            x = np.arange(0.1, 0.3, 0.1)
+            # x = np.arange(0.1, 0.3, 0.1)
 
-            plt.figure(figsize=(8, 6))
+            # plt.figure(figsize=(8, 6))
 
-            plt.plot(x, corr_up1_list, marker='o', label='corr_up1_list')
-            plt.plot(x, corr_down1_list, marker='s', label='corr_down1_list')
-            plt.plot(x, corr_up2_list, marker='^', label='corr_up2_list')
-            plt.plot(x, corr_down2_list, marker='x', label='corr_down2_list')
+            # plt.plot(x, corr_up1_list, marker='o', label='corr_up1_list')
+            # plt.plot(x, corr_down1_list, marker='s', label='corr_down1_list')
+            # plt.plot(x, corr_up2_list, marker='^', label='corr_up2_list')
+            # plt.plot(x, corr_down2_list, marker='x', label='corr_down2_list')
 
-            plt.xlabel("Offered Load")
-            plt.ylabel("Correlation Coefficient")
-            plt.title("Correlation vs Offered Load")
+            # plt.xlabel("Offered Load")
+            # plt.ylabel("Correlation Coefficient")
+            # plt.title("Correlation vs Offered Load")
 
-            plt.legend()
-            plt.grid(True)
-            plt.tight_layout()
+            # plt.legend()
+            # plt.grid(True)
+            # plt.tight_layout()
 
-            plt.savefig(f"{prefix_name}__correlation_vs_offered_load.png", dpi=300)
-            plt.show()
+            # plt.savefig(f"{prefix_name}__correlation_vs_offered_load.png", dpi=300)
+            # plt.show()
 
 
 def plot_distance_vs_per_lowess(
