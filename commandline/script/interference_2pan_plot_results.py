@@ -49,12 +49,12 @@ def main():
         print("--- Starting Result Aggregation and Plotting ---")
 
 
-        for off_load_pan2 in np.round(np.arange(0.1, 0.3, 0.1),1):
+        for off_load_pan2 in np.round(np.arange(0.1, 1.1, 0.1),1):
             corr_up1_list = []
             corr_down1_list = []
             corr_up2_list = []
             corr_down2_list = []
-            for off_load_pan1 in np.round(np.arange(0.1, 0.3, 0.1),1):
+            for off_load_pan1 in np.round(np.arange(0.1, 1.1, 0.1),1):
                 print("start off_load_pan1/pan2:", off_load_pan1,"/",off_load_pan2)
                 distance_to_interference_pan1 = []
                 up_per_all_pan1 = []

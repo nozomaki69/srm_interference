@@ -28,7 +28,7 @@ DEVICE_ID_1 = list(range(3, NUM_DEVICE + 3))
 DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
 
 DISTANCES_M = 1200
-SIMULATION_SEEDS = 3
+SIMULATION_SEEDS = 50
  
 MEASURE_START_SEC = 10.0
 MEASURE_DURATION_SEC = 50.0
@@ -79,10 +79,10 @@ def main():
         else:
             interference = 0
         
-        for offered_load_pan2 in np.arange(0.1, 0.3, 0.1): #1.1
+        for offered_load_pan2 in np.arange(0.1, 1.1, 0.1): 
             OFFERED_LOAD_PAN2 = round(float(offered_load_pan2), 1)
 
-            for offered_load_pan1 in np.arange(0.1, 0.3, 0.1):
+            for offered_load_pan1 in np.arange(0.1, 1.1, 0.1):
                 OFFERED_LOAD_PAN1 = round(float(offered_load_pan1), 1)
 
                 for seed in range(SIMULATION_SEEDS):
