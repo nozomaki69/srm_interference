@@ -48,13 +48,34 @@ def main():
         """Main execution function."""
         print("--- Starting Result Aggregation and Plotting ---")
 
+        # ループ外で一度だけ取得
+        all_files = os.listdir(STATS_DIR)
 
-        for off_load_pan2 in np.round(np.arange(0.1, 1.1, 0.1),1):
+        # 辞書に整理：prefix_name → off_load_pan1 → off_load_pan2 → ファイルリスト
+        file_dict = {
+            "stat": collections.defaultdict(lambda: collections.defaultdict(list)),
+            "trace": collections.defaultdict(lambda: collections.defaultdict(list)),
+            "pos": collections.defaultdict(lambda: collections.defaultdict(list)),
+        }
+
+        for f in all_files:
+            for ftype, suffix in [("stat", ".stat"), ("trace", ".trace"), ("pos", ".pos")]:
+                if f.endswith(suffix):
+                    for prefix in FILE_PREFIXES:
+                        if f.startswith(prefix):
+                            # ファイル名から off_load_pan1, off_load_pan2 を抽出
+                            m = re.search(r"pan1_([\d.]+)_pan2_([\d.]+)", f)
+                            if m:
+                                off1 = float(m.group(1))
+                                off2 = float(m.group(2))
+                                file_dict[ftype][prefix][(off1, off2)].append(f)
+
+        for off_load_pan2 in np.round(np.arange(0.7, 1.1, 0.1),1):
             corr_up1_list = []
             corr_down1_list = []
             corr_up2_list = []
             corr_down2_list = []
-            for off_load_pan1 in np.round(np.arange(0.1, 1.1, 0.1),1):
+            for off_load_pan1 in np.round(np.arange(0.1, 0.3, 0.1),1):
                 print("start off_load_pan1/pan2:", off_load_pan1,"/",off_load_pan2)
                 distance_to_interference_pan1 = []
                 up_per_all_pan1 = []
@@ -86,25 +107,10 @@ def main():
                         f"pan1_{off_load_pan1}_pan2_{off_load_pan2}"
                     )
                 # Find all .stat files
-                stat_files = [f for f in os.listdir(STATS_DIR)
-                                if f.endswith(".stat")
-                                and f.startswith(prefix_name)
-                                and f"pan2_{off_load_pan2}" in f
-                                and f"pan1_{off_load_pan1}" in f
-                                ]
+                stat_files  = file_dict["stat"][prefix_name].get((off_load_pan1, off_load_pan2), [])
+                trace_files = file_dict["trace"][prefix_name].get((off_load_pan1, off_load_pan2), [])
+                pos_files   = file_dict["pos"][prefix_name].get((off_load_pan1, off_load_pan2), [])
 
-                trace_files = [f for f in os.listdir(STATS_DIR)
-                                if f.endswith(".trace")
-                                and f.startswith(prefix_name)
-                                and f"pan2_{off_load_pan2}" in f
-                                and f"pan1_{off_load_pan1}" in f
-                                ]
-                pos_files = [f for f in os.listdir(STATS_DIR)
-                                if f.endswith(".pos")
-                                and f.startswith(prefix_name)
-                                and f"pan2_{off_load_pan2}" in f
-                                and f"pan1_{off_load_pan1}" in f
-                                ]
                 if not (stat_files or trace_files or pos_files):
                     print("Warning: No .stat, .trace, or _seed0.pos files found. Nothing to plot.", file=sys.stderr)
                     return
@@ -465,16 +471,21 @@ def parse_pos_file(filepath):
 
 def node_parse_trace_file(filepath,num_device):
     #device → coordinator
-    coordinator_receive_list = [0 for _ in range(3 * num_device)]
     device_dequed_list = [0 for _ in range(3 * num_device)]
+    coordinator_receive_list = [0 for _ in range(3 * num_device)]#重複なし
     device_received_ack_list = [0 for _ in range(3 * num_device)]
-
+    device_tx_count = [0 for _ in range(3 * num_device)]
+    coordinator_rx_count = [0 for _ in range(3 * num_device)] #重複あり
+    
     #coordinator → device
     coordinator_dequed_list = [0 for _ in range(3 * num_device)]
     device_receive_list = [0 for _ in range(3 * num_device)]
+    coordinator_tx_count = [0 for _ in range(3 * num_device)]
+    device_rx_count = [0 for _ in range(3 * num_device)]
 
-    up_data_pdr_list = [0 for _ in range(3 * num_device)]
-    down_data_pdr_list = [0 for _ in range(3 * num_device)]
+
+    up_data_per_list = [0 for _ in range(3 * num_device)]
+    down_data_per_list = [0 for _ in range(3 * num_device)]
 
     SENDER_ID_RANGE1 = [int(i) for i in range(3, num_device + 3)] 
 
@@ -488,8 +499,20 @@ def node_parse_trace_file(filepath,num_device):
             if "DrIotMac" in parts[5] and ( "1" == parts[3] or  "2" == parts[3]):
                 #coordinatorが送信機
                 if "DataFrameDequeued" in parts[9]:
-                    devicenum_ber = int(parts[15])
-                    coordinator_dequed_list[devicenum_ber] += 1
+                    if "1" == parts[3]:
+                        devicenum_ber_1 = int(parts[15])
+                        coordinator_dequed_list[devicenum_ber_1] += 1
+                    else:
+                        devicenum_ber_2 = int(parts[15])
+                        coordinator_dequed_list[devicenum_ber_2] += 1
+
+                if "Tx-DATA" in parts[9]:
+                    if "1" == parts[3]:
+                        coordinator_tx_count[devicenum_ber_1] += 1 
+
+                    if "2" == parts[3]:
+                        coordinator_tx_count[devicenum_ber_2] += 1 
+
 
                 #coordinatorが受信機
                 if "RxFrame" in parts[9]:
@@ -497,10 +520,25 @@ def node_parse_trace_file(filepath,num_device):
                     devicenum_ber = int(pkt_id.split('_')[0])
                     if "Data" in parts[15]:
                         coordinator_receive_list[devicenum_ber] += 1
+                        coordinator_rx_count[devicenum_ber] += 1
                         if devicenum_ber in SENDER_ID_RANGE1:
                             coordinator_receive_list[1] += 1
+                            coordinator_rx_count[1] += 1
                         else:
                             coordinator_receive_list[2] += 1
+                            coordinator_rx_count[2] += 1
+
+                if "RxDupFrame" in parts[9]:
+                    pkt_id = parts[11]
+                    devicenum_ber = int(pkt_id.split('_')[0])
+                    if "Data" in parts[15]:
+                        coordinator_rx_count[devicenum_ber] += 1
+                        if "1" == parts[3]:
+                            coordinator_rx_count[1] += 1 
+
+                        if "2" == parts[3]:
+                            coordinator_rx_count[2] += 1 
+
 
             #device
             if "DrIotMac" in parts[5] and parts[3]!= "1" and parts[3]!= "2":
@@ -516,19 +554,33 @@ def node_parse_trace_file(filepath,num_device):
                     else:
                         device_dequed_list[2] += 1
 
+                if "Tx-DATA" in parts[9]:
+                    device_tx_count[devicenum_ber] += 1 
+                    if devicenum_ber in SENDER_ID_RANGE1:
+                        device_tx_count[1] += 1
+                    else:
+                        device_tx_count[2] += 1
+
                 if "RxFrame" in parts[9]: 
                     if "ACK" in parts[15]:
                         device_received_ack_list[devicenum_ber] += 1
                     
                     if "Data" in parts[15]:
                         device_receive_list[devicenum_ber] +=  1
+                        device_rx_count[devicenum_ber] +=  1
+                
+                if "RxDupFrame" in parts[9]:
+                    if "Data" in parts[15]:
+                        device_rx_count[devicenum_ber] += 1
 
         for device_id in range(3 * num_device):
-            if device_dequed_list[device_id]  != 0 and coordinator_dequed_list[device_id] != 0:
-                up_data_pdr_list[device_id] =  round((device_dequed_list[device_id] - coordinator_receive_list[device_id])/device_dequed_list[device_id],3)
-                down_data_pdr_list[device_id] =  round((coordinator_dequed_list[device_id] - device_receive_list[device_id])/coordinator_dequed_list[device_id],3)
+            if device_tx_count[device_id]  != 0 and coordinator_tx_count[device_id] != 0:
+                up_data_per_list[device_id] =  round((device_tx_count[device_id] - coordinator_rx_count[device_id])/device_tx_count[device_id],3)
+                down_data_per_list[device_id] =  round((coordinator_tx_count[device_id] - device_rx_count[device_id])/coordinator_tx_count[device_id],3)\
         
-        return up_data_pdr_list, down_data_pdr_list
+        print(filepath)
+        print(coordinator_rx_count)
+        return up_data_per_list, down_data_per_list
 
 
 def plot_positions_and_values(positions, filename, metric_values, bw1_khz, bw2_khz):

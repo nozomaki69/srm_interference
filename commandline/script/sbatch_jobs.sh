@@ -32,7 +32,7 @@ count=0
 
 for config in "${configs[@]}"; do
   echo "Submitting: $config"
-  sbatch "$SCRIPT_DIR/run_one_sim.slurm.sh" "$(realpath "$config")"
+  sbatch "$SCRIPT_DIR/run_one_sim.slurm.sh" "$(realpath "$config")" #sbatch -p basic
   count=$((count + 1))
 done
 
