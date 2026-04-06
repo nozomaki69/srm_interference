@@ -5,7 +5,7 @@
 CMD_DIR=/home/arimoto/opt/scensim_env/scenargie_simulator/2.2/scenarios_linux/srm_interference/commandline
 SCRIPT_DIR="$CMD_DIR/script"
 
-sbatch "$SCRIPT_DIR/run_one_sim.slurm.sh" 
+sbatch "$SCRIPT_DIR/analyze_trace.sh" 
 
 echo "----------------------------------------"
 echo "全てのジョブを投入しました"
