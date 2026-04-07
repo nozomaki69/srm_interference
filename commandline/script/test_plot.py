@@ -11,6 +11,7 @@ import matplotlib.ticker as mtick
 from collections import defaultdict
 from sklearn.kernel_ridge import KernelRidge
 from statsmodels.nonparametric.smoothers_lowess import lowess
+from concurrent.futures import ProcessPoolExecutor
 
 # ★修正：scipyのインポートを削除
 # from scipy import stats 
@@ -40,6 +41,7 @@ BW1_kHZ = 150.0
 BW2_kHZ = 600.0
 FONT_SIZE = 45
 PATTERN =2
+MAX_WORKERS=32
 
 def main():
     for prefix_name in FILE_PREFIXES:
@@ -114,94 +116,11 @@ def main():
                 print(f"Found {len(pos_files)} pos files to process.")
 
                 # Data container for all runs
-                results = {
-                    "up_data_pdr_list":collections.defaultdict(list),
-                    "down_data_pdr_list":collections.defaultdict(list),
-                }
-
-                #seedごとの統計情報をtraceファイルから取り、perを計算し格納
-                for filename in trace_files:
-                    match = FILENAME_TRACE.match(filename.replace(f"{prefix_name}_", ""))
-                    if not match:
-                        print(f"Skipping file with unexpected name format: {filename}")
-                        continue
-                    #interf_coord_dist_{DISTANCES_M}m_off_load_pan1_{OFFERED_LOAD_PAN1}_pan2_{OFFERED_LOAD_PAN2}_seed{seed}
-                    off_load_pan1 = round(float(match.group(2)), 1)
-                    off_load_pan2 = round(float(match.group(3)), 1)
-                    seed = int(match.group(4))
-
-                    filepath = os.path.join(STATS_DIR, filename)
-                    #print(filepath)
-                    up_data_pdr_list, down_data_pdr_list= node_parse_trace_file(filepath, NUM_DEV_GROUP)
-                    #print(up_data_pdr_list, down_data_pdr_list)
-                    results["up_data_pdr_list"][seed]=up_data_pdr_list
-                    results["down_data_pdr_list"][seed]=down_data_pdr_list
-
-                #print(filename)
-                #print(results)
-                #print(results["up_data_pdr_list"])    
-                """
-                距離ごとのシミュレーション回数分の結果が出ているので、距離ごとで平均をとる
-                """
-                # average_up_data_pdr_dict = calculate_node_seed_average(
-                #         results["up_data_pdr_list"]
-                # )
-                # average_down_data_pdr_dict = calculate_node_seed_average(
-                #         results["down_data_pdr_list"]
-                # )
-
-                """
-                pdrの比
-                """
-                # up_down_pdr_diff = defaultdict(list)
-                # for seed in list(range(10)):
-                #     for node_id in range(33):
-                #         diff = round(average_down_data_pdr_dict[seed][node_id]/average_up_data_pdr_dict[seed][node_id],2)
-                #         up_down_pdr_diff[seed].append(diff)
-
+                results = run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS)
 
                 #求めた距離ごとのノードの平均を二次元平面上にプロット
                 #print(results)
-                for filename in pos_files:
-                    print(filename)
-                    match = FILENAME_POS.match(filename.replace(f"{prefix_name}_", ""))
-                    if not match:
-                        print(f"Skipping file with unexpected name format: {filename}")
-                        continue
-
-                    off_load_pan1 = round(float(match.group(2)), 1)
-                    off_load_pan2 = round(float(match.group(3)), 1)
-                    seed = int(match.group(4))
-
-                    #posファイルから場所を特定
-                    positions = parse_pos_file(filename)
-                    # print(positions)
-                    for device_id in C1_DEV_RANGE:
-                        d = np.sqrt((positions[device_id][0] - positions[2][0])**2 + (positions[device_id][1] - positions[2][1])**2)
-                        distance_to_interference_pan1.append(d)
-                        up_per_all_pan1.append(results["up_data_pdr_list"][seed][device_id])
-                        down_per_all_pan1.append(results["down_data_pdr_list"][seed][device_id])
-
-                    # print("seed:",seed)
-                    # print(positions)
-                    # print(distance_to_interference_pan1)
-                    # print(per_all_pan1)
-                    
-                    for device_id in C2_DEV_RANGE:
-                        d = np.sqrt((positions[device_id][0] - positions[1][0])**2 + (positions[device_id][1] - positions[1][1])**2)
-                        distance_to_interference_pan2.append(d)
-                        up_per_all_pan2.append(results["up_data_pdr_list"][seed][device_id])
-                        down_per_all_pan2.append(results["down_data_pdr_list"][seed][device_id])
-
-                    #print(distance_to_interference_pan2)
-
-                    """
-                    グラフのプロット
-                    """
-                    # plot_positions_and_values(positions, f"{prefix_name}_seed{seed}_up_data_pdr_plot.png", average_up_data_pdr_dict[seed], BW1_kHZ, BW2_kHZ)
-                    # plot_positions_and_values(positions, f"{prefix_name}_seed{seed}_down_data_pdr_plot.png", average_down_data_pdr_dict[seed], BW1_kHZ, BW2_kHZ)
-                    #plot_positions_and_values(positions, f"{prefix_name}_seed{seed}_pdr_diff_plot.png", up_down_pdr_diff[seed], BW1_kHZ, BW2_kHZ)
-                
+                distance_to_interference_pan1, up_per_all_pan1 ,down_per_all_pan1, distance_to_interference_pan2, up_per_all_pan2, down_per_all_pan2 = run_pos_parallel(pos_files, prefix_name, results, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS)
 
                 plot_distance_vs_per(distance_to_interference_pan1, up_per_all_pan1, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan1_up.png","blue", "UpLink",plot_dir)
                 plot_distance_vs_per(distance_to_interference_pan1, down_per_all_pan1, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan1_down.png", "red", "DownLink",plot_dir)
@@ -355,6 +274,110 @@ def plot_distance_vs_per_lowess(
     plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
+def process_single_trace(filename, prefix_name, STATS_DIR, NUM_DEV_GROUP):
+    # ファイル名から情報を抽出（元のループ内の処理）
+    match = FILENAME_TRACE.match(filename.replace(f"{prefix_name}_", ""))
+    if not match:
+        return None
+    
+    seed = int(match.group(4))
+    filepath = os.path.join(STATS_DIR, filename)
+    
+    # 重い解析処理を実行
+    up_data_pdr_list, down_data_pdr_list = node_parse_trace_file(filepath, NUM_DEV_GROUP)
+    
+    # seed値と一緒に結果を返す
+    return {
+        "seed": seed,
+        "up": up_data_pdr_list,
+        "down": down_data_pdr_list
+    }
+
+# --- 2. メインの処理部分 ---
+def run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS):
+    results = {
+        "up_data_pdr_list": {},
+        "down_data_pdr_list": {}
+    }
+
+    print(f"Starting analysis with 10 cores for {len(trace_files)} files...")
+
+    # ProcessPoolExecutorで10並列実行
+    with ProcessPoolExecutor(MAX_WORKERS) as executor:
+        # 実行準備：関数に渡す引数をリスト化
+        futures = [
+            executor.submit(process_single_trace, f, prefix_name, STATS_DIR, NUM_DEV_GROUP) 
+            for f in trace_files
+        ]
+        print(futures)
+        # 終わったものから結果を回収
+        for future in futures:
+            res = future.result()
+            if res:
+                seed = res["seed"]
+                results["up_data_pdr_list"][seed] = res["up"]
+                results["down_data_pdr_list"][seed] = res["down"]
+
+    return results
+
+def process_single_pos(filename, prefix_name, results, C1_DEV_RANGE, C2_DEV_RANGE):
+    match = FILENAME_POS.match(filename.replace(f"{prefix_name}_", ""))
+    if not match:
+        return None
+
+    seed = int(match.group(4))
+    positions = parse_pos_file(filename) # ファイル読み込み
+    
+    # このファイル（seed）での計算結果を一時的に保存するリスト
+    tmp_res = {
+        "dist1": [], "up1": [], "down1": [],
+        "dist2": [], "up2": [], "down2": []
+    }
+
+    # PAN1の計算
+    for device_id in C1_DEV_RANGE:
+        d = np.sqrt((positions[device_id][0] - positions[2][0])**2 + (positions[device_id][1] - positions[2][1])**2)
+        tmp_res["dist1"].append(d)
+        tmp_res["up1"].append(results["up_data_pdr_list"][seed][device_id])
+        tmp_res["down1"].append(results["down_data_pdr_list"][seed][device_id])
+
+    # PAN2の計算
+    for device_id in C2_DEV_RANGE:
+        d = np.sqrt((positions[device_id][0] - positions[1][0])**2 + (positions[device_id][1] - positions[1][1])**2)
+        tmp_res["dist2"].append(d)
+        tmp_res["up2"].append(results["up_data_pdr_list"][seed][device_id])
+        tmp_res["down2"].append(results["down_data_pdr_list"][seed][device_id])
+
+    return tmp_res
+
+def run_pos_parallel(pos_files, prefix_name, results, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS):
+    # 最終的な格納先
+    distance_to_interference_pan1 = []
+    up_per_all_pan1 = []
+    down_per_all_pan1 = []
+    distance_to_interference_pan2 = []
+    up_per_all_pan2 = []
+    down_per_all_pan2 = []
+    with ProcessPoolExecutor(MAX_WORKERS) as executor:
+        # 10並列で実行
+        futures = [
+            executor.submit(process_single_pos, f, prefix_name, results, C1_DEV_RANGE, C2_DEV_RANGE)
+            for f in pos_files
+        ]
+
+        for future in futures:
+            res = future.result()
+            if res:
+                # 各プロセスの結果をメインのリストに結合（extend）
+                distance_to_interference_pan1.extend(res["dist1"])
+                up_per_all_pan1.extend(res["up1"])
+                down_per_all_pan1.extend(res["down1"])
+                distance_to_interference_pan2.extend(res["dist2"])
+                up_per_all_pan2.extend(res["up2"])
+                down_per_all_pan2.extend(res["down2"])
+
+    return (distance_to_interference_pan1, up_per_all_pan1, down_per_all_pan1,
+            distance_to_interference_pan2, up_per_all_pan2, down_per_all_pan2)
 
 def plot_distance_vs_per_up_down(distance, up_per, down_per, filename, plot_dir):
     plt.figure(figsize=(13, 10))
