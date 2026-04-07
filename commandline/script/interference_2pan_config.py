@@ -96,10 +96,10 @@ def main():
         else:
             interference = 0
         
-        for offered_load_pan2 in np.arange(0.7, 0.8, 0.1): #1.1
+        for offered_load_pan2 in np.arange(0.1, 1.1, 0.1): #1.1
             OFFERED_LOAD_PAN2 = round(float(offered_load_pan2), 1)
 
-            for offered_load_pan1 in np.arange(0.7, 0.8, 0.1):
+            for offered_load_pan1 in np.arange(0.1, 1.1, 0.1):
                 OFFERED_LOAD_PAN1 = round(float(offered_load_pan1), 1)
 
                 for seed in range(SIMULATION_SEEDS):
