@@ -15,9 +15,6 @@ from sklearn.kernel_ridge import KernelRidge
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from concurrent.futures import ProcessPoolExecutor
 
-# ★修正：scipyのインポートを削除
-# from scipy import stats 
-
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STATS_DIR = os.path.join(SCRIPT_DIR, "..")  # commandline/
@@ -51,7 +48,11 @@ PATTERN =2
 MAX_WORKERS=32
 
 def main():
-    ratio = {
+    results = {
+        "up_per_all_pan1": {},
+        "down_per_all_pan1": {},
+        "up_per_all_pan2": {},
+        "down_per_all_pan2": {},
         "pan1_ratio": {},
         "pan2_ratio": {},
         "pan1_diff" : {},
@@ -67,19 +68,8 @@ def main():
 
 
         for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
-            # corr_up1_list = []
-            # corr_down1_list = []
-            # corr_up2_list = []
-            # corr_down2_list = []
             for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
                 print("start off_load_pan1/pan2:", off_load_pan1,"/",off_load_pan2)
-                distance_to_interference_pan1 = []
-                up_per_all_pan1 = []
-                down_per_all_pan1 = []
-                
-                distance_to_interference_pan2 = []
-                up_per_all_pan2 = []
-                down_per_all_pan2 = []
 
                 if not os.path.isdir(STATS_DIR):
                     print(
@@ -87,21 +77,6 @@ def main():
                     )
                     sys.exit(1)
 
-                base_plot_dir = "plots"
-                
-                if prefix_name == "interf":
-                    plot_dir = os.path.join(
-                        base_plot_dir,
-                        "interf",
-                        f"pan1_{off_load_pan1}_pan2_{off_load_pan2}"
-
-                    )
-                else:
-                    plot_dir = os.path.join(
-                        base_plot_dir,
-                        "no_interf",
-                        f"pan1_{off_load_pan1}_pan2_{off_load_pan2}"
-                    )
                 # Find all .stat files
                 stat_files = [f for f in os.listdir(STATS_DIR)
                                 if f.endswith(".stat")
@@ -125,44 +100,64 @@ def main():
                 if not (stat_files or trace_files or pos_files):
                     print("Warning: No .stat, .trace, or _seed0.pos files found. Nothing to plot.", file=sys.stderr)
                     return
-                #print(pos_files)
+                
                 print(f"Found {len(stat_files)} stat files to process.")
                 print(f"Found {len(trace_files)} trace files to process.")
                 print(f"Found {len(pos_files)} pos files to process.")
 
                 # Data container for all runs
-                results = run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS)
+                values = run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS)
 
                 #求めた距離ごとのノードの平均を二次元平面上にプロット
-                #print(results)
-                distance_to_interference_pan1, up_per_all_pan1 ,down_per_all_pan1, distance_to_interference_pan2, up_per_all_pan2, down_per_all_pan2 = run_pos_parallel(pos_files, prefix_name, results, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS)
+                offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
+                results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload] = run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS)
+                results["pan1_ratio"][offload] = np.array(results["down_per_all_pan1"][offload])/np.array(results["up_per_all_pan1"][offload])
+                results["pan2_ratio"][offload] = np.array(results["down_per_all_pan2"][offload])/np.array(results["up_per_all_pan2"][offload])
+                results["pan1_diff"][offload] = np.array(results["down_per_all_pan1"][offload])-np.array(results["up_per_all_pan1"][offload])
+                results["pan2_diff"][offload] = np.array(results["down_per_all_pan2"][offload])-np.array(results["up_per_all_pan2"][offload])
+                print(f"{offload} finish")
+                # plot_distance_vs_per(distance_to_interference_pan1, up_per_all_pan1, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan1_up.png","blue", "UpLink",plot_dir)
+                # plot_distance_vs_per(distance_to_interference_pan1, down_per_all_pan1, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan1_down.png", "red", "DownLink",plot_dir)
+                # plot_distance_vs_per_up_down(distance_to_interference_pan1,up_per_all_pan1,down_per_all_pan1,f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_per_pan1.png",plot_dir)
+                # plot_distance_vs_per(distance_to_interference_pan2, up_per_all_pan2, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan2_up.png", "blue", "UpLink",plot_dir)
+                # plot_distance_vs_per(distance_to_interference_pan2, down_per_all_pan2, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan2_down.png", "red", "DownLink",plot_dir)
+                # plot_distance_vs_per_up_down(distance_to_interference_pan2,up_per_all_pan2,down_per_all_pan2,f"pan1_{off_load_pan1}_pan2_{off_load_pan2}__per_pan2.png",plot_dir)
 
-                plot_distance_vs_per(distance_to_interference_pan1, up_per_all_pan1, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan1_up.png","blue", "UpLink",plot_dir)
-                plot_distance_vs_per(distance_to_interference_pan1, down_per_all_pan1, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan1_down.png", "red", "DownLink",plot_dir)
-                plot_distance_vs_per_up_down(distance_to_interference_pan1,up_per_all_pan1,down_per_all_pan1,f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_per_pan1.png",plot_dir)
-                plot_distance_vs_per(distance_to_interference_pan2, up_per_all_pan2, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan2_up.png", "blue", "UpLink",plot_dir)
-                plot_distance_vs_per(distance_to_interference_pan2, down_per_all_pan2, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan2_down.png", "red", "DownLink",plot_dir)
-                plot_distance_vs_per_up_down(distance_to_interference_pan2,up_per_all_pan2,down_per_all_pan2,f"pan1_{off_load_pan1}_pan2_{off_load_pan2}__per_pan2.png",plot_dir)
-                
-                
-                plot_distance_vs_per_errorbar(distance_to_interference_pan1, up_per_all_pan1, distance_to_interference_pan1, down_per_all_pan1, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_pan1_errorbar.png", plot_dir)
-                plot_distance_vs_per_errorbar(distance_to_interference_pan2, up_per_all_pan2, distance_to_interference_pan2, down_per_all_pan2, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_pan2_errorbar.png", plot_dir)
-                print(f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}_per.png finish")
+    for prefix_name in FILE_PREFIXES:            
+        base_plot_dir = "plots"            
+        
+        with ProcessPoolExecutor(MAX_WORKERS) as executor:  # elgarやwagnerなら8〜16くらいがおすすめ
+            for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
+                for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+                    if prefix_name == "interf":
+                        plot_dir = os.path.join(
+                            base_plot_dir,
+                            "interf",
+                            f"pan1_{off_load_pan1}_pan2_{off_load_pan2}"
 
-                ratio["pan1_ratio"][f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"] = np.array(down_per_all_pan1)/np.array(up_per_all_pan1)
-                ratio["pan2_ratio"][f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"] = np.array(down_per_all_pan2)/np.array(up_per_all_pan2)
-                ratio["pan1_diff"][f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"] = np.array(down_per_all_pan1)-np.array(up_per_all_pan1)
-                ratio["pan2_diff"][f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"] = np.array(down_per_all_pan2)-np.array(up_per_all_pan2)
-                ratio["distance_pan1"][f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"] = distance_to_interference_pan1
-                ratio["distance_pan2"][f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"] = distance_to_interference_pan2
-    
+                        )
+                    else:
+                        plot_dir = os.path.join(
+                            base_plot_dir,
+                            "no_interf",
+                            f"pan1_{off_load_pan1}_pan2_{off_load_pan2}"
+                        )
+                    executor.submit(generate_all_plots, results, prefix_name, off_load_pan1, off_load_pan2, plot_dir)
+
+        
     for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
         for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
-            interf_no_interf_errorbar_ratio(ratio["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                          ratio["pan1_ratio"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                          ratio["distance_pan1"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                          ratio["pan1_ratio"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_ratio.png", plot_dir)
+            interf_no_interf_errorbar_ratio(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                            results["pan1_ratio"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                            results["distance_pan1"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                            results["pan1_ratio"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                            f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_ratio.png")
             
+            interf_no_interf_errorbar_ratio(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                            results["pan1_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                            results["distance_pan1"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                            results["pan1_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                            f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_diff.png")        
                 # distance_to_interference_pan1 = np.asarray(distance_to_interference_pan1)
                 # up_per_all_pan1 = np.asarray(up_per_all_pan1)
                 # down_per_all_pan1 = np.asarray(down_per_all_pan1)
@@ -193,7 +188,27 @@ def main():
                 #     plot_dir
                 # )
 
-
+def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_dir):
+    # この関数の中に、実行したいプロット処理をすべて詰め込む
+    offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
+    
+    # 1. 個別のプロット
+    plot_distance_vs_per(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], f"pan1_up_scatter_{offload}.png", "blue", "UpLink", plot_dir)
+    plot_distance_vs_per(results["distance_pan1"][offload], results["down_per_all_pan1"][offload], f"pan1_down_scatter_{offload}.png", "red", "DownLink", plot_dir)
+    plot_distance_vs_per_up_down(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], f"pan1_up_and_down_per_scatter_{offload}.png", plot_dir)
+    
+    plot_distance_vs_per(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], f"pan2_up_scatter_{offload}.png", "blue", "UpLink", plot_dir)
+    plot_distance_vs_per(results["distance_pan2"][offload], results["down_per_all_pan2"][offload], f"pan2_down_scatter_{offload}.png", "red", "DownLink", plot_dir)
+    plot_distance_vs_per_up_down(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload], f"pan2_up_and_down_per_scatter_{offload}.png", plot_dir)
+    
+    # 2. エラーバー付きのプロット
+    plot_distance_vs_per_errorbar(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], 
+                                  results["distance_pan1"][offload], results["down_per_all_pan1"][offload], 
+                                  f"pan1_errorbar_{offload}.png", plot_dir)
+    
+    plot_distance_vs_per_errorbar(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], 
+                                  results["distance_pan2"][offload], results["down_per_all_pan2"][offload], 
+                                  f"pan2_errorbar_{offload}.png", plot_dir)
 
 
 
@@ -294,32 +309,28 @@ def process_single_trace(filename, prefix_name, STATS_DIR, NUM_DEV_GROUP):
 
 # --- 2. メインの処理部分 ---
 def run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS):
-    results = {
+    values = {
         "up_data_pdr_list": {},
         "down_data_pdr_list": {}
     }
 
-    print(f"Starting analysis with 10 cores for {len(trace_files)} files...")
-
-    # ProcessPoolExecutorで10並列実行
     with ProcessPoolExecutor(MAX_WORKERS) as executor:
         # 実行準備：関数に渡す引数をリスト化
         futures = [
             executor.submit(process_single_trace, f, prefix_name, STATS_DIR, NUM_DEV_GROUP) 
             for f in trace_files
         ]
-        print(futures)
-        # 終わったものから結果を回収
+
         for future in futures:
             res = future.result()
             if res:
                 seed = res["seed"]
-                results["up_data_pdr_list"][seed] = res["up"]
-                results["down_data_pdr_list"][seed] = res["down"]
+                values["up_data_pdr_list"][seed] = res["up"]
+                values["down_data_pdr_list"][seed] = res["down"]
 
-    return results
+    return values
 
-def process_single_pos(filename, prefix_name, results, C1_DEV_RANGE, C2_DEV_RANGE):
+def process_single_pos(filename, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE):
     match = FILENAME_POS.match(filename.replace(f"{prefix_name}_", ""))
     if not match:
         return None
@@ -337,19 +348,19 @@ def process_single_pos(filename, prefix_name, results, C1_DEV_RANGE, C2_DEV_RANG
     for device_id in C1_DEV_RANGE:
         d = np.sqrt((positions[device_id][0] - positions[2][0])**2 + (positions[device_id][1] - positions[2][1])**2)
         tmp_res["dist1"].append(d)
-        tmp_res["up1"].append(results["up_data_pdr_list"][seed][device_id])
-        tmp_res["down1"].append(results["down_data_pdr_list"][seed][device_id])
+        tmp_res["up1"].append(values["up_data_pdr_list"][seed][device_id])
+        tmp_res["down1"].append(values["down_data_pdr_list"][seed][device_id])
 
     # PAN2の計算
     for device_id in C2_DEV_RANGE:
         d = np.sqrt((positions[device_id][0] - positions[1][0])**2 + (positions[device_id][1] - positions[1][1])**2)
         tmp_res["dist2"].append(d)
-        tmp_res["up2"].append(results["up_data_pdr_list"][seed][device_id])
-        tmp_res["down2"].append(results["down_data_pdr_list"][seed][device_id])
+        tmp_res["up2"].append(values["up_data_pdr_list"][seed][device_id])
+        tmp_res["down2"].append(values["down_data_pdr_list"][seed][device_id])
 
     return tmp_res
 
-def run_pos_parallel(pos_files, prefix_name, results, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS):
+def run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS):
     # 最終的な格納先
     distance_to_interference_pan1 = []
     up_per_all_pan1 = []
@@ -360,7 +371,7 @@ def run_pos_parallel(pos_files, prefix_name, results, C1_DEV_RANGE, C2_DEV_RANGE
     with ProcessPoolExecutor(MAX_WORKERS) as executor:
         # 10並列で実行
         futures = [
-            executor.submit(process_single_pos, f, prefix_name, results, C1_DEV_RANGE, C2_DEV_RANGE)
+            executor.submit(process_single_pos, f, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE)
             for f in pos_files
         ]
 
@@ -532,7 +543,7 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
     plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
-def interf_no_interf_errorbar_ratio(interf_dist_pan1, interf_pan1_per_ratio, no_interf_dist_pan1, no_interf_pan1_per_ratio, filename, plot_dir):
+def interf_no_interf_errorbar_ratio(interf_dist_pan1, interf_pan1_per_ratio, no_interf_dist_pan1, no_interf_pan1_per_ratio, filename):
     fig, ax = plt.subplots(figsize=(13, 10))
 
     # それぞれ独立した関数を呼び出す
@@ -719,4 +730,5 @@ def plot_positions_and_values(positions, filename, metric_values, bw1_khz, bw2_k
 
 if __name__ == "__main__":
     main()
+
 

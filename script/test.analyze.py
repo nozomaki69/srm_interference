@@ -54,6 +54,8 @@ def main():
     ratio = {
         "pan1_ratio": {},
         "pan2_ratio": {},
+        "pan1_diff" : {},
+        "pan2_diff" : {},
         "distance_pan1"  : {},
         "distance_pan2"  : {},
     }
@@ -149,6 +151,8 @@ def main():
 
                 ratio["pan1_ratio"][f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"] = np.array(down_per_all_pan1)/np.array(up_per_all_pan1)
                 ratio["pan2_ratio"][f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"] = np.array(down_per_all_pan2)/np.array(up_per_all_pan2)
+                ratio["pan1_diff"][f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"] = np.array(down_per_all_pan1)-np.array(up_per_all_pan1)
+                ratio["pan2_diff"][f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"] = np.array(down_per_all_pan2)-np.array(up_per_all_pan2)
                 ratio["distance_pan1"][f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"] = distance_to_interference_pan1
                 ratio["distance_pan2"][f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"] = distance_to_interference_pan2
     
@@ -188,9 +192,6 @@ def main():
                 #     f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_lowess_pan2.png",
                 #     plot_dir
                 # )
-
-
-
 
 
 
@@ -298,16 +299,12 @@ def run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MA
         "down_data_pdr_list": {}
     }
 
-    print(f"Starting analysis with 10 cores for {len(trace_files)} files...")
-
-    # ProcessPoolExecutorで10並列実行
     with ProcessPoolExecutor(MAX_WORKERS) as executor:
         # 実行準備：関数に渡す引数をリスト化
         futures = [
             executor.submit(process_single_trace, f, prefix_name, STATS_DIR, NUM_DEV_GROUP) 
             for f in trace_files
         ]
-        print(futures)
         # 終わったものから結果を回収
         for future in futures:
             res = future.result()
@@ -441,7 +438,7 @@ def plot_distance_vs_per(distance, per, filename, color, legend_name, plot_dir):
     plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
-   
+
 def calculate_node_seed_average(results_dict):
     average_dict = {}
 
@@ -536,10 +533,10 @@ def interf_no_interf_errorbar_ratio(interf_dist_pan1, interf_pan1_per_ratio, no_
 
     # それぞれ独立した関数を呼び出す
     if len(interf_dist_pan1) > 0:
-        add_errorbar_plot(interf_dist_pan1, interf_pan1_per_ratio, 'blue', 'UpLink', ax)
+        add_errorbar_plot(interf_dist_pan1, interf_pan1_per_ratio, 'red', 'With Interference', ax)
     
     if len(no_interf_dist_pan1) > 0:
-        add_errorbar_plot(no_interf_dist_pan1, no_interf_pan1_per_ratio, 'red', 'DownLink', ax)
+        add_errorbar_plot(no_interf_dist_pan1, no_interf_pan1_per_ratio, 'blue', 'Without Interference', ax)
 
     # グラフの装飾
     ax.legend(fontsize=20)

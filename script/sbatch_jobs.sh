@@ -10,7 +10,7 @@ cd "$CONFIG_DIR" || {
   echo "ERROR: cd failed: $CONFIG_DIR"
   exit 1
 }
-
+JOB_NAME="sim_arimoto"
 # -------------------------------
 # .config が存在するかチェック
 # -------------------------------
@@ -32,20 +32,22 @@ count=0
 
 for config in "${configs[@]}"; do
   echo "Submitting: $config"
-  sbatch "$SCRIPT_DIR/run_one_sim.slurm.sh" "$(realpath "$config")"
+  sbatch --job-name="$JOB_NAME" "$SCRIPT_DIR/run_one_sim.slurm.sh" "$(realpath "$config")"
   count=$((count + 1))
 
   # 100個ごとに5秒待機
   if [ $((count % 100)) -eq 0 ]; then
     echo "Current count: $count. Sleeping for 5s..."
-<<<<<<< HEAD
-    sleep 1
-=======
     sleep 5
->>>>>>> 6f0d0398fb4ca3e5c48e99ea55ee690f8bf77ee0
   fi
 done
 
 echo "----------------------------------------"
 echo "Total submitted jobs: $count"
-echo "全てのジョブを投入しました"
+echo "全てのシミュレーションのジョブを投入しました"
+
+#上のすべてのjobが終了したら実行
+echo "Submitting analysis job (waiting for simulations to finish...)"
+sbatch sbatch -p elgar --dependency=afterok:singleton --job-name="$JOB_NAME" "$SCRIPT_DIR/analyze_trace.sh"
+
+echo "分析のジョブの予約が完了しました"
