@@ -38,7 +38,11 @@ for config in "${configs[@]}"; do
   # 100個ごとに5秒待機
   if [ $((count % 100)) -eq 0 ]; then
     echo "Current count: $count. Sleeping for 5s..."
+<<<<<<< HEAD
     sleep 1
+=======
+    sleep 5
+>>>>>>> 6f0d0398fb4ca3e5c48e99ea55ee690f8bf77ee0
   fi
 done
 
