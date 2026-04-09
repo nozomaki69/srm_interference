@@ -533,10 +533,27 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
     if len(dist_down) > 0:
         add_errorbar_plot(dist_down, per_down, 'red', 'DownLink', ax)
 
-    # グラフの装飾
+
+    # 範囲の設定
     ax.set_ylim(0.0, 1.0)
-    ax.legend(fontsize=20)
-    ax.grid(True, linestyle='--', alpha=0.5)
+
+    # フォントサイズの一括設定
+    ax.tick_params(axis="both", labelsize=FONT_SIZE, width=3.0, which="major", length=20)
+
+    # 凡例の設定
+    leg = ax.legend(fontsize=FONT_SIZE)
+    leg.get_frame().set_linewidth(1.8)
+
+    # 軸のフォーマット（ax.gca()を使わずに直接 ax を指定）
+    ax.xaxis.set_major_formatter(mtick.StrMethodFormatter('{x:,.0f}'))
+    ax.xaxis.set_major_locator(mtick.MultipleLocator(400))
+
+    # 枠線の「上」と「右」を消す（さきほどのリクエストを反映）
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    # 最後に tight_layout
+    fig.tight_layout()
 
     os.makedirs(plot_dir, exist_ok=True)
     output_path = os.path.join(plot_dir, filename)
@@ -553,9 +570,23 @@ def interf_no_interf_errorbar_ratio(interf_dist_pan1, interf_pan1_per_ratio, no_
     if len(no_interf_dist_pan1) > 0:
         add_errorbar_plot(no_interf_dist_pan1, no_interf_pan1_per_ratio, 'blue', 'Without Interference', ax)
 
-    # グラフの装飾
-    ax.legend(fontsize=20)
-    ax.grid(True, linestyle='--', alpha=0.5)
+    # フォントサイズの一括設定
+    ax.tick_params(axis="both", labelsize=FONT_SIZE, width=3.0, which="major", length=20)
+
+    # 凡例の設定
+    leg = ax.legend(fontsize=FONT_SIZE)
+    leg.get_frame().set_linewidth(1.8)
+
+    # 軸のフォーマット（ax.gca()を使わずに直接 ax を指定）
+    ax.xaxis.set_major_formatter(mtick.StrMethodFormatter('{x:,.0f}'))
+    ax.xaxis.set_major_locator(mtick.MultipleLocator(400))
+
+    # 枠線の「上」と「右」を消す（さきほどのリクエストを反映）
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    # 最後に tight_layout
+    fig.tight_layout()
 
     output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
     os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
