@@ -147,17 +147,13 @@ def main():
         
     for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
         for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
-            interf_no_interf_errorbar_ratio(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                            results["pan1_ratio"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                            results["distance_pan1"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                            results["pan1_ratio"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                            f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_ratio.png")
-            
-            interf_no_interf_errorbar_ratio(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                            results["pan1_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                            results["distance_pan1"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                            results["pan1_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                            f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_diff.png")        
+            interf_diff_errorbar(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                 results["pan1_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                 f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_diff.png") 
+
+            interf_diff_errorbar(results["distance_pan2"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                 results["pan2_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                 f"pan1_{off_load_pan1}_PAN2_{off_load_pan2}_errorbar_diff.png")        
                 # distance_to_interference_pan1 = np.asarray(distance_to_interference_pan1)
                 # up_per_all_pan1 = np.asarray(up_per_all_pan1)
                 # down_per_all_pan1 = np.asarray(down_per_all_pan1)
@@ -530,9 +526,6 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
     if len(dist_up) > 0:
         add_errorbar_plot(dist_up, per_up, 'blue', 'UpLink', ax)
     
-    if len(dist_down) > 0:
-        add_errorbar_plot(dist_down, per_down, 'red', 'DownLink', ax)
-
 
     # 範囲の設定
     ax.set_ylim(0.0, 1.0)
@@ -560,15 +553,12 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
     plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
-def interf_no_interf_errorbar_ratio(interf_dist_pan1, interf_pan1_per_ratio, no_interf_dist_pan1, no_interf_pan1_per_ratio, filename):
+def interf_diff_errorbar(interf_dist_pan1, interf_diff, filename):
     fig, ax = plt.subplots(figsize=(13, 10))
 
     # それぞれ独立した関数を呼び出す
     if len(interf_dist_pan1) > 0:
-        add_errorbar_plot(interf_dist_pan1, interf_pan1_per_ratio, 'red', 'With Interference', ax)
-    
-    if len(no_interf_dist_pan1) > 0:
-        add_errorbar_plot(no_interf_dist_pan1, no_interf_pan1_per_ratio, 'blue', 'Without Interference', ax)
+        add_errorbar_plot(interf_dist_pan1, interf_diff, 'red', 'With Interference', ax)
 
     # フォントサイズの一括設定
     ax.tick_params(axis="both", labelsize=FONT_SIZE, width=3.0, which="major", length=20)
@@ -584,10 +574,9 @@ def interf_no_interf_errorbar_ratio(interf_dist_pan1, interf_pan1_per_ratio, no_
     # 枠線の「上」と「右」を消す（さきほどのリクエストを反映）
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-
+    ax.set_ylim(-0.5, 0.5)
     # 最後に tight_layout
     fig.tight_layout()
-
     output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
     os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
     
