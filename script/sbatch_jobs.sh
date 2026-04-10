@@ -48,6 +48,6 @@ echo "全てのシミュレーションのジョブを投入しました"
 
 #上のすべてのjobが終了したら実行
 echo "Submitting analysis job (waiting for simulations to finish...)"
-sbatch sbatch -p elgar --dependency=afterok:singleton --job-name="$JOB_NAME" "$SCRIPT_DIR/analyze_trace.sh"
+sbatch -p elgar --dependency=afterok:singleton --job-name="$JOB_NAME" "$SCRIPT_DIR/analyze_trace.sh"
 
 echo "分析のジョブの予約が完了しました"
