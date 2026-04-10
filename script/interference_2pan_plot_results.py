@@ -525,8 +525,10 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
     # それぞれ独立した関数を呼び出す
     if len(dist_up) > 0:
         add_errorbar_plot(dist_up, per_up, 'blue', 'UpLink', ax)
-    
 
+    if len(dist_down) > 0:
+        add_errorbar_plot(dist_down, per_down, 'red', 'DownLink', ax)
+        
     # 範囲の設定
     ax.set_ylim(0.0, 1.0)
 
