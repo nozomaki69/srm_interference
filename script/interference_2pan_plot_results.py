@@ -516,8 +516,18 @@ def add_errorbar_plot(distance, per, color, label, ax):
             ci95_hi.append(0) # データが1つ以下の場合はエラーバーを出さない
 
     # 4. エラーバー付きでプロット
-    ax.errorbar(stats_df.index.astype(float), stats_df['mean'], yerr=ci95_hi, 
-                fmt='o', color=color, label=label, capsize=5, capthick=2, elinewidth=2)
+    ax.errorbar(
+        stats_df.index.astype(float), 
+        stats_df['mean'], 
+        yerr=ci95_hi, 
+        fmt='o', 
+        color=color, 
+        label=label, 
+        capsize=8,            # ヒゲの横棒を大きく (5 -> 8)
+        capthick=3,           # ヒゲの横棒を太く (2 -> 3)
+        elinewidth=3,         # ヒゲの縦線を太く (2 -> 3)
+        markersize=12,        # 平均点のサイズを大きく (デフォルトは6前後)
+    )
 
 def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename, plot_dir):
     fig, ax = plt.subplots(figsize=(13, 10))
@@ -528,7 +538,7 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
 
     if len(dist_down) > 0:
         add_errorbar_plot(dist_down, per_down, 'red', 'DownLink', ax)
-        
+
     # 範囲の設定
     ax.set_ylim(0.0, 1.0)
 

@@ -36,18 +36,12 @@ for config in "${configs[@]}"; do
   count=$((count + 1))
 
   # 100個ごとに5秒待機
-  if [ $((count % 150)) -eq 0 ]; then
+  if [ $((count % 200)) -eq 0 ]; then
     echo "Current count: $count. Sleeping for 5s..."
-    sleep 8																																																																			
+    sleep 10																																																																			
   fi
 done
 
 echo "----------------------------------------"
 echo "Total submitted jobs: $count"
 echo "全てのシミュレーションのジョブを投入しました"
-
-#上のすべてのjobが終了したら実行
-echo "Submitting analysis job (waiting for simulations to finish...)"
-sbatch -p elgar --dependency=afterok:singleton --job-name="$JOB_NAME" "$SCRIPT_DIR/analyze_trace.sh"
-
-echo "分析のジョブの予約が完了しました"
