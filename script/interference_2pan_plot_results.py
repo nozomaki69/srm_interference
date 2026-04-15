@@ -33,9 +33,9 @@ FILE_PREFIXES = ["interf", "no_interf"]
 # --- Main Logic ---
 
 pan1_offload_min = 0.1
-pan1_offload_max = 0.2
+pan1_offload_max = 1.1
 pan2_offload_min = 0.1
-pan2_offload_max = 0.2
+pan2_offload_max = 1.1
 
 NUM_COORD = 2
 NUM_DEV_GROUP = 12 # 各グループのデバイス数
