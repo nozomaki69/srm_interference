@@ -33,9 +33,9 @@ FILE_PREFIXES = ["interf", "no_interf"]
 # --- Main Logic ---
 
 pan1_offload_min = 0.1
-pan1_offload_max = 1.1
+pan1_offload_max = 0.2
 pan2_offload_min = 0.1
-pan2_offload_max = 1.1
+pan2_offload_max = 0.2
 
 NUM_COORD = 2
 NUM_DEV_GROUP = 12 # 各グループのデバイス数
@@ -116,13 +116,7 @@ def main():
                 results["pan1_diff"][offload] = np.array(results["down_per_all_pan1"][offload])-np.array(results["up_per_all_pan1"][offload])
                 results["pan2_diff"][offload] = np.array(results["down_per_all_pan2"][offload])-np.array(results["up_per_all_pan2"][offload])
                 print(f"{offload} finish")
-                # plot_distance_vs_per(distance_to_interference_pan1, up_per_all_pan1, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan1_up.png","blue", "UpLink",plot_dir)
-                # plot_distance_vs_per(distance_to_interference_pan1, down_per_all_pan1, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan1_down.png", "red", "DownLink",plot_dir)
-                # plot_distance_vs_per_up_down(distance_to_interference_pan1,up_per_all_pan1,down_per_all_pan1,f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_per_pan1.png",plot_dir)
-                # plot_distance_vs_per(distance_to_interference_pan2, up_per_all_pan2, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan2_up.png", "blue", "UpLink",plot_dir)
-                # plot_distance_vs_per(distance_to_interference_pan2, down_per_all_pan2, f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_solo_pan2_down.png", "red", "DownLink",plot_dir)
-                # plot_distance_vs_per_up_down(distance_to_interference_pan2,up_per_all_pan2,down_per_all_pan2,f"pan1_{off_load_pan1}_pan2_{off_load_pan2}__per_pan2.png",plot_dir)
-
+                
     for prefix_name in FILE_PREFIXES:            
         base_plot_dir = "plots"            
         
@@ -149,62 +143,33 @@ def main():
         for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
             interf_diff_errorbar(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["pan1_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_diff.png") 
+                                 f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_diff.pdf") 
 
             interf_diff_errorbar(results["distance_pan2"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["pan2_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 f"pan1_{off_load_pan1}_PAN2_{off_load_pan2}_errorbar_diff.png")        
-                # distance_to_interference_pan1 = np.asarray(distance_to_interference_pan1)
-                # up_per_all_pan1 = np.asarray(up_per_all_pan1)
-                # down_per_all_pan1 = np.asarray(down_per_all_pan1)
-                # idx = np.argsort(distance_to_interference_pan1)
-                # distance_pan1_sorted = distance_to_interference_pan1[idx]
-                # up_per_pan1_sorted = up_per_all_pan1[idx]
-                # down_per_pan1_sorted = down_per_all_pan1[idx]
-                # plot_distance_vs_per_lowess(
-                #     distance_pan1_sorted,
-                #     up_per_pan1_sorted,
-                #     down_per_pan1_sorted,
-                #     f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_lowess_pan1.png",
-                #     plot_dir
-                # )
-
-                # distance_to_interference_pan2 = np.asarray(distance_to_interference_pan2)
-                # up_per_all_pan2 = np.asarray(up_per_all_pan2)
-                # down_per_all_pan2 = np.asarray(down_per_all_pan2)
-                # idx = np.argsort(distance_to_interference_pan2)
-                # distance_pan2_sorted = distance_to_interference_pan2[idx]
-                # up_per_pan2_sorted = up_per_all_pan2[idx]
-                # down_per_pan2_sorted = down_per_all_pan2[idx]
-                # plot_distance_vs_per_lowess(
-                #     distance_pan2_sorted,
-                #     up_per_pan2_sorted,
-                #     down_per_pan2_sorted,
-                #     f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_lowess_pan2.png",
-                #     plot_dir
-                # )
-
+                                 f"pan1_{off_load_pan1}_PAN2_{off_load_pan2}_errorbar_diff.pdf")        
+                
 def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_dir):
     # この関数の中に、実行したいプロット処理をすべて詰め込む
     offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
     
     # 1. 個別のプロット
-    plot_distance_vs_per(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], f"pan1_up_scatter_{offload}.png", "blue", "UpLink", plot_dir)
-    plot_distance_vs_per(results["distance_pan1"][offload], results["down_per_all_pan1"][offload], f"pan1_down_scatter_{offload}.png", "red", "DownLink", plot_dir)
-    plot_distance_vs_per_up_down(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], f"pan1_up_and_down_per_scatter_{offload}.png", plot_dir)
+    plot_distance_vs_per(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], f"pan1_up_scatter_{offload}.pdf", "blue", "UpLink", plot_dir)
+    plot_distance_vs_per(results["distance_pan1"][offload], results["down_per_all_pan1"][offload], f"pan1_down_scatter_{offload}.pdf", "red", "DownLink", plot_dir)
+    plot_distance_vs_per_up_down(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], f"pan1_up_and_down_per_scatter_{offload}.pdf", plot_dir)
     
-    plot_distance_vs_per(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], f"pan2_up_scatter_{offload}.png", "blue", "UpLink", plot_dir)
-    plot_distance_vs_per(results["distance_pan2"][offload], results["down_per_all_pan2"][offload], f"pan2_down_scatter_{offload}.png", "red", "DownLink", plot_dir)
-    plot_distance_vs_per_up_down(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload], f"pan2_up_and_down_per_scatter_{offload}.png", plot_dir)
+    plot_distance_vs_per(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], f"pan2_up_scatter_{offload}.pdf", "blue", "UpLink", plot_dir)
+    plot_distance_vs_per(results["distance_pan2"][offload], results["down_per_all_pan2"][offload], f"pan2_down_scatter_{offload}.pdf", "red", "DownLink", plot_dir)
+    plot_distance_vs_per_up_down(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload], f"pan2_up_and_down_per_scatter_{offload}.pdf", plot_dir)
     
     # 2. エラーバー付きのプロット
     plot_distance_vs_per_errorbar(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], 
                                   results["distance_pan1"][offload], results["down_per_all_pan1"][offload], 
-                                  f"pan1_errorbar_{offload}.png", plot_dir)
+                                  f"pan1_errorbar_{offload}.pdf", plot_dir)
     
     plot_distance_vs_per_errorbar(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], 
                                   results["distance_pan2"][offload], results["down_per_all_pan2"][offload], 
-                                  f"pan2_errorbar_{offload}.png", plot_dir)
+                                  f"pan2_errorbar_{offload}.pdf", plot_dir)
 
 
 
@@ -246,6 +211,7 @@ def plot_distance_vs_per_lowess(
     lowess_dl = lowess(down_per, distance, frac=frac, return_sorted=True)
 
     plt.figure(figsize=(13, 10))
+    plt.rcParams['font.sans-serif'] = ['Helvetica']
 
     # Scatter
     plt.scatter(distance, up_per,
@@ -387,6 +353,7 @@ def run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE,
 
 def plot_distance_vs_per_up_down(distance, up_per, down_per, filename, plot_dir):
     plt.figure(figsize=(13, 10))
+    plt.rcParams['font.sans-serif'] = ['Helvetica']
     plt.scatter(distance, up_per, color='blue', marker='o', s=50, label='UpLink')
     plt.scatter(distance, down_per, color='red', marker='o', s=50, label='DownLink')
 
@@ -421,6 +388,7 @@ def plot_distance_vs_per_up_down(distance, up_per, down_per, filename, plot_dir)
 
 def plot_distance_vs_per(distance, per, filename, color, legend_name, plot_dir):
     plt.figure(figsize=(13, 10))
+    plt.rcParams['font.sans-serif'] = ['Helvetica']
     plt.scatter(distance, per, color = f"{color}",marker='o', s=50,label = f"{legend_name}")
     #plt.xlabel("d [m]",fontsize=FONT_SIZE+20)
     #plt.ylabel("PER",fontsize=FONT_SIZE+20)
@@ -531,7 +499,7 @@ def add_errorbar_plot(distance, per, color, label, ax):
 
 def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename, plot_dir):
     fig, ax = plt.subplots(figsize=(13, 10))
-
+    plt.rcParams['font.sans-serif'] = ['Helvetica']
     # それぞれ独立した関数を呼び出す
     if len(dist_up) > 0:
         add_errorbar_plot(dist_up, per_up, 'blue', 'UpLink', ax)
@@ -567,7 +535,7 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
 
 def interf_diff_errorbar(interf_dist_pan1, interf_diff, filename):
     fig, ax = plt.subplots(figsize=(13, 10))
-
+    plt.rcParams['font.sans-serif'] = ['Helvetica']
     # それぞれ独立した関数を呼び出す
     if len(interf_dist_pan1) > 0:
         add_errorbar_plot(interf_dist_pan1, interf_diff, 'red', 'With Interference', ax)
@@ -669,7 +637,7 @@ def plot_positions_and_values(positions, filename, metric_values, bw1_khz, bw2_k
     ノードの位置をプロットし、対応する値を座標の隣にオーバーレイする。
     """
     plt.figure(figsize=(10, 10))
-
+    plt.rcParams['font.sans-serif'] = ['Helvetica']
     # X, Y座標の最大値/最小値を見つけるためのリスト
     all_x = []
     all_y = []
