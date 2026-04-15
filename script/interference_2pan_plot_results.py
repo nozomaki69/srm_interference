@@ -32,8 +32,8 @@ FILENAME_POS = re.compile(r"coord_dist_([\d.]+)m_off_load_pan1_([\d.]+)_pan2_([\
 FILE_PREFIXES = ["interf", "no_interf"]
 # --- Main Logic ---
 
-pan1_offload_min = 0.1
-pan1_offload_max = 1.1
+pan1_offload_min = 0.7
+pan1_offload_max = 0.8
 pan2_offload_min = 0.1
 pan2_offload_max = 1.1
 
