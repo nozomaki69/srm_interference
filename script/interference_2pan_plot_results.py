@@ -143,10 +143,14 @@ def main():
         for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
             interf_diff_errorbar(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["pan1_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                 results["distance_pan1"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                 results["pan1_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_diff.pdf") 
 
             interf_diff_errorbar(results["distance_pan2"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["pan2_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                 results["distance_pan2"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                 results["pan2_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  f"pan1_{off_load_pan1}_PAN2_{off_load_pan2}_errorbar_diff.pdf")        
                 
 def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_dir):
@@ -533,12 +537,15 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
     plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
-def interf_diff_errorbar(interf_dist_pan1, interf_diff, filename):
+def interf_diff_errorbar(interf_dist_pan1, interf_diff, no_interf_dist_pan1, no_interf_diff, filename):
     fig, ax = plt.subplots(figsize=(13, 10))
     plt.rcParams['font.sans-serif'] = ['Helvetica']
     # それぞれ独立した関数を呼び出す
     if len(interf_dist_pan1) > 0:
         add_errorbar_plot(interf_dist_pan1, interf_diff, 'red', 'With Interference', ax)
+
+    if len(no_interf_dist_pan1) > 0:
+        add_errorbar_plot(no_interf_dist_pan1, no_interf_diff, 'blue', 'Without Interference', ax)
 
     # フォントサイズの一括設定
     ax.tick_params(axis="both", labelsize=FONT_SIZE, width=3.0, which="major", length=20)
