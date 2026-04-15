@@ -14,6 +14,7 @@ from collections import defaultdict
 from sklearn.kernel_ridge import KernelRidge
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from concurrent.futures import ProcessPoolExecutor
+from sklearn.metrics import roc_curve, auc
 
 # ★修正：scipyのインポートを削除
 # from scipy import stats 
@@ -163,6 +164,9 @@ def main():
                                           ratio["distance_pan1"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                           ratio["pan1_ratio"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], f"pan1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_ratio.png", plot_dir)
             
+
+    for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
+        plot_roc_curves(ratio, off_load_pan1)
                 # distance_to_interference_pan1 = np.asarray(distance_to_interference_pan1)
                 # up_per_all_pan1 = np.asarray(up_per_all_pan1)
                 # down_per_all_pan1 = np.asarray(down_per_all_pan1)
@@ -616,6 +620,48 @@ def node_parse_trace_file(filepath,num_device):
         
         return up_data_pdr_list, down_data_pdr_list
 
+def plot_roc_curves(results, off_load, pan2_val=0.8):
+    plt.figure(figsize=(10, 8))
+    
+    key_interf = f"interf_pan1_{off_load:.1f}_pan2_{pan2_val:.1f}"
+    key_no_interf = f"no_interf_pan1_{off_load:.1f}_pan2_{pan2_val:.1f}"
+    
+    # データの取得（辞書から配列を取り出す）
+    data_p = np.array(results["pan1_diff"][key_interf])
+    data_n = np.array(results["pan1_diff"][key_no_interf])
+    
+    # ラベルとスコアの結合
+    y_true = np.concatenate([np.ones(len(data_p)), np.zeros(len(data_n))])
+    y_scores = np.concatenate([data_p, data_n])
+    
+    # ROC曲線の計算
+    fpr, tpr, thresholds = roc_curve(y_true, y_scores)
+    roc_auc = auc(fpr, tpr)
+    
+    # プロット
+    plt.plot(fpr, tpr, lw=2, label=f'Offload {off_load:.1f} (AUC = {roc_auc:.2f})')
+
+    # 対角線（ランダム推測）
+    plt.plot([0, 1], [0, 1], color='gray', linestyle='--')
+    
+    # グラフの装飾
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.0])
+    plt.xlabel('False Positive Rate (FPR)', fontsize=14)
+    plt.ylabel('True Positive Rate (TPR)', fontsize=14)
+    
+    # 枠線の調整（上と右を消す）
+    ax = plt.gca()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    plt.legend(loc="lower right", fontsize=10)
+    output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
+    os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
+    
+    plt.tight_layout()
+    plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
+    plt.close()
 
 def plot_positions_and_values(positions, filename, metric_values, bw1_khz, bw2_khz):
     """

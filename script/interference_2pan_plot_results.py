@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 from collections import defaultdict
 from sklearn.kernel_ridge import KernelRidge
+from sklearn.metrics import roc_curve, auc
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from concurrent.futures import ProcessPoolExecutor
 
@@ -152,7 +153,11 @@ def main():
                                  results["distance_pan2"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["pan2_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  f"pan1_{off_load_pan1}_PAN2_{off_load_pan2}_errorbar_diff.pdf")        
-                
+            
+
+    for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+        plot_roc_curves(results, off_load_pan1, f"pan1_{off_load_pan1}_pan2_0.8_ROC_curve.pdf")
+
 def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_dir):
     # この関数の中に、実行したいプロット処理をすべて詰め込む
     offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
@@ -638,6 +643,65 @@ def node_parse_trace_file(filepath,num_device):
         
         return up_data_pdr_list, down_data_pdr_list
 
+def plot_roc_curves(results, off_load, filename, pan2_val=0.8):
+    plt.figure(figsize=(10, 8))
+    
+    key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
+    key_no_interf = f"no_interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
+    
+    # データの取得（辞書から配列を取り出す）
+    data_p = [
+    diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
+    if dist < 700
+    ]
+
+    # 干渉なしデータの抽出
+    data_n = [
+        diff for diff, dist in zip(results["pan1_diff"][key_no_interf], results["distance_pan1"][key_no_interf])
+        if dist < 700
+    ]
+    
+    # ラベルとスコアの結合
+    y_true = np.concatenate([np.ones(len(data_p)), np.zeros(len(data_n))])
+    y_scores = np.concatenate([data_p, data_n])
+    
+    # ROC曲線の計算
+    fpr, tpr, thresholds = roc_curve(y_true, y_scores)
+    roc_auc = auc(fpr, tpr)
+    
+    # プロット
+    plt.plot(fpr, tpr, lw=8, label=f'Offload {off_load} (AUC = {roc_auc:.2f})')
+
+    # 対角線（ランダム推測）
+    plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=3)
+    
+    # グラフの装飾
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.0])
+    plt.xlabel('False Positive Rate (FPR)', fontsize=14)
+    plt.ylabel('True Positive Rate (TPR)', fontsize=14)
+    
+    # 枠線の調整（上と右を消す）
+    plt.xticks(fontsize=FONT_SIZE)
+    plt.yticks(fontsize=FONT_SIZE)
+    leg = plt.legend(fontsize=FONT_SIZE)
+    leg.get_frame().set_linewidth(1.8)
+    plt.tick_params(axis="both",width=3.0, which="major", length=20)
+    plt.gca().xaxis.set_major_formatter(
+    mtick.StrMethodFormatter('{x:,.0f}')
+    )
+    
+    ax = plt.gca()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    plt.legend(loc="lower right", fontsize=10)
+    output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
+    os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
+    
+    plt.tight_layout()
+    plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
+    plt.close()
 
 def plot_positions_and_values(positions, filename, metric_values, bw1_khz, bw2_khz):
     """
