@@ -28,9 +28,10 @@ DEVICE_ID_1 = list(range(3, NUM_DEVICE + 3))
 DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
 
 DISTANCES_M = 1200
-SIMULATION_SEEDS = 10
+SIMULATION_SEEDS = 30
+ 
 MEASURE_START_SEC = 10.0
-MEASURE_DURATION_SEC = 50.0
+MEASURE_DURATION_SEC = 100.0
 MEASURE_END_SEC = MEASURE_START_SEC + MEASURE_DURATION_SEC
 SIM_DURATION_SEC = MEASURE_END_SEC + MEASURE_START_SEC
 MY_TRACE_TAGS = ['Application', 'Mac']
@@ -46,10 +47,6 @@ OUTPUT_DIR = os.path.join(SCRIPT_DIR, "..")  # commandline/
 CONFIG_TEMPLATE = "TEMPLATE.config.j2"
 POS_TEMPLATE = "TEMPLATE.pos.j2"
 STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
-pan1_offload_min = 0.1
-pan1_offload_max = 0.2
-pan2_offload_min = 0.1
-pan2_offload_max = 0.2
 
 """
 極座標変換を用いて、半径Rの円内に一様なランダム座標を生成する。
@@ -99,10 +96,10 @@ def main():
         else:
             interference = 0
         
-        for offered_load_pan2 in np.arange(pan1_offload_min, pan1_offload_max, 0.1): #1.1
+        for offered_load_pan2 in np.arange(0.3, 0.4, 0.1): #1.1
             OFFERED_LOAD_PAN2 = round(float(offered_load_pan2), 1)
 
-            for offered_load_pan1 in np.arange(pan2_offload_min, pan2_offload_max, 0.1):
+            for offered_load_pan1 in np.arange(0.3, 0.4, 0.1):
                 OFFERED_LOAD_PAN1 = round(float(offered_load_pan1), 1)
 
                 for seed in range(SIMULATION_SEEDS):
