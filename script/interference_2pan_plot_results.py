@@ -154,9 +154,10 @@ def main():
                                  results["pan2_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  f"pan1_{off_load_pan1}_PAN2_{off_load_pan2}_errorbar_diff.pdf")        
             
-
+    dist_list = [650, 700]
     for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
-        plot_roc_curves(results, off_load_pan1, f"pan1_{off_load_pan1}_pan2_0.8_ROC_curve.pdf")
+        for dist in dist_list:
+            plot_roc_curves(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_0.8_ROC_curve{dist}.pdf")
 
 def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_dir):
     # この関数の中に、実行したいプロット処理をすべて詰め込む
@@ -643,7 +644,7 @@ def node_parse_trace_file(filepath,num_device):
         
         return up_data_pdr_list, down_data_pdr_list
 
-def plot_roc_curves(results, off_load, filename, pan2_val=0.8):
+def plot_roc_curves(results, off_load, dist_mesure, filename, pan2_val=0.8):
     plt.figure(figsize=(10, 8))
     
     key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
@@ -652,13 +653,13 @@ def plot_roc_curves(results, off_load, filename, pan2_val=0.8):
     # データの取得（辞書から配列を取り出す）
     data_p = [
     diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
-    if dist < 700
+    if dist < dist_mesure
     ]
 
     # 干渉なしデータの抽出
     data_n = [
         diff for diff, dist in zip(results["pan1_diff"][key_no_interf], results["distance_pan1"][key_no_interf])
-        if dist < 700
+        if dist < dist_mesure
     ]
     
     # ラベルとスコアの結合
@@ -670,7 +671,7 @@ def plot_roc_curves(results, off_load, filename, pan2_val=0.8):
     roc_auc = auc(fpr, tpr)
     
     # プロット
-    plt.plot(fpr, tpr, lw=8, label=f'Offload {off_load} (AUC = {roc_auc:.2f})')
+    plt.plot(fpr, tpr, lw=8, label=f'Offload {off_load} (AUC = {roc_auc:.3f})')
 
     # 対角線（ランダム推測）
     plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=3)
@@ -688,7 +689,7 @@ def plot_roc_curves(results, off_load, filename, pan2_val=0.8):
     leg.get_frame().set_linewidth(1.8)
     plt.tick_params(axis="both",width=3.0, which="major", length=20)
     plt.gca().xaxis.set_major_formatter(
-    mtick.StrMethodFormatter('{x:,.0f}')
+    mtick.StrMethodFormatter('{x:,.1f}')
     )
     
     ax = plt.gca()
