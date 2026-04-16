@@ -33,10 +33,10 @@ FILENAME_POS = re.compile(r"coord_dist_([\d.]+)m_off_load_pan1_([\d.]+)_pan2_([\
 FILE_PREFIXES = ["interf", "no_interf"]
 # --- Main Logic ---
 
-pan1_offload_min = 0.7
-pan1_offload_max = 0.8
-pan2_offload_min = 0.1
-pan2_offload_max = 1.1
+pan1_offload_min = 0.1
+pan1_offload_max = 1.1
+pan2_offload_min = 0.7
+pan2_offload_max = 0.8
 
 NUM_COORD = 2
 NUM_DEV_GROUP = 12 # 各グループのデバイス数
@@ -68,8 +68,9 @@ def main():
         print("--- Starting Result Aggregation and Plotting ---")
 
 
-        for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
-            for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+        # for off_load_pan2 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+        off_load_pan2 = np.round(pan2_offload_max, 1)
+        for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
                 print("start off_load_pan1/pan2:", off_load_pan1,"/",off_load_pan2)
 
                 if not os.path.isdir(STATS_DIR):
@@ -122,8 +123,8 @@ def main():
         base_plot_dir = "plots"            
         
         with ProcessPoolExecutor(MAX_WORKERS) as executor:  # elgarやwagnerなら8〜16くらいがおすすめ
-            for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
-                for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+            off_load_pan2 = np.round(pan2_offload_max, 1)
+            for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
                     if prefix_name == "interf":
                         plot_dir = os.path.join(
                             base_plot_dir,
@@ -140,8 +141,9 @@ def main():
                     executor.submit(generate_all_plots, results, prefix_name, off_load_pan1, off_load_pan2, plot_dir)
 
         
-    for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
-        for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+    # for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
+    off_load_pan2 = np.round(pan2_offload_max, 1)
+    for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
             interf_diff_errorbar(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["pan1_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["distance_pan1"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
@@ -155,9 +157,13 @@ def main():
                                  f"pan1_{off_load_pan1}_PAN2_{off_load_pan2}_errorbar_diff.pdf")        
             
     dist_list = [650, 700]
-    for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+    for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
         for dist in dist_list:
             plot_roc_curves(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_0.8_ROC_curve{dist}.pdf")
+
+    for dist in dist_list:
+        eplot_roc_curves(results, dist, f"0.8_ROC_curve{dist}.pdf")
+
 
 def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_dir):
     # この関数の中に、実行したいプロット処理をすべて詰め込む
@@ -240,7 +246,7 @@ def plot_distance_vs_per_lowess(
     plt.ylim(0.0, 1.0)
     plt.xticks(fontsize=FONT_SIZE)
     plt.yticks(fontsize=FONT_SIZE)
-    leg = plt.legend(fontsize=FONT_SIZE)
+    leg = plt.legend(fontsize=20)
     leg.get_frame().set_linewidth(1.8)
     plt.tight_layout()
     plt.gca().spines['right'].set_visible(False)
@@ -644,6 +650,64 @@ def node_parse_trace_file(filepath,num_device):
         
         return up_data_pdr_list, down_data_pdr_list
 
+def eplot_roc_curves(results ,dist_mesure, filename, pan2_val=0.8):
+    plt.figure(figsize=(10, 8))
+    off_load_list = [0.1, 0.4, 0.7, 1.0]
+    for off_load in off_load_list:
+        key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
+        key_no_interf = f"no_interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
+        
+        # データの取得（辞書から配列を取り出す）
+        data_p = [
+        diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
+        if dist < dist_mesure
+        ]
+
+        # 干渉なしデータの抽出
+        data_n = [
+            diff for diff, dist in zip(results["pan1_diff"][key_no_interf], results["distance_pan1"][key_no_interf])
+            if dist < dist_mesure
+        ]
+        
+        # ラベルとスコアの結合
+        y_true = np.concatenate([np.ones(len(data_p)), np.zeros(len(data_n))])
+        y_scores = np.concatenate([data_p, data_n])
+        
+        # ROC曲線の計算
+        fpr, tpr, thresholds = roc_curve(y_true, y_scores)
+        roc_auc = auc(fpr, tpr)
+        
+        # プロット
+        plt.plot(fpr, tpr, lw=6, label=f'Offload {off_load} (AUC = {roc_auc:.3f})')
+
+    # 対角線（ランダム推測）
+    plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=3)
+    
+    # グラフの装飾
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.0])
+    
+    # 枠線の調整（上と右を消す）
+    plt.xticks(fontsize=FONT_SIZE)
+    plt.yticks(fontsize=FONT_SIZE)
+    leg = plt.legend(loc="lower right", fontsize=20)
+    leg.get_frame().set_linewidth(1.8)
+    plt.tick_params(axis="both",width=3.0, which="major", length=20)
+    plt.gca().xaxis.set_major_formatter(
+    mtick.StrMethodFormatter('{x:,.1f}')
+    )
+    
+    ax = plt.gca()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
+    os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
+    
+    plt.tight_layout()
+    plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
+    plt.close()
+
 def plot_roc_curves(results, off_load, dist_mesure, filename, pan2_val=0.8):
     plt.figure(figsize=(10, 8))
     
@@ -679,14 +743,11 @@ def plot_roc_curves(results, off_load, dist_mesure, filename, pan2_val=0.8):
     # グラフの装飾
     plt.xlim([0.0, 1.0])
     plt.ylim([0.0, 1.0])
-    plt.xlabel('False Positive Rate (FPR)', fontsize=14)
-    plt.ylabel('True Positive Rate (TPR)', fontsize=14)
+
     
     # 枠線の調整（上と右を消す）
     plt.xticks(fontsize=FONT_SIZE)
     plt.yticks(fontsize=FONT_SIZE)
-    leg = plt.legend(fontsize=FONT_SIZE)
-    leg.get_frame().set_linewidth(1.8)
     plt.tick_params(axis="both",width=3.0, which="major", length=20)
     plt.gca().xaxis.set_major_formatter(
     mtick.StrMethodFormatter('{x:,.1f}')
@@ -696,7 +757,8 @@ def plot_roc_curves(results, off_load, dist_mesure, filename, pan2_val=0.8):
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     
-    plt.legend(loc="lower right", fontsize=10)
+    leg = plt.legend(loc="lower right", fontsize=20)
+    leg.get_frame().set_linewidth(1.8)
     output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
     os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
     
