@@ -60,6 +60,8 @@ def main():
         "pan2_diff" : {},
         "distance_pan1"  : {},
         "distance_pan2"  : {},
+        "pan1_device_rssi": {},
+        "pan2_device_rssi": {},
     }
     for prefix_name in FILE_PREFIXES:
         print(f"\n===== Processing {prefix_name} files =====\n")
@@ -109,10 +111,10 @@ def main():
 
                 # Data container for all runs
                 values = run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS)
-
+                print(values)
                 #求めた距離ごとのノードの平均を二次元平面上にプロット
                 offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
-                results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload] = run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS)
+                results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], results["pan1_device_rssi"][offload], results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload], results["pan2_device_rssi"][offload] = run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS)
                 results["pan1_ratio"][offload] = np.array(results["down_per_all_pan1"][offload])/np.array(results["up_per_all_pan1"][offload])
                 results["pan2_ratio"][offload] = np.array(results["down_per_all_pan2"][offload])/np.array(results["up_per_all_pan2"][offload])
                 results["pan1_diff"][offload] = np.array(results["down_per_all_pan1"][offload])-np.array(results["up_per_all_pan1"][offload])
@@ -159,7 +161,8 @@ def main():
     dist_list = [650, 700]
     for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
         for dist in dist_list:
-            plot_roc_curves(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_0.8_ROC_curve{dist}.pdf")
+            plot_roc_diff_curves(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_0.8_ROC_curve{dist}.pdf")
+            plot_roc_rssi_curves(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_0.8_ROC_rssi_curve{dist}.pdf")
 
     for dist in dist_list:
         eplot_roc_curves(results, dist, f"0.8_ROC_curve{dist}.pdf")
@@ -276,20 +279,22 @@ def process_single_trace(filename, prefix_name, STATS_DIR, NUM_DEV_GROUP):
     filepath = os.path.join(STATS_DIR, filename)
     
     # 重い解析処理を実行
-    up_data_pdr_list, down_data_pdr_list = node_parse_trace_file(filepath, NUM_DEV_GROUP)
+    up_data_pdr_list, down_data_pdr_list, device_rssi_ave_list = node_parse_trace_file(filepath, NUM_DEV_GROUP)
     
     # seed値と一緒に結果を返す
     return {
         "seed": seed,
         "up": up_data_pdr_list,
-        "down": down_data_pdr_list
+        "down": down_data_pdr_list,
+        "device_rssi": device_rssi_ave_list
     }
 
 # --- 2. メインの処理部分 ---
 def run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS):
     values = {
         "up_data_pdr_list": {},
-        "down_data_pdr_list": {}
+        "down_data_pdr_list": {},
+        "device_rssi_ave_list": {}
     }
 
     with ProcessPoolExecutor(MAX_WORKERS) as executor:
@@ -305,7 +310,7 @@ def run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MA
                 seed = res["seed"]
                 values["up_data_pdr_list"][seed] = res["up"]
                 values["down_data_pdr_list"][seed] = res["down"]
-
+                values["device_rssi_ave_list"][seed] = res["device_rssi"]
     return values
 
 def process_single_pos(filename, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE):
@@ -318,16 +323,17 @@ def process_single_pos(filename, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE
     
     # このファイル（seed）での計算結果を一時的に保存するリスト
     tmp_res = {
-        "dist1": [], "up1": [], "down1": [],
-        "dist2": [], "up2": [], "down2": []
+        "dist1": [], "up1": [], "down1": [], "pan1_device_rssi": [],
+        "dist2": [], "up2": [], "down2": [], "pan2_device_rssi": []
     }
-
+    #ここでpan1とpan2を両方同じリストで管理していたものを分ける
     # PAN1の計算
     for device_id in C1_DEV_RANGE:
         d = np.sqrt((positions[device_id][0] - positions[2][0])**2 + (positions[device_id][1] - positions[2][1])**2)
         tmp_res["dist1"].append(d)
         tmp_res["up1"].append(values["up_data_pdr_list"][seed][device_id])
         tmp_res["down1"].append(values["down_data_pdr_list"][seed][device_id])
+        tmp_res["pan1_device_rssi"].append(values["device_rssi_ave_list"][seed][device_id])
 
     # PAN2の計算
     for device_id in C2_DEV_RANGE:
@@ -335,7 +341,7 @@ def process_single_pos(filename, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE
         tmp_res["dist2"].append(d)
         tmp_res["up2"].append(values["up_data_pdr_list"][seed][device_id])
         tmp_res["down2"].append(values["down_data_pdr_list"][seed][device_id])
-
+        tmp_res["pan2_device_rssi"].append(values["device_rssi_ave_list"][seed][device_id])
     return tmp_res
 
 def run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS):
@@ -346,6 +352,10 @@ def run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE,
     distance_to_interference_pan2 = []
     up_per_all_pan2 = []
     down_per_all_pan2 = []
+    pan1_device_rssi = []
+    pan2_device_rssi = []
+
+
     with ProcessPoolExecutor(MAX_WORKERS) as executor:
         # 10並列で実行
         futures = [
@@ -360,12 +370,14 @@ def run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE,
                 distance_to_interference_pan1.extend(res["dist1"])
                 up_per_all_pan1.extend(res["up1"])
                 down_per_all_pan1.extend(res["down1"])
+                pan1_device_rssi.extend(res["pan1_device_rssi"])
                 distance_to_interference_pan2.extend(res["dist2"])
                 up_per_all_pan2.extend(res["up2"])
                 down_per_all_pan2.extend(res["down2"])
+                pan2_device_rssi.extend(res["pan2_device_rssi"])
 
-    return (distance_to_interference_pan1, up_per_all_pan1, down_per_all_pan1,
-            distance_to_interference_pan2, up_per_all_pan2, down_per_all_pan2)
+    return (distance_to_interference_pan1, up_per_all_pan1, down_per_all_pan1, pan1_device_rssi,
+            distance_to_interference_pan2, up_per_all_pan2, down_per_all_pan2, pan2_device_rssi)
 
 def plot_distance_vs_per_up_down(distance, up_per, down_per, filename, plot_dir):
     plt.figure(figsize=(13, 10))
@@ -587,14 +599,18 @@ def node_parse_trace_file(filepath,num_device):
     #device → coordinator
     coordinator_receive_list = [0 for _ in range(3 * num_device)]
     device_dequed_list = [0 for _ in range(3 * num_device)]
+
     device_received_ack_list = [0 for _ in range(3 * num_device)]
 
     #coordinator → device
     coordinator_dequed_list = [0 for _ in range(3 * num_device)]
     device_receive_list = [0 for _ in range(3 * num_device)]
+    device_rssi_sum_list = [0 for _ in range(3 * num_device)]
+
 
     up_data_pdr_list = [0 for _ in range(3 * num_device)]
     down_data_pdr_list = [0 for _ in range(3 * num_device)]
+    device_rssi_ave_list = [0 for _ in range(3 * num_device)]
 
     SENDER_ID_RANGE1 = [int(i) for i in range(3, num_device + 3)] 
 
@@ -617,6 +633,7 @@ def node_parse_trace_file(filepath,num_device):
                     devicenum_ber = int(pkt_id.split('_')[0])
                     if "Data" in parts[15]:
                         coordinator_receive_list[devicenum_ber] += 1
+
                         if devicenum_ber in SENDER_ID_RANGE1:
                             coordinator_receive_list[1] += 1
                         else:
@@ -642,13 +659,16 @@ def node_parse_trace_file(filepath,num_device):
                     
                     if "Data" in parts[15]:
                         device_receive_list[devicenum_ber] +=  1
+                        device_rssi_sum_list[devicenum_ber] += float(parts[19])
+
 
         for device_id in range(3 * num_device):
             if device_dequed_list[device_id]  != 0 and coordinator_dequed_list[device_id] != 0:
                 up_data_pdr_list[device_id] =  round((device_dequed_list[device_id] - coordinator_receive_list[device_id])/device_dequed_list[device_id],3)
                 down_data_pdr_list[device_id] =  round((coordinator_dequed_list[device_id] - device_receive_list[device_id])/coordinator_dequed_list[device_id],3)
-        
-        return up_data_pdr_list, down_data_pdr_list
+            if device_receive_list[device_id] != 0:
+                device_rssi_ave_list[device_id] = round(device_rssi_sum_list[devicenum_ber] / device_receive_list[device_id],3)
+        return up_data_pdr_list, down_data_pdr_list, device_rssi_ave_list
 
 def eplot_roc_curves(results ,dist_mesure, filename, pan2_val=0.8):
     plt.figure(figsize=(10, 8))
@@ -678,7 +698,7 @@ def eplot_roc_curves(results ,dist_mesure, filename, pan2_val=0.8):
         roc_auc = auc(fpr, tpr)
         
         # プロット
-        plt.plot(fpr, tpr, lw=6, label=f'Offload {off_load} (AUC = {roc_auc:.3f})')
+        plt.plot(fpr, tpr, lw=6, label=f'Load of PAN1 {off_load} (AUC = {roc_auc:.3f})')
 
     # 対角線（ランダム推測）
     plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=3)
@@ -708,7 +728,7 @@ def eplot_roc_curves(results ,dist_mesure, filename, pan2_val=0.8):
     plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
-def plot_roc_curves(results, off_load, dist_mesure, filename, pan2_val=0.8):
+def plot_roc_diff_curves(results, off_load, dist_mesure, filename, pan2_val=0.8):
     plt.figure(figsize=(10, 8))
     
     key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
@@ -716,13 +736,71 @@ def plot_roc_curves(results, off_load, dist_mesure, filename, pan2_val=0.8):
     
     # データの取得（辞書から配列を取り出す）
     data_p = [
-    diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
-    if dist < dist_mesure
+        diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
+        if dist < dist_mesure
     ]
 
     # 干渉なしデータの抽出
     data_n = [
         diff for diff, dist in zip(results["pan1_diff"][key_no_interf], results["distance_pan1"][key_no_interf])
+        if dist < dist_mesure
+    ]
+    
+    # ラベルとスコアの結合
+    y_true = np.concatenate([np.ones(len(data_p)), np.zeros(len(data_n))])
+    y_scores = np.concatenate([data_p, data_n])
+    
+    # ROC曲線の計算
+    fpr, tpr, thresholds = roc_curve(y_true, y_scores)
+    roc_auc = auc(fpr, tpr)
+    
+    # プロット
+    plt.plot(fpr, tpr, lw=8, label=f'Offload {off_load} (AUC = {roc_auc:.3f})')
+
+    # 対角線（ランダム推測）
+    plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=3)
+    
+    # グラフの装飾
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.0])
+
+    
+    # 枠線の調整（上と右を消す）
+    plt.xticks(fontsize=FONT_SIZE)
+    plt.yticks(fontsize=FONT_SIZE)
+    plt.tick_params(axis="both",width=3.0, which="major", length=20)
+    plt.gca().xaxis.set_major_formatter(
+    mtick.StrMethodFormatter('{x:,.1f}')
+    )
+    
+    ax = plt.gca()
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    
+    leg = plt.legend(loc="lower right", fontsize=20)
+    leg.get_frame().set_linewidth(1.8)
+    output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
+    os.makedirs(PLOT_OUTPUT_DIR, exist_ok=True)
+    
+    plt.tight_layout()
+    plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
+    plt.close()
+
+def plot_roc_rssi_curves(results, off_load, dist_mesure, filename, pan2_val=0.8):
+    plt.figure(figsize=(10, 8))
+    
+    key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
+    key_no_interf = f"no_interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
+    
+    # データの取得（辞書から配列を取り出す）
+    data_p = [
+        diff for diff, dist in zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])
+        if dist < dist_mesure
+    ]
+
+    # 干渉なしデータの抽出
+    data_n = [
+        diff for diff, dist in zip(results["pan1_device_rssi"][key_no_interf], results["distance_pan1"][key_no_interf])
         if dist < dist_mesure
     ]
     
