@@ -797,7 +797,7 @@ def plot_roc_rssi_curves(results, off_load, dist_mesure, filename, pan2_val=0.8)
     ]
 
     # 干渉なしデータの抽出
-    data_p = [
+    data_n = [
         diff for diff, dist in zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])
         if dist > dist_mesure
     ]
