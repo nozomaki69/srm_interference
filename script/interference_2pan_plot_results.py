@@ -793,13 +793,13 @@ def plot_roc_rssi_curves(results, off_load, dist_mesure, filename, pan2_val=0.8)
     # データの取得（辞書から配列を取り出す）
     data_p = [
         diff for diff, dist in zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])
-        if dist < dist_mesure
+        if dist <= dist_mesure
     ]
 
     # 干渉なしデータの抽出
-    data_n = [
-        diff for diff, dist in zip(results["pan1_device_rssi"][key_no_interf], results["distance_pan1"][key_no_interf])
-        if dist < dist_mesure
+    data_p = [
+        diff for diff, dist in zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])
+        if dist > dist_mesure
     ]
     
     # ラベルとスコアの結合
