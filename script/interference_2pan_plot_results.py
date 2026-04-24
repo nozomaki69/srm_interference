@@ -156,7 +156,13 @@ def main():
                                  results["pan2_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["distance_pan2"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["pan2_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 f"pan1_{off_load_pan1}_PAN2_{off_load_pan2}_errorbar_diff.pdf")        
+                                 f"pan1_{off_load_pan1}_PAN2_{off_load_pan2}_errorbar_diff.pdf")    
+
+            interf_diff_errorbar(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                 results["pan1_device_rssi"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                 results["distance_pan2"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                 results["pan2_device_rssi"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                 f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_rssi.pdf")     
             
     dist_list = [650, 700]
     for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
