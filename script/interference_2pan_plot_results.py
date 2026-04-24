@@ -675,7 +675,6 @@ def eplot_roc_curves(results ,dist_mesure, filename, pan2_val=0.8):
     off_load_list = [0.1, 0.4, 0.7, 1.0]
     for off_load in off_load_list:
         key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
-        key_no_interf = f"no_interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
         
         # データの取得（辞書から配列を取り出す）
         data_p = [
@@ -685,8 +684,8 @@ def eplot_roc_curves(results ,dist_mesure, filename, pan2_val=0.8):
 
         # 干渉なしデータの抽出
         data_n = [
-            diff for diff, dist in zip(results["pan1_diff"][key_no_interf], results["distance_pan1"][key_no_interf])
-            if dist < dist_mesure
+        diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
+        if dist > dist_mesure
         ]
         
         # ラベルとスコアの結合
@@ -732,18 +731,17 @@ def plot_roc_diff_curves(results, off_load, dist_mesure, filename, pan2_val=0.8)
     plt.figure(figsize=(10, 8))
     
     key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
-    key_no_interf = f"no_interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
     
     # データの取得（辞書から配列を取り出す）
     data_p = [
         diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
-        if dist < dist_mesure
+        if dist <= dist_mesure
     ]
 
     # 干渉なしデータの抽出
     data_n = [
-        diff for diff, dist in zip(results["pan1_diff"][key_no_interf], results["distance_pan1"][key_no_interf])
-        if dist < dist_mesure
+        diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
+        if dist > dist_mesure
     ]
     
     # ラベルとスコアの結合
