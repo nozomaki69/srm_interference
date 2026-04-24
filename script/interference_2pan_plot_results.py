@@ -119,6 +119,7 @@ def main():
                 # results["pan2_ratio"][offload] = np.array(results["down_per_all_pan2"][offload])/np.array(results["up_per_all_pan2"][offload])
                 results["pan1_diff"][offload] = np.array(results["down_per_all_pan1"][offload])-np.array(results["up_per_all_pan1"][offload])
                 results["pan2_diff"][offload] = np.array(results["down_per_all_pan2"][offload])-np.array(results["up_per_all_pan2"][offload])
+                
                 print(f"{offload} finish")
     for prefix_name in FILE_PREFIXES:            
         base_plot_dir = "plots"            
@@ -798,20 +799,17 @@ def plot_roc_rssi_curves(results, off_load, dist_mesure, filename, pan2_val=0.8)
     plt.figure(figsize=(10, 8))
     
     key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
-    key_no_interf = f"no_interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
-    
-    # データの取得（辞書から配列を取り出す）
-    data_p = [
-        diff for diff, dist in zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])
-        if dist <= dist_mesure
-    ]
+    data_p = []
+    data_n = []
+    target_indices = {0, 4, 7, 11}    # 対象のデバイス番号
+    for i, (rssi, dist)  in enumerate(zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])):
+        # 12で割った余りが 0, 4, 7, 11 なら抽出
+        if i % 12 in target_indices:
+            if dist <= dist_mesure:
+                data_p.append(rssi)
+            else:
+                data_n.append(rssi)
 
-    # 干渉なしデータの抽出
-    data_n = [
-        diff for diff, dist in zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])
-        if dist > dist_mesure
-    ]
-    
     # ラベルとスコアの結合
     y_true = np.concatenate([np.ones(len(data_p)), np.zeros(len(data_n))])
     y_scores = np.concatenate([data_p, data_n])
