@@ -111,16 +111,15 @@ def main():
 
                 # Data container for all runs
                 values = run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS)
-                print(values)
+                #print(values)
                 #求めた距離ごとのノードの平均を二次元平面上にプロット
                 offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
                 results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], results["pan1_device_rssi"][offload], results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload], results["pan2_device_rssi"][offload] = run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS)
-                results["pan1_ratio"][offload] = np.array(results["down_per_all_pan1"][offload])/np.array(results["up_per_all_pan1"][offload])
-                results["pan2_ratio"][offload] = np.array(results["down_per_all_pan2"][offload])/np.array(results["up_per_all_pan2"][offload])
+                # results["pan1_ratio"][offload] = np.array(results["down_per_all_pan1"][offload])/np.array(results["up_per_all_pan1"][offload])
+                # results["pan2_ratio"][offload] = np.array(results["down_per_all_pan2"][offload])/np.array(results["up_per_all_pan2"][offload])
                 results["pan1_diff"][offload] = np.array(results["down_per_all_pan1"][offload])-np.array(results["up_per_all_pan1"][offload])
                 results["pan2_diff"][offload] = np.array(results["down_per_all_pan2"][offload])-np.array(results["up_per_all_pan2"][offload])
                 print(f"{offload} finish")
-                
     for prefix_name in FILE_PREFIXES:            
         base_plot_dir = "plots"            
         
@@ -666,17 +665,22 @@ def node_parse_trace_file(filepath,num_device):
                     if "Data" in parts[15]:
                         device_receive_list[devicenum_ber] +=  1
                         device_rssi_sum_list[devicenum_ber] += float(parts[19])
-
-
+        
         for device_id in range(3 * num_device):
             if device_dequed_list[device_id]  != 0 and coordinator_dequed_list[device_id] != 0:
                 up_data_pdr_list[device_id] =  round((device_dequed_list[device_id] - coordinator_receive_list[device_id])/device_dequed_list[device_id],3)
                 down_data_pdr_list[device_id] =  round((coordinator_dequed_list[device_id] - device_receive_list[device_id])/coordinator_dequed_list[device_id],3)
             if device_receive_list[device_id] != 0:
-                device_rssi_ave_list[device_id] = round(device_rssi_sum_list[devicenum_ber] / device_receive_list[device_id],3)
-        return up_data_pdr_list, down_data_pdr_list, device_rssi_ave_list
+                device_rssi_ave_list[device_id] = round(device_rssi_sum_list[device_id] / device_receive_list[device_id], 3)
+            # print("------------------")
+            # print(device_rssi_sum_list)
+            # print(device_receive_list)
+            # print(device_rssi_ave_list)
+            # print("------------------")
+    return up_data_pdr_list, down_data_pdr_list, device_rssi_ave_list
 
 def eplot_roc_curves(results ,dist_mesure, filename, pan2_val=0.8):
+
     plt.figure(figsize=(10, 8))
     off_load_list = [0.1, 0.4, 0.7, 1.0]
     for off_load in off_load_list:
