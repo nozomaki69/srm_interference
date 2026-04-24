@@ -591,7 +591,7 @@ def interf_diff_errorbar(interf_dist_pan1, interf_diff, no_interf_dist_pan1, no_
     # 枠線の「上」と「右」を消す（さきほどのリクエストを反映）
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    ax.set_ylim(-0.5, 0.5)
+    #ax.set_ylim(-0.5, 0.5)
     # 最後に tight_layout
     fig.tight_layout()
     output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
