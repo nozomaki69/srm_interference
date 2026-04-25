@@ -859,31 +859,32 @@ def plot_roc_rssi_curve(results, off_load, dist_mesure, filename, pan2_val=0.8):
     plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
-def plot_roc_rssi_curves(results, off_load, dist_mesure, filename, pan2_val=0.8):
+def plot_roc_rssi_curves(results ,dist_mesure, filename, pan2_val=0.8):
     plt.figure(figsize=(10, 8))
-    
-    key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
-    data_p = []
-    data_n = []
-    target_indices = {0, 4, 7, 11}    # 対象のデバイス番号
-    for i, (rssi, dist)  in enumerate(zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])):
-        # 12で割った余りが 0, 4, 7, 11 なら抽出
-        if i % 12 in target_indices:
-            if dist <= dist_mesure:
-                data_n.append(rssi)
-            else:
-                data_p.append(rssi)
+    off_load_list = [0.1, 0.4, 0.7, 1.0]
+    for off_load in off_load_list:
+        key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
+        data_p = []
+        data_n = []
+        target_indices = {0, 4, 7, 11}    # 対象のデバイス番号
+        for i, (rssi, dist)  in enumerate(zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])):
+            # 12で割った余りが 0, 4, 7, 11 なら抽出
+            if i % 12 in target_indices:
+                if dist <= dist_mesure:
+                    data_n.append(rssi)
+                else:
+                    data_p.append(rssi)
 
-    # ラベルとスコアの結合
-    y_true = np.concatenate([np.ones(len(data_p)), np.zeros(len(data_n))])
-    y_scores = np.concatenate([data_p, data_n])
-    
-    # ROC曲線の計算
-    fpr, tpr, thresholds = roc_curve(y_true, y_scores)
-    roc_auc = auc(fpr, tpr)
-    
-    # プロット
-    plt.plot(fpr, tpr, lw=8, label=f'Offload {off_load} (AUC = {roc_auc:.3f})')
+        # ラベルとスコアの結合
+        y_true = np.concatenate([np.ones(len(data_p)), np.zeros(len(data_n))])
+        y_scores = np.concatenate([data_p, data_n])
+        
+        # ROC曲線の計算
+        fpr, tpr, thresholds = roc_curve(y_true, y_scores)
+        roc_auc = auc(fpr, tpr)
+        
+        # プロット
+        plt.plot(fpr, tpr, lw=8, label=f'Offload {off_load} (AUC = {roc_auc:.3f})')
 
     # 対角線（ランダム推測）
     plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=3)
