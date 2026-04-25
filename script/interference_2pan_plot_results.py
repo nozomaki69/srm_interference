@@ -172,7 +172,7 @@ def main():
 
     for dist in dist_list:
         plot_roc_diff_curves(results, dist, f"0.8_ROC_diff_curve{dist}.pdf")
-        plot_roc_diff_curves(results, dist, f"0.8_ROC_rssi_curve{dist}.pdf")
+        plot_roc_rssi_curves(results, dist, f"0.8_ROC_rssi_curve{dist}.pdf")
 
 def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_dir):
     # この関数の中に、実行したいプロット処理をすべて詰め込む
