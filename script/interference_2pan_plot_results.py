@@ -717,8 +717,8 @@ def plot_roc_diff_curves(results ,dist_mesure, filename, pan2_val=0.8):
     plt.ylim([0.0, 1.0])
     
     # 枠線の調整（上と右を消す）
-    plt.xticks(fontsize=FONT_SIZE)
-    plt.yticks(fontsize=FONT_SIZE)
+    plt.xticks(fontsize= 25)
+    plt.yticks(fontsize= 25)
     leg = plt.legend(loc="lower right", fontsize=20)
     leg.get_frame().set_linewidth(1.8)
     plt.tick_params(axis="both",width=3.0, which="major", length=20)
@@ -784,8 +784,8 @@ def plot_roc_diff_curve(results, off_load, dist_mesure, filename, pan2_val=0.8):
 
     
     # 枠線の調整（上と右を消す）
-    plt.xticks(fontsize=FONT_SIZE)
-    plt.yticks(fontsize=FONT_SIZE)
+    plt.xticks(fontsize= 25)
+    plt.yticks(fontsize= 25)
     plt.tick_params(axis="both",width=3.0, which="major", length=20)
     plt.gca().xaxis.set_major_formatter(
     mtick.StrMethodFormatter('{x:,.1f}')
@@ -895,8 +895,8 @@ def plot_roc_rssi_curves(results ,dist_mesure, filename, pan2_val=0.8):
 
     
     # 枠線の調整（上と右を消す）
-    plt.xticks(fontsize=FONT_SIZE)
-    plt.yticks(fontsize=FONT_SIZE)
+    plt.xticks(fontsize= 25)
+    plt.yticks(fontsize= 25)
     plt.tick_params(axis="both",width=3.0, which="major", length=20)
     plt.gca().xaxis.set_major_formatter(
     mtick.StrMethodFormatter('{x:,.1f}')
