@@ -126,7 +126,7 @@ def main():
         
         with ProcessPoolExecutor(MAX_WORKERS) as executor:  # elgarやwagnerなら8〜16くらいがおすすめ
             off_load_pan2 = np.round(pan2_offload_max, 1)
-            for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+            for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
                     if prefix_name == "interf":
                         plot_dir = os.path.join(
                             base_plot_dir,
@@ -145,7 +145,7 @@ def main():
         
     # for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
     off_load_pan2 = np.round(pan2_offload_max, 1)
-    for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+    for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
             interf_diff_errorbar(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["pan1_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["distance_pan1"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
@@ -236,7 +236,6 @@ def plot_distance_vs_per_lowess(
     lowess_dl = lowess(down_per, distance, frac=frac, return_sorted=True)
 
     plt.figure(figsize=(13, 10))
-    plt.rcParams['font.sans-serif'] = ['Helvetica']
 
     # Scatter
     plt.scatter(distance, up_per,
@@ -387,7 +386,7 @@ def run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE,
 
 def plot_distance_vs_per_up_down(distance, up_per, down_per, filename, plot_dir):
     plt.figure(figsize=(13, 10))
-    plt.rcParams['font.sans-serif'] = ['Helvetica']
+    
     plt.scatter(distance, up_per, color='blue', marker='o', s=50, label='UpLink')
     plt.scatter(distance, down_per, color='red', marker='o', s=50, label='DownLink')
 
@@ -533,7 +532,6 @@ def add_errorbar_plot(distance, per, color, label, ax):
 
 def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename, plot_dir):
     fig, ax = plt.subplots(figsize=(13, 10))
-    plt.rcParams['font.sans-serif'] = ['Helvetica']
     # それぞれ独立した関数を呼び出す
     if len(dist_up) > 0:
         add_errorbar_plot(dist_up, per_up, 'blue', 'UpLink', ax)
@@ -569,7 +567,6 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
 
 def interf_diff_errorbar(interf_dist_pan1, interf_diff, no_interf_dist_pan1, no_interf_diff, filename):
     fig, ax = plt.subplots(figsize=(13, 10))
-    plt.rcParams['font.sans-serif'] = ['Helvetica']
     # それぞれ独立した関数を呼び出す
     if len(interf_dist_pan1) > 0:
         add_errorbar_plot(interf_dist_pan1, interf_diff, 'red', 'With Interference', ax)
@@ -920,7 +917,7 @@ def plot_positions_and_values(positions, filename, metric_values, bw1_khz, bw2_k
     ノードの位置をプロットし、対応する値を座標の隣にオーバーレイする。
     """
     plt.figure(figsize=(10, 10))
-    plt.rcParams['font.sans-serif'] = ['Helvetica']
+    
     # X, Y座標の最大値/最小値を見つけるためのリスト
     all_x = []
     all_y = []
@@ -1013,5 +1010,3 @@ def plot_positions_and_values(positions, filename, metric_values, bw1_khz, bw2_k
 
 if __name__ == "__main__":
     main()
-
-
