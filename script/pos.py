@@ -25,9 +25,9 @@ num_device = 12
 # Regular expression to parse parameters from filenames
 # Matches: driot_dist_{distance}m_bw_{bw1}and{bw2}khz_num_device{num_device}_seed{seed}.pos
 FILENAME_RE = re.compile(
-    r"interf_coord_dist_([\d.]+)m_off_load([\d.]+)_seed(\d+)\.pos"
+    r"interf_coord_dist_1200m_off_load_pan1_([\d.]+)_pan2_([\d.]+)_seed(\d+).pos"
 )
-
+#interf_coord_dist_1200m_off_load_pan1_([\d.]+)_pan2_([\d.]+)_seed(\d+).pos
 def parse_pos_file(filepath):
     """Parses a single .pos file to extract node positions."""
     positions = {}
@@ -107,8 +107,8 @@ def plot_positions(positions, filename):
     #plt.axis('equal')
     plt.xlim(-0.60, 1.56)
     plt.ylim(-0.84, 0.84)
-    xmin, xmax = -0.60, 1.56
-    ymin, ymax = -0.84, 0.84
+    xmin, xmax = -0.60, 1.80
+    ymin, ymax = -1.08, 1.08
     # 240 m = 0.24 km
     xticks = np.arange(xmin, xmax + 0.24, 0.24)
     yticks = np.arange(ymin, ymax + 0.24, 0.24)
@@ -151,13 +151,10 @@ def main():
             print(f"Skipping file with unexpected name format: {pos_file}"); continue
         
         seed = int(match.group(3))
-        if seed == 0:
-            filepath = os.path.join(POS_DIR, pos_file)
-            positions = parse_pos_file(filepath)
-            if positions:
-                plot_positions(positions, pos_file)
-        else:
-            print(f"Skipping file: {pos_file} (seed != 0)")
+        filepath = os.path.join(POS_DIR, pos_file)
+        positions = parse_pos_file(filepath)
+        if positions:
+            plot_positions(positions, pos_file)
 
     print("\n--- Script finished successfully. ---")
 

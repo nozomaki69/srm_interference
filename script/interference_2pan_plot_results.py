@@ -37,7 +37,7 @@ pan1_offload_min = 0.1
 pan1_offload_max = 1.1
 pan2_offload_min = 0.7
 pan2_offload_max = 0.8
-
+WINDOW_SIZE = 50
 NUM_COORD = 2
 NUM_DEV_GROUP = 12 # 各グループのデバイス数
 C1_DEV_RANGE = range(NUM_COORD + 1, NUM_COORD + NUM_DEV_GROUP + 1)  # 3 ~ 14
@@ -126,7 +126,7 @@ def main():
         
         with ProcessPoolExecutor(MAX_WORKERS) as executor:  # elgarやwagnerなら8〜16くらいがおすすめ
             off_load_pan2 = np.round(pan2_offload_max, 1)
-            for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+            for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
                     if prefix_name == "interf":
                         plot_dir = os.path.join(
                             base_plot_dir,
@@ -145,7 +145,7 @@ def main():
         
     # for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
     off_load_pan2 = np.round(pan2_offload_max, 1)
-    for off_load_pan1 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+    for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
             interf_diff_errorbar(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["pan1_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  results["distance_pan1"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
@@ -236,7 +236,6 @@ def plot_distance_vs_per_lowess(
     lowess_dl = lowess(down_per, distance, frac=frac, return_sorted=True)
 
     plt.figure(figsize=(13, 10))
-    plt.rcParams['font.sans-serif'] = ['Helvetica']
 
     # Scatter
     plt.scatter(distance, up_per,
@@ -387,7 +386,6 @@ def run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE,
 
 def plot_distance_vs_per_up_down(distance, up_per, down_per, filename, plot_dir):
     plt.figure(figsize=(13, 10))
-    plt.rcParams['font.sans-serif'] = ['Helvetica']
     plt.scatter(distance, up_per, color='blue', marker='o', s=50, label='UpLink')
     plt.scatter(distance, down_per, color='red', marker='o', s=50, label='DownLink')
 
@@ -422,7 +420,6 @@ def plot_distance_vs_per_up_down(distance, up_per, down_per, filename, plot_dir)
 
 def plot_distance_vs_per(distance, per, filename, color, legend_name, plot_dir):
     plt.figure(figsize=(13, 10))
-    plt.rcParams['font.sans-serif'] = ['Helvetica']
     plt.scatter(distance, per, color = f"{color}",marker='o', s=50,label = f"{legend_name}")
     #plt.xlabel("d [m]",fontsize=FONT_SIZE+20)
     #plt.ylabel("PER",fontsize=FONT_SIZE+20)
@@ -533,7 +530,6 @@ def add_errorbar_plot(distance, per, color, label, ax):
 
 def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename, plot_dir):
     fig, ax = plt.subplots(figsize=(13, 10))
-    plt.rcParams['font.sans-serif'] = ['Helvetica']
     # それぞれ独立した関数を呼び出す
     if len(dist_up) > 0:
         add_errorbar_plot(dist_up, per_up, 'blue', 'UpLink', ax)
@@ -569,7 +565,6 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
 
 def interf_diff_errorbar(interf_dist_pan1, interf_diff, no_interf_dist_pan1, no_interf_diff, filename):
     fig, ax = plt.subplots(figsize=(13, 10))
-    plt.rcParams['font.sans-serif'] = ['Helvetica']
     # それぞれ独立した関数を呼び出す
     if len(interf_dist_pan1) > 0:
         add_errorbar_plot(interf_dist_pan1, interf_diff, 'red', 'With Interference', ax)
@@ -602,83 +597,184 @@ def interf_diff_errorbar(interf_dist_pan1, interf_diff, no_interf_dist_pan1, no_
     plt.close()
     
 def node_parse_trace_file(filepath,num_device):
-    #device → coordinator
-    coordinator_receive_list = [0 for _ in range(3 * num_device)]
-    device_dequed_list = [0 for _ in range(3 * num_device)]
+    size = 3 * num_device
 
-    device_received_ack_list = [0 for _ in range(3 * num_device)]
+    # 全て np.zeros で定義 (float型にしておくと計算時に安心です)
+    # device → coordinator
+    c_rx_pkt_num_list     = np.zeros(size)
+    tmp_c_rx_pkt_num_list = np.zeros(size)
+    d_deq_pkt_num_list    = np.zeros(size)
+    tmp_d_deq_pkt_num_list = np.zeros(size)
+    d_rx_ack_num_list     = np.zeros(size)
+    tmp_d_rx_ack_num_list = np.zeros(size)
 
-    #coordinator → device
-    coordinator_dequed_list = [0 for _ in range(3 * num_device)]
-    device_receive_list = [0 for _ in range(3 * num_device)]
-    device_rssi_sum_list = [0 for _ in range(3 * num_device)]
+    # coordinator → device
+    c_deq_pkt_num_list     = np.zeros(size)
+    tmp_c_deq_pkt_num_list = np.zeros(size)
+    d_rx_pkt_num_list      = np.zeros(size)
+    tmp_d_rx_pkt_num_list  = np.zeros(size)
 
+    # 統計用
+    up_data_pkt_per_list      = np.zeros(size)
+    tmp_up_data_pkt_per_list   = np.full(size, -1)
+    down_data_pkt_per_list    = np.zeros(size)
+    tmp_down_data_pkt_per_list = np.full(size, -1)
+    #print(tmp_down_data_pkt_per_list)
 
-    up_data_pdr_list = [0 for _ in range(3 * num_device)]
-    down_data_pdr_list = [0 for _ in range(3 * num_device)]
-    device_rssi_ave_list = [0 for _ in range(3 * num_device)]
+    d_rssi_sum_list    = np.zeros(size)
+    d_rssi_ave_list    = np.zeros(size)
+    detect_interf_num_list  = np.zeros(size)
+    consecutive_interf_counter = np.zeros(size)  # 連続カウント用
 
     SENDER_ID_RANGE1 = [int(i) for i in range(3, num_device + 3)] 
 
     with open(filepath, "r") as f:
+        t = 1
+        pan1_interf_flag = 0
+        pan2_interf_flag = 0
+
         for line in f:
             parts = line.split()
             if not parts:
                 continue
+            current_time = float(parts[1])
+            if current_time < t * WINDOW_SIZE:
+                #coordinator
+                if "DrIotMac" in parts[5] and ( "1" == parts[3] or  "2" == parts[3]):
+                    #coordinatorが送信機
+                    if "DataFrameDequeued" in parts[9]:
+                        devicenum_ber = int(parts[15])
+                        tmp_c_deq_pkt_num_list[devicenum_ber] += 1
 
-            #coordinator
-            if "DrIotMac" in parts[5] and ( "1" == parts[3] or  "2" == parts[3]):
-                #coordinatorが送信機
-                if "DataFrameDequeued" in parts[9]:
-                    devicenum_ber = int(parts[15])
-                    coordinator_dequed_list[devicenum_ber] += 1
+                    #coordinatorが受信機
+                    if "RxFrame" in parts[9]:
+                        pkt_id = parts[11]
+                        devicenum_ber = int(pkt_id.split('_')[0])
+                        if "Data" in parts[15]:
+                            tmp_c_rx_pkt_num_list[devicenum_ber] += 1
 
-                #coordinatorが受信機
-                if "RxFrame" in parts[9]:
-                    pkt_id = parts[11]
-                    devicenum_ber = int(pkt_id.split('_')[0])
-                    if "Data" in parts[15]:
-                        coordinator_receive_list[devicenum_ber] += 1
+                            if devicenum_ber in SENDER_ID_RANGE1:
+                                tmp_c_rx_pkt_num_list[1] += 1
+                            else:
+                                tmp_c_rx_pkt_num_list[2] += 1
 
+                #device
+                if "DrIotMac" in parts[5] and parts[3]!= "1" and parts[3]!= "2":
+                    devicenum_ber = int(parts[3])
+                    # if "Tx-DATA" in parts[9]:
+                    #     num_retry =  int(parts[13])
+                    #     device_currentRetry_list[devicenum_ber] = num_retry
+
+                    if "DataFrameDequeued" in parts[9] :
+                        tmp_d_deq_pkt_num_list[devicenum_ber] += 1
                         if devicenum_ber in SENDER_ID_RANGE1:
-                            coordinator_receive_list[1] += 1
+                            tmp_d_deq_pkt_num_list[1] += 1
                         else:
-                            coordinator_receive_list[2] += 1
+                            tmp_d_deq_pkt_num_list[2] += 1
 
-            #device
-            if "DrIotMac" in parts[5] and parts[3]!= "1" and parts[3]!= "2":
-                devicenum_ber = int(parts[3])
-                # if "Tx-DATA" in parts[9]:
-                #     num_retry =  int(parts[13])
-                #     device_currentRetry_list[devicenum_ber] = num_retry
+                    if "RxFrame" in parts[9]: 
+                        if "ACK" in parts[15]:
+                            tmp_d_rx_ack_num_list[devicenum_ber] += 1
+                        
+                        if "Data" in parts[15]:
+                            tmp_d_rx_pkt_num_list[devicenum_ber] +=  1
+                            d_rssi_sum_list[devicenum_ber] += float(parts[19])
+            
+            else:
+                t += 1
+                c_deq_pkt_num_list += tmp_c_deq_pkt_num_list
+                c_rx_pkt_num_list += tmp_c_rx_pkt_num_list
+                d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
+                d_rx_pkt_num_list += tmp_d_rx_pkt_num_list
 
-                if "DataFrameDequeued" in parts[9] :
-                    device_dequed_list[devicenum_ber] += 1
-                    if devicenum_ber in SENDER_ID_RANGE1:
-                        device_dequed_list[1] += 1
-                    else:
-                        device_dequed_list[2] += 1
+                safe_d_deq = np.where(tmp_d_deq_pkt_num_list == 0, 1, tmp_d_deq_pkt_num_list)
 
-                if "RxFrame" in parts[9]: 
-                    if "ACK" in parts[15]:
-                        device_received_ack_list[devicenum_ber] += 1
+                # 安全な分母で計算（0除算が発生しない）
+                tmp_up_data_pkt_per_list = np.where(tmp_d_deq_pkt_num_list > 0, 
+                    np.round((tmp_d_deq_pkt_num_list - tmp_c_rx_pkt_num_list) / safe_d_deq, 3), 0.0)
+                
+                # --- 下り (Down) の計算 ---
+                # 同じく分母が0の場所を1に置き換える
+                safe_c_deq = np.where(tmp_c_deq_pkt_num_list == 0, 1, tmp_c_deq_pkt_num_list)
+                tmp_down_data_pkt_per_list = np.where(tmp_c_deq_pkt_num_list > 0, 
+                    np.round((tmp_c_deq_pkt_num_list - tmp_d_rx_pkt_num_list) / safe_c_deq, 3), 0.0)
+                tmp_delta_per = tmp_down_data_pkt_per_list - tmp_up_data_pkt_per_list
+                print(tmp_down_data_pkt_per_list)
+
+                # 1. PANごとの範囲（インデックス）を定義
+                pan1_idx = np.arange(3, 15)  # 3 ~ 14
+                pan2_idx = np.arange(15, 27) # 15 ~ 26
+
+                # 今回のループで外れ値と判定されたデバイスを記録する一時的な配列
+                current_outliers = np.zeros(size, dtype=bool)
+                
+                for idx_range in [pan1_idx, pan2_idx]:
+                    # そのPANに属するデバイスのPERを抽出
+                    pan_values = tmp_delta_per[idx_range]
                     
-                    if "Data" in parts[15]:
-                        device_receive_list[devicenum_ber] +=  1
-                        device_rssi_sum_list[devicenum_ber] += float(parts[19])
-        
+                    # 0以外の値を抽出してMADを計算
+                    non_zero_values = pan_values[pan_values != 0]
+                    #print(non_zero_values)
+                    if len(non_zero_values) > 1:  # データが2つ以上あれば統計計算
+                        median = np.median(non_zero_values)
+                        mad = np.median(np.abs(non_zero_values - median))
+                        #print("median : ", median)
+                        #print("mad : ", mad)
+                        # σ相当のしきい値 (1.4826 * mad は標準偏差相当)
+                        #1.0→σ, 1.96→2σ, 3.0→3σ
+                        threshold = median + 1.96 * (1.4826 * mad)
+                        
+                        # このPAN内での外れ値判定（PER > 0 かつ threshold超え）
+                        pan_outlier_mask = (pan_values > threshold) & (pan_values > 0)
+                        
+                        # 全体配列の該当するインデックスに結果を書き込む
+                        current_outliers[idx_range] = pan_outlier_mask
+                        
+                        #print("threshold : ", threshold)
+                # --- 2. 連続性の判定とフラグ処理 (デバイスごと) ---
+
+                # 外れ値だったデバイス：カウントを+1
+                consecutive_interf_counter[current_outliers] += 1
+                #print(consecutive_interf_counter)
+                # 外れ値ではなかったデバイス：カウントをリセット（0に戻す）
+                #consecutive_interf_counter[~current_outliers] = 0
+
+                #print(consecutive_interf_counter)
+                # カウントが3に達したデバイスの処理
+                # 3以上になったらフラグを立て、detect_interf_num_listを更新
+                newly_detected = (consecutive_interf_counter >= 5)
+                if newly_detected[pan1_idx].any():
+                    pan1_interf_flag = 1
+
+                # 4. PAN2の範囲内に True が1つでもあるかチェック
+                if newly_detected[pan2_idx].any():
+                    pan2_interf_flag = 1
+                    
+                tmp_c_deq_pkt_num_list = np.zeros(size)
+                tmp_c_rx_pkt_num_list = np.zeros(size)
+                tmp_d_deq_pkt_num_list = np.zeros(size)
+                tmp_d_rx_pkt_num_list = np.zeros(size)
+        if pan1_interf_flag == 1:
+            print("##########pan1#########")
+        if pan2_interf_flag == 1:
+            print("##########pan2#########")
+        c_deq_pkt_num_list += tmp_c_deq_pkt_num_list
+        c_rx_pkt_num_list += tmp_c_rx_pkt_num_list
+        d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
+        d_rx_pkt_num_list += tmp_d_rx_pkt_num_list        
         for device_id in range(3 * num_device):
-            if device_dequed_list[device_id]  != 0 and coordinator_dequed_list[device_id] != 0:
-                up_data_pdr_list[device_id] =  round((device_dequed_list[device_id] - coordinator_receive_list[device_id])/device_dequed_list[device_id],3)
-                down_data_pdr_list[device_id] =  round((coordinator_dequed_list[device_id] - device_receive_list[device_id])/coordinator_dequed_list[device_id],3)
-            if device_receive_list[device_id] != 0:
-                device_rssi_ave_list[device_id] = round(device_rssi_sum_list[device_id] / device_receive_list[device_id], 3)
+            if d_deq_pkt_num_list[device_id]  != 0 and c_deq_pkt_num_list[device_id] != 0:
+                up_data_pkt_per_list[device_id] =  round((d_deq_pkt_num_list[device_id] - c_rx_pkt_num_list[device_id])/d_deq_pkt_num_list[device_id],3)
+                down_data_pkt_per_list[device_id] =  round((c_deq_pkt_num_list[device_id] - d_rx_pkt_num_list[device_id])/c_deq_pkt_num_list[device_id],3)
+            if d_rx_pkt_num_list[device_id] != 0:
+                d_rssi_ave_list[device_id] = round(d_rssi_sum_list[device_id] / d_rx_pkt_num_list[device_id], 3)
+
             # print("------------------")
             # print(device_rssi_sum_list)
             # print(device_receive_list)
             # print(device_rssi_ave_list)
             # print("------------------")
-    return up_data_pdr_list, down_data_pdr_list, device_rssi_ave_list
+    return up_data_pkt_per_list, down_data_pkt_per_list, d_rssi_ave_list
 
 def plot_roc_diff_curves(results ,dist_mesure, filename, pan2_val=0.8):
 
@@ -920,7 +1016,6 @@ def plot_positions_and_values(positions, filename, metric_values, bw1_khz, bw2_k
     ノードの位置をプロットし、対応する値を座標の隣にオーバーレイする。
     """
     plt.figure(figsize=(10, 10))
-    plt.rcParams['font.sans-serif'] = ['Helvetica']
     # X, Y座標の最大値/最小値を見つけるためのリスト
     all_x = []
     all_y = []

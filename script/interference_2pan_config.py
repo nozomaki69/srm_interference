@@ -28,7 +28,7 @@ DEVICE_ID_1 = list(range(3, NUM_DEVICE + 3))
 DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
 
 DISTANCES_M = 1200
-SIMULATION_SEEDS = 300
+SIMULATION_SEEDS = 1
 MEASURE_START_SEC = 10.0
 MEASURE_DURATION_SEC = 50.0
 MEASURE_END_SEC = MEASURE_START_SEC + MEASURE_DURATION_SEC
@@ -106,6 +106,7 @@ def main():
                 OFFERED_LOAD_PAN1 = round(float(offered_load_pan1), 1)
 
                 for seed in range(SIMULATION_SEEDS):
+                    seed = 18
                     np.random.seed(seed)
 
                     # print(
