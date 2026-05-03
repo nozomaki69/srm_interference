@@ -18,19 +18,19 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 # --- パラメータ定義 ---
 
 CHANNELS = {
-    0:  {"ch": 0, "bandwidth": 150.0, "bitrate": 50e3,   "frame_size": 255,  "preamble_power": -97.0, "range_km": 1.4414098800604656, "ed_threshold_dbm": -87.0}, #周波数920MHz
-    1:  {"ch": 1, "bandwidth": 150.0, "bitrate": 50e3,   "frame_size": 255,  "preamble_power": -97.0, "range_km": 1.4414098800604656, "ed_threshold_dbm": -87.0}, #周波数921MHz
-    2:  {"ch": 2, "bandwidth": 600.0, "bitrate": 200e3,  "frame_size": 511,  "preamble_power": -90.97940008672037, "range_km": 1.0192307006600434, "ed_threshold_dbm": -80.97940008672037},#周波数920MHz
+    0:  {"ch": 0, "bandwidth": 150.0, "bitrate": 50e3,   "frame_size": 127,  "preamble_power": -97.0, "range_km": 1.4414098800604656, "ed_threshold_dbm": -87.0}, #周波数920MHz
+    1:  {"ch": 1, "bandwidth": 150.0, "bitrate": 50e3,   "frame_size": 127,  "preamble_power": -97.0, "range_km": 1.4414098800604656, "ed_threshold_dbm": -87.0}, #周波数921MHz
+    2:  {"ch": 2, "bandwidth": 600.0, "bitrate": 200e3,  "frame_size": 255,  "preamble_power": -90.97940008672037, "range_km": 1.0192307006600434, "ed_threshold_dbm": -80.97940008672037},#周波数920MHz
 }
 TARGET_BANDWIDTH_PATTERNS = [[0, 2],[1, 2]]
-NUM_DEVICE = 12
+NUM_DEVICE = 50
 DEVICE_ID_1 = list(range(3, NUM_DEVICE + 3))
 DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
 
-DISTANCES_M = 1200
-SIMULATION_SEEDS = 1
+DISTANCES_M = 1500
+SIMULATION_SEEDS = 25
 MEASURE_START_SEC = 10.0
-MEASURE_DURATION_SEC = 50.0
+MEASURE_DURATION_SEC = 200.0
 MEASURE_END_SEC = MEASURE_START_SEC + MEASURE_DURATION_SEC
 SIM_DURATION_SEC = MEASURE_END_SEC + MEASURE_START_SEC
 MY_TRACE_TAGS = ['Application', 'Mac']
@@ -49,7 +49,7 @@ STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 pan1_offload_min = 0.1
 pan1_offload_max = 1.1
 pan2_offload_min = 0.7
-pan2_offload_max = 0.8
+pan2_offload_max = 1.0
 
 """
 極座標変換を用いて、半径Rの円内に一様なランダム座標を生成する。
@@ -70,6 +70,24 @@ pan2_offload_max = 0.8
 #             points.append(point)
                 
 #         return points
+def generate_uniform_circle_coords(center_x, center_y, radius, num_devices):
+    """
+    中心(x, y)から指定された半径内に一様にデバイスを配置する
+    """
+    # 0から1の間のランダムな値を生成
+    u = np.random.rand(num_devices)
+    v = np.random.rand(num_devices)
+    
+    # 半径方向の計算 (sqrtを使うことで中心付近の密集を防ぎ、一様に分散させる)
+    r = radius * np.sqrt(u)
+    # 角度方向の計算 (0 to 2π)
+    theta = 2 * np.pi * v
+    
+    # 極座標から直交座標(x, y)に変換
+    x = center_x + r * np.cos(theta)
+    y = center_y + r * np.sin(theta)
+    
+    return x, y
 
 def main():
     try:
@@ -106,27 +124,13 @@ def main():
                 OFFERED_LOAD_PAN1 = round(float(offered_load_pan1), 1)
 
                 for seed in range(SIMULATION_SEEDS):
-                    seed = 18
                     np.random.seed(seed)
 
                     # print(
                     #     f"Starting to generate configuration files...\nOutput directory: {os.path.abspath(OUTPUT_DIR)}"
                     # )
-                    
-                    device_x_unit = [ -3, -2, -2, -2, -1, -1, -1, -1,  0,  0, 0,  1]
-                    device_y_unit = [ -1,  0, -1, -2, 1, 0, -2, -3, 0, -1, -2, -1]
-                    lattice_width = 240
-                    lattice_offset = 120
-                    device_x = []
-                    device_y = []
-                    num_pan = 2
-                    for _ in range(num_pan):
-                        for x, y in zip(device_x_unit, device_y_unit): 
-                            device_x.append(np.random.uniform(x*lattice_width +lattice_offset, x*lattice_width +lattice_width +lattice_offset))
-                            device_y.append(np.random.uniform(y*lattice_width +lattice_offset, y*lattice_width +lattice_width +lattice_offset))
-
-                    # print(device_x)
-                    # print(device_y)
+                    x1, y1 = generate_uniform_circle_coords(0, 0, 1400, NUM_DEVICE)
+                    x2, y2 = generate_uniform_circle_coords(DISTANCES_M, 0, 1000, NUM_DEVICE)
 
                     total_files = 0
                     
@@ -157,10 +161,10 @@ def main():
                     for dev_id in DEVICE_ID_1:
                         coordinator_node_1["cbr_applications"].append({
                                 "dst": dev_id,  # Coordinator 1宛て
-                                "bps": (c1_info["bitrate"]/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN1,
+                                "bps": ((c1_info["bitrate"]/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN1),
                                 "start": MEASURE_START_SEC,
                                 "end": MEASURE_END_SEC,
-                                "jitter": 1.0,
+                                "jitter": 20.0,
                                 "payload_size": c1_info["frame_size"] - 15,  # MACヘッダを引いたサイズ
                                 "is_ack_required": True,
                         })
@@ -184,29 +188,29 @@ def main():
                     for dev_id in DEVICE_ID_2:
                         coordinator_node_2["cbr_applications"].append({
                                 "dst": dev_id,  # Coordinator 1宛て
-                                "bps": (c2_info["bitrate"]/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN2,
+                                "bps": ((c2_info["bitrate"]/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN2),
                                 "start": MEASURE_START_SEC,
                                 "end": MEASURE_END_SEC,
-                                "jitter": 1.0,
+                                "jitter": 20.0,
                                 "payload_size": c2_info["frame_size"] - 15,  # MACヘッダを引いたサイズ
                                 "is_ack_required": True,
                         })
                     all_nodes.append(coordinator_node_2)
 
-                    for dev_id in DEVICE_ID_1: 
+                    for i, dev_id in enumerate(DEVICE_ID_1):
                         device_node_1 = {
                             "id": dev_id,
                             "pan_id": 0,
                             "mode": "device",
-                            "pos_list": [{"time": 0, "x": device_x[dev_id -3], "y": device_y[dev_id -3]}],
+                            "pos_list": [{"time": 0, "x": x1[i], "y": y1[i]}],
                             "interfaces": [{"mode": "Device", "init_ch": c1_info["ch"]}],
                             "associated": True,  # 静的に関連付け済み
                             "cbr_applications": [{
                                 "dst": 1,  # Coordinator 1宛て
-                                "bps": (c1_info["bitrate"]/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN1,
+                                "bps": ((c1_info["bitrate"]/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN1),
                                 "start": MEASURE_START_SEC,
                                 "end": MEASURE_END_SEC,
-                                "jitter": 1.0,
+                                "jitter": 20.0,
                                 "payload_size": c1_info["frame_size"] - 15,  # MACヘッダを引いたサイズ
                                 "is_ack_required": True,
                             }],
@@ -216,20 +220,20 @@ def main():
                         all_nodes.append(device_node_1)
 
 
-                    for dev_id in DEVICE_ID_2: 
+                    for i, dev_id in enumerate(DEVICE_ID_2):
                         device_node_2 = {
                             "id": dev_id,
                             "pan_id": 1,
                             "mode": "device",
-                            "pos_list": [{"time": 0, "x": (DISTANCES_M) + device_x[dev_id - 3], "y": 0 + device_y[dev_id - 3]}],
+                            "pos_list": [{"time": 0, "x": x2[i], "y": y2[i]}],
                             "interfaces": [{"mode": "Device", "init_ch": c2_info["ch"]}],
                             "associated": True,  # 静的に関連付け済み
                             "cbr_applications": [{
                                 "dst": 2,  # Coordinator 1宛て
-                                "bps": (c2_info["bitrate"]/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN2,
+                                "bps": ((c2_info["bitrate"]/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN2),
                                 "start": MEASURE_START_SEC,
                                 "end": MEASURE_END_SEC,
-                                "jitter": 1.0,
+                                "jitter": 20.0,
                                 "payload_size": c2_info["frame_size"] - 15,  # MACヘッダを引いたサイズ
                                 "is_ack_required": True,
                             }],

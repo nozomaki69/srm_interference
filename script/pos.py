@@ -1,163 +1,144 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Simulation Position Plotting Script
-This script reads .pos files, plots node positions, and saves the plots.
-"""
 
 import os
 import re
 import sys
 import matplotlib.pyplot as plt
 import numpy as np
-import matplotlib.ticker as ticker
-from matplotlib.ticker import MultipleLocator
+from matplotlib.patches import Circle
 
 # --- Configuration ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# 修正: プロットの出力先をスクリプトの1つ上の階層に設定
 OUTPUT_DIR = os.path.join(SCRIPT_DIR, "..")
-
-# .posファイルはOUTPUT_DIRと同じ階層にあると仮定
 POS_DIR = OUTPUT_DIR
-num_device = 12
+num_device = 50 # 1PANあたりのデバイス数（合計120台ならここを調整）
 
-# Regular expression to parse parameters from filenames
-# Matches: driot_dist_{distance}m_bw_{bw1}and{bw2}khz_num_device{num_device}_seed{seed}.pos
 FILENAME_RE = re.compile(
-    r"interf_coord_dist_1200m_off_load_pan1_([\d.]+)_pan2_([\d.]+)_seed(\d+).pos"
+    r"interf_coord_dist_1500m_off_load_pan1_0.1_pan2_([\d.]+)_seed(\d+).pos"
 )
-#interf_coord_dist_1200m_off_load_pan1_([\d.]+)_pan2_([\d.]+)_seed(\d+).pos
+
 def parse_pos_file(filepath):
-    """Parses a single .pos file to extract node positions."""
+    """各ファイルの座標を読み込む"""
     positions = {}
     with open(filepath, "r") as f:
         for line in f:
             parts = line.split()
             if len(parts) >= 4:
                 node_id = int(parts[0])
-                # 1行目の座標のみを抽出
                 if parts[1] == "0":
-                    x = float(parts[2]) / 1000.0  # meters to kilometers
-                    y = float(parts[3]) / 1000.0  # meters to kilometers
+                    x = float(parts[2]) / 1000.0  # m to km
+                    y = float(parts[3]) / 1000.0  # m to km
                     positions[node_id] = (x, y)
     return positions
 
 def plot_positions(positions, filename):
-    """
-    Plots node positions with different markers for coordinators and devices.
-    """
+    """個別seedのプロット"""
     match = FILENAME_RE.match(filename)
-    if not match:
-        print(f"Skipping file with unexpected name format: {filename}")
-        return
+    if not match: return
+    seed = int(match.group(2))
 
-    dist_m = float(match.group(1))
-    seed = int(match.group(3))
+    fig, ax = plt.subplots(figsize=(10, 10))
 
-    plt.figure(figsize=(10, 8))
+    coord1 = positions.get(1)
+    coord2 = positions.get(2)
 
-    # Plot coordinators as squares
-    coord1_pos = positions.get(1)
-    coord2_pos = positions.get(2)
-    if coord1_pos:
-        plt.plot(coord1_pos[0], coord1_pos[1], marker='s', markersize=10, color='b', label=f"Coordinator(PAN1)", linestyle='')
-    if coord2_pos:
-        plt.plot(coord2_pos[0], coord2_pos[1], marker='s', markersize=10, color='r', label=f"Coordinator(PAN2)", linestyle='')
+    # PAN1範囲 (1.4km)
+    if coord1:
+        ax.plot(coord1[0], coord1[1], 'sb', markersize=10, label="Coord(PAN1)")
+        ax.add_patch(Circle((coord1[0], coord1[1]), 1.4, color='blue', alpha=0.05, fill=True))
 
-    # Plot devices as circles
-    device_group1_ids = range(3, num_device + 3)
-    device_group2_ids = range(num_device + 3, 2 * num_device + 3)
+    # PAN2範囲 (1.0km)
+    if coord2:
+        ax.plot(coord2[0], coord2[1], 'sr', markersize=10, label="Coord(PAN2)")
+        ax.add_patch(Circle((coord2[0], coord2[1]), 1.0, color='red', alpha=0.05, fill=True))
 
-    # Plot Group 1 devices (belonging to Coordinator 1)
-    for node_id in device_group1_ids:
-        pos = positions.get(node_id)
-        if pos:
-            label = f"Device(PAN1)" if node_id == 3 else None
-            plt.plot(pos[0], pos[1], marker='o', markersize=10, color='b', label=label, alpha=0.6)
-            # plt.text(
-            # pos[0], pos[1], 
-            # f'{node_id}', 
-            # fontsize=15, 
-            # # 決定したアライメントを適用
-            # #verticalalignment= "bottom", 
-            # #horizontalalignment= 'right'
-            # )
+    # デバイスプロット
+    for node_id, (x, y) in positions.items():
+        if node_id <= 2: continue
+        color = 'blue' if 3 <= node_id < num_device + 3 else 'red'
+        ax.plot(x, y, 'o', color=color, markersize=8, alpha=0.4, linestyle='')
 
-    # Plot Group 2 devices (belonging to Coordinator 2)
-    for node_id in device_group2_ids:
-        pos = positions.get(node_id)
-        if pos:
-            label = f"Device(PAN2)" if node_id == num_device + 3 else None
-            plt.plot(pos[0], pos[1], marker='o', markersize=10, color='r', label=label, alpha=0.6)
-            # plt.text(
-            # pos[0], pos[1], 
-            # f'{node_id}', 
-            # fontsize=15, 
-            # # 決定したアライメントを適用
-            # #verticalalignment= "bottom", 
-            # #horizontalalignment= 'right'
-            # )
-        
-    #plt.grid(True, which='major', linestyle='--', linewidth=0.8, color='gray', alpha=0.7)
+    ax.set_aspect('equal', adjustable='box')
     plt.xlabel("X (km)", fontsize=20)
     plt.ylabel("Y (km)", fontsize=20)
-    #plt.title(f"Node Positions for Dist={dist_m}m, BWs={bw1_khz} & {bw2_khz}kHz", fontsize=20)
-    plt.tick_params(axis='both', labelsize=18)
-    #plt.axis('equal')
-    plt.xlim(-0.60, 1.56)
-    plt.ylim(-0.84, 0.84)
-    xmin, xmax = -0.60, 1.80
-    ymin, ymax = -1.08, 1.08
-    # 240 m = 0.24 km
-    xticks = np.arange(xmin, xmax + 0.24, 0.24)
-    yticks = np.arange(ymin, ymax + 0.24, 0.24)
-    ax = plt.gca()
-    ax.set_xticks(xticks)
-    ax.set_yticks(yticks)
-
-    ax.grid(True, axis='x', linewidth=0.8)
-    ax.grid(True, axis='y', linewidth=0.8)
-
-    plt.grid(True)
+    plt.tick_params(labelsize=18)
     plt.tight_layout()
-    
-    plt.legend(fontsize=10)
-    output_filename = os.path.join(OUTPUT_DIR, filename.replace('.pos', f"_seed{seed}.png"))
-    plt.savefig(output_filename)
+    plt.savefig(os.path.join(OUTPUT_DIR, filename.replace('.pos', f"_seed{seed}.png")))
     plt.close()
-    print(f"Plot saved to: {output_filename}")
 
+def plot_centroids(stats):
+    """全seedの重心をプロット（視認性向上版）"""
+    fig, ax = plt.subplots(figsize=(10, 10))
+    
+    for node_id, data in stats.items():
+        mean_x = data['sum_x'] / data['count']
+        mean_y = data['sum_y'] / data['count']
+
+        if node_id == 1:
+            # コーディネータはデバイスプロットと同様に青い四角
+            ax.plot(mean_x, mean_y, marker='s', markersize=12, color='b', label="Coord1 Mean", linestyle='')
+            # 範囲を分かりやすくするため薄い塗りつぶしも追加
+            ax.add_patch(Circle((mean_x, mean_y), 1.4, color='blue', alpha=0.03, fill=True))
+        elif node_id == 2:
+            # コーディネータはデバイスプロットと同様に赤い四角
+            ax.plot(mean_x, mean_y, marker='s', markersize=12, color='r', label="Coord2 Mean", linestyle='')
+            ax.add_patch(Circle((mean_x, mean_y), 1.0, color='red', alpha=0.03, fill=True))
+        else:
+            # デバイスの重心を「ばつ印」でプロット
+            # サイズを大きく(10)、線を太く(mew=3)して、デバイスプロットに近い存在感にする
+            color = 'blue' if 3 <= node_id < num_device + 3 else 'red'
+            ax.plot(mean_x, mean_y, marker='x', markersize=10, color=color, mew=3, linestyle='')
+
+    # 軸の設定
+    ax.set_aspect('equal', adjustable='box')
+    plt.title("Device Centroids across All Seeds", fontsize=20)
+    plt.xlabel("X (km)", fontsize=20)
+    plt.ylabel("Y (km)", fontsize=20)
+    
+    # 軸の範囲が自動で小さくなりすぎる場合は、ここで余裕を持たせる設定も可能
+    # ax.autoscale(enable=True, tight=False)
+
+    plt.tick_params(axis='both', labelsize=18)
+    #plt.grid(True, linestyle=':', alpha=0.6)
+    
+    output_path = os.path.join(OUTPUT_DIR, "all_seeds_centroids.png")
+    plt.savefig(output_path)
+    plt.close()
+    print(f"Centroid plot (enhanced visibility) saved to: {output_path}")
 
 def main():
-    """Main execution function to find and process all .pos files."""
     print("--- Starting Position Plotting ---")
-
-    if not os.path.isdir(POS_DIR):
-        print(f"Error: Position directory not found at '{POS_DIR}'", file=sys.stderr)
-        sys.exit(1)
-
     pos_files = [f for f in os.listdir(POS_DIR) if f.endswith(".pos")]
-    if not pos_files:
-        print("Warning: No .pos files found. Nothing to plot.", file=sys.stderr)
-        return
-
-    print(f"Found {len(pos_files)} position files to process.")
-    # plotsディレクトリを作成しないように、os.makedirsを削除
     
+    # 重心計算用の集計辞書
+    # {node_id: {'sum_x': 0.0, 'sum_y': 0.0, 'count': 0}}
+    stats = {}
+
     for pos_file in pos_files:
         match = FILENAME_RE.match(pos_file)
-        if not match:
-            print(f"Skipping file with unexpected name format: {pos_file}"); continue
+        if not match: continue
         
-        seed = int(match.group(3))
         filepath = os.path.join(POS_DIR, pos_file)
         positions = parse_pos_file(filepath)
+        
         if positions:
+            # 1. 個別プロット
             plot_positions(positions, pos_file)
+            
+            # 2. 重心データの集計（読み込みながら加算）
+            for node_id, (x, y) in positions.items():
+                if node_id not in stats:
+                    stats[node_id] = {'sum_x': 0.0, 'sum_y': 0.0, 'count': 0}
+                stats[node_id]['sum_x'] += x
+                stats[node_id]['sum_y'] += y
+                stats[node_id]['count'] += 1
 
-    print("\n--- Script finished successfully. ---")
+    # 全ファイルの読み込みが終わったら重心を描画
+    if stats:
+        plot_centroids(stats)
 
+    print("--- Script finished successfully. ---")
 
 if __name__ == "__main__":
     main()

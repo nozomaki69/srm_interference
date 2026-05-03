@@ -36,10 +36,10 @@ FILE_PREFIXES = ["interf", "no_interf"]
 pan1_offload_min = 0.1
 pan1_offload_max = 1.1
 pan2_offload_min = 0.7
-pan2_offload_max = 0.8
-WINDOW_SIZE = 50
+pan2_offload_max = 1.0
+WINDOW_SIZE = 20
 NUM_COORD = 2
-NUM_DEV_GROUP = 12 # 各グループのデバイス数
+NUM_DEV_GROUP = 50 # 各グループのデバイス数
 C1_DEV_RANGE = range(NUM_COORD + 1, NUM_COORD + NUM_DEV_GROUP + 1)  # 3 ~ 14
 C2_DEV_RANGE = range(NUM_COORD + NUM_DEV_GROUP + 1, NUM_COORD + (2 * NUM_DEV_GROUP) + 1) # 15 ~ 26
 BW1_kHZ = 150.0
@@ -164,15 +164,15 @@ def main():
                                  results["pan2_device_rssi"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_rssi.pdf")     
             
-    dist_list = [650, 700]
+    dist_list = [1000]
     for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
         for dist in dist_list:
-            plot_roc_diff_curve(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_0.8_ROC_curve{dist}.pdf")
-            plot_roc_rssi_curve(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_0.8_ROC_rssi_curve{dist}.pdf")
+            plot_roc_diff_curve(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_{pan2_offload_max}_ROC_curve{dist}.pdf")
+            plot_roc_rssi_curve(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_{pan2_offload_max}_ROC_rssi_curve{dist}.pdf")
 
     for dist in dist_list:
-        plot_roc_diff_curves(results, dist, f"0.8_ROC_diff_curve{dist}.pdf")
-        plot_roc_rssi_curves(results, dist, f"0.8_ROC_rssi_curve{dist}.pdf")
+        plot_roc_diff_curves(results, dist, f"{pan2_offload_max}_ROC_diff_curve{dist}.pdf")
+        plot_roc_rssi_curves(results, dist, f"{pan2_offload_max}_ROC_rssi_curve{dist}.pdf")
 
 def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_dir):
     # この関数の中に、実行したいプロット処理をすべて詰め込む
@@ -596,7 +596,7 @@ def interf_diff_errorbar(interf_dist_pan1, interf_diff, no_interf_dist_pan1, no_
     plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
     plt.close()
     
-def node_parse_trace_file(filepath,num_device):
+def node_parse_trace_file(filepath, num_device):
     size = 3 * num_device
 
     # 全て np.zeros で定義 (float型にしておくと計算時に安心です)
@@ -686,7 +686,7 @@ def node_parse_trace_file(filepath,num_device):
                 c_rx_pkt_num_list += tmp_c_rx_pkt_num_list
                 d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
                 d_rx_pkt_num_list += tmp_d_rx_pkt_num_list
-
+                #print(d_rx_pkt_num_list)
                 safe_d_deq = np.where(tmp_d_deq_pkt_num_list == 0, 1, tmp_d_deq_pkt_num_list)
 
                 # 安全な分母で計算（0除算が発生しない）
@@ -699,7 +699,7 @@ def node_parse_trace_file(filepath,num_device):
                 tmp_down_data_pkt_per_list = np.where(tmp_c_deq_pkt_num_list > 0, 
                     np.round((tmp_c_deq_pkt_num_list - tmp_d_rx_pkt_num_list) / safe_c_deq, 3), 0.0)
                 tmp_delta_per = tmp_down_data_pkt_per_list - tmp_up_data_pkt_per_list
-                print(tmp_down_data_pkt_per_list)
+                #print(tmp_down_data_pkt_per_list)
 
                 # 1. PANごとの範囲（インデックス）を定義
                 pan1_idx = np.arange(3, 15)  # 3 ~ 14
@@ -722,7 +722,7 @@ def node_parse_trace_file(filepath,num_device):
                         #print("mad : ", mad)
                         # σ相当のしきい値 (1.4826 * mad は標準偏差相当)
                         #1.0→σ, 1.96→2σ, 3.0→3σ
-                        threshold = median + 1.96 * (1.4826 * mad)
+                        threshold = median + 1.0 * (1.4826 * mad)
                         
                         # このPAN内での外れ値判定（PER > 0 かつ threshold超え）
                         pan_outlier_mask = (pan_values > threshold) & (pan_values > 0)
@@ -742,7 +742,7 @@ def node_parse_trace_file(filepath,num_device):
                 #print(consecutive_interf_counter)
                 # カウントが3に達したデバイスの処理
                 # 3以上になったらフラグを立て、detect_interf_num_listを更新
-                newly_detected = (consecutive_interf_counter >= 5)
+                newly_detected = (consecutive_interf_counter >= 3)
                 if newly_detected[pan1_idx].any():
                     pan1_interf_flag = 1
 
@@ -754,14 +754,15 @@ def node_parse_trace_file(filepath,num_device):
                 tmp_c_rx_pkt_num_list = np.zeros(size)
                 tmp_d_deq_pkt_num_list = np.zeros(size)
                 tmp_d_rx_pkt_num_list = np.zeros(size)
-        if pan1_interf_flag == 1:
-            print("##########pan1#########")
-        if pan2_interf_flag == 1:
-            print("##########pan2#########")
+        # if pan1_interf_flag == 1:
+        #     print("##########pan1#########")
+        # if pan2_interf_flag == 1:
+        #     print("##########pan2#########")
         c_deq_pkt_num_list += tmp_c_deq_pkt_num_list
         c_rx_pkt_num_list += tmp_c_rx_pkt_num_list
         d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
-        d_rx_pkt_num_list += tmp_d_rx_pkt_num_list        
+        d_rx_pkt_num_list += tmp_d_rx_pkt_num_list
+
         for device_id in range(3 * num_device):
             if d_deq_pkt_num_list[device_id]  != 0 and c_deq_pkt_num_list[device_id] != 0:
                 up_data_pkt_per_list[device_id] =  round((d_deq_pkt_num_list[device_id] - c_rx_pkt_num_list[device_id])/d_deq_pkt_num_list[device_id],3)
@@ -776,7 +777,7 @@ def node_parse_trace_file(filepath,num_device):
             # print("------------------")
     return up_data_pkt_per_list, down_data_pkt_per_list, d_rssi_ave_list
 
-def plot_roc_diff_curves(results ,dist_mesure, filename, pan2_val=0.8):
+def plot_roc_diff_curves(results ,dist_mesure, filename, pan2_val=pan2_offload_max):
 
     plt.figure(figsize=(10, 8))
     off_load_list = [0.1, 0.4, 0.7, 1.0]
@@ -785,14 +786,17 @@ def plot_roc_diff_curves(results ,dist_mesure, filename, pan2_val=0.8):
         
         data_p = []
         data_n = []
-        target_indices = {0, 4, 7, 11}    # 対象のデバイス番号
-        for i, (diff, dist)  in enumerate(zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])):
-            # 12で割った余りが 0, 4, 7, 11 なら抽出
-            if i % 12 in target_indices:
-                if dist <= dist_mesure:
-                    data_p.append(diff)
-                else:
-                    data_n.append(diff)
+        data_p = [
+        diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
+            if dist <= dist_mesure
+        ]
+
+        # 干渉なしデータの抽出
+        data_n = [
+            diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
+            if dist > dist_mesure
+        ]
+    
         
         # ラベルとスコアの結合
         y_true = np.concatenate([np.ones(len(data_p)), np.zeros(len(data_n))])
@@ -833,32 +837,32 @@ def plot_roc_diff_curves(results ,dist_mesure, filename, pan2_val=0.8):
     plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
-def plot_roc_diff_curve(results, off_load, dist_mesure, filename, pan2_val=0.8):
+def plot_roc_diff_curve(results, off_load, dist_mesure, filename, pan2_val= pan2_offload_max):
     plt.figure(figsize=(10, 8))
     
     key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
     
     data_p = []
     data_n = []
-    target_indices = {0, 4, 7, 11}    # 対象のデバイス番号
-    for i, (diff, dist)  in enumerate(zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])):
-        # 12で割った余りが 0, 4, 7, 11 なら抽出
-        if i % 12 in target_indices:
-            if dist <= dist_mesure:
-                data_p.append(diff)
-            else:
-                data_n.append(diff)
+    # target_indices = {0, 4, 7, 11}    # 対象のデバイス番号
+    # for i, (diff, dist)  in enumerate(zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])):
+    #     # 12で割った余りが 0, 4, 7, 11 なら抽出
+    #     if i % 12 in target_indices:
+    #         if dist <= dist_mesure:
+    #             data_p.append(diff)
+    #         else:
+    #             data_n.append(diff)
     # データの取得（辞書から配列を取り出す）
-    # data_p = [
-    #     diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
-    #     if dist <= dist_mesure
-    # ]
+    data_p = [
+        diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
+        if dist <= dist_mesure
+    ]
 
-    # # 干渉なしデータの抽出
-    # data_n = [
-    #     diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
-    #     if dist > dist_mesure
-    # ]
+    # 干渉なしデータの抽出
+    data_n = [
+        diff for diff, dist in zip(results["pan1_diff"][key_interf], results["distance_pan1"][key_interf])
+        if dist > dist_mesure
+    ]
     
     # ラベルとスコアの結合
     y_true = np.concatenate([np.ones(len(data_p)), np.zeros(len(data_n))])
@@ -900,20 +904,31 @@ def plot_roc_diff_curve(results, off_load, dist_mesure, filename, pan2_val=0.8):
     plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
-def plot_roc_rssi_curve(results, off_load, dist_mesure, filename, pan2_val=0.8):
+def plot_roc_rssi_curve(results, off_load, dist_mesure, filename, pan2_val=pan2_offload_max):
     plt.figure(figsize=(10, 8))
     
     key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
     data_p = []
     data_n = []
-    target_indices = {0, 4, 7, 11}    # 対象のデバイス番号
-    for i, (rssi, dist)  in enumerate(zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])):
-        # 12で割った余りが 0, 4, 7, 11 なら抽出
-        if i % 12 in target_indices:
-            if dist <= dist_mesure:
-                data_n.append(rssi)
-            else:
-                data_p.append(rssi)
+
+    data_p = [
+        rssi for rssi, dist in zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])
+        if dist <= dist_mesure
+    ]
+
+    # 干渉なしデータの抽出
+    data_n = [
+        rssi for rssi, dist in zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])
+        if dist > dist_mesure
+    ]
+    # target_indices = {0, 4, 7, 11}    # 対象のデバイス番号
+    # for i, (rssi, dist)  in enumerate(zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])):
+    #     # 12で割った余りが 0, 4, 7, 11 なら抽出
+    #     if i % 12 in target_indices:
+    #         if dist <= dist_mesure:
+    #             data_n.append(rssi)
+    #         else:
+    #             data_p.append(rssi)
 
     # ラベルとスコアの結合
     y_true = np.concatenate([np.ones(len(data_p)), np.zeros(len(data_n))])
@@ -955,22 +970,32 @@ def plot_roc_rssi_curve(results, off_load, dist_mesure, filename, pan2_val=0.8):
     plt.savefig(output_filename, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
-def plot_roc_rssi_curves(results ,dist_mesure, filename, pan2_val=0.8):
+def plot_roc_rssi_curves(results ,dist_mesure, filename, pan2_val=pan2_offload_max):
     plt.figure(figsize=(10, 8))
     off_load_list = [0.1, 0.4, 0.7, 1.0]
     for off_load in off_load_list:
         key_interf = f"interf_pan1_{off_load}_pan2_{pan2_val:.1f}"
         data_p = []
         data_n = []
-        target_indices = {0, 4, 7, 11}    # 対象のデバイス番号
-        for i, (rssi, dist)  in enumerate(zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])):
-            # 12で割った余りが 0, 4, 7, 11 なら抽出
-            if i % 12 in target_indices:
-                if dist <= dist_mesure:
-                    data_n.append(rssi)
-                else:
-                    data_p.append(rssi)
+        # target_indices = {0, 4, 7, 11}    # 対象のデバイス番号
+        # for i, (rssi, dist)  in enumerate(zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])):
+        #     # 12で割った余りが 0, 4, 7, 11 なら抽出
+        #     if i % 12 in target_indices:
+        #         if dist <= dist_mesure:
+        #             data_n.append(rssi)
+        #         else:
+        #             data_p.append(rssi)
+        data_p = [
+            rssi for rssi, dist in zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])
+            if dist <= dist_mesure and rssi != 0
+        ]
 
+        # 干渉なしデータの抽出
+        data_n = [
+            rssi for rssi, dist in zip(results["pan1_device_rssi"][key_interf], results["distance_pan1"][key_interf])
+            if dist > dist_mesure and rssi != 0
+        ]
+    
         # ラベルとスコアの結合
         y_true = np.concatenate([np.ones(len(data_p)), np.zeros(len(data_n))])
         y_scores = np.concatenate([data_p, data_n])
