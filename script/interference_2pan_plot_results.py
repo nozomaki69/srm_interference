@@ -491,8 +491,8 @@ def parse_pos_file(filepath):
     return positions
 
 def add_errorbar_plot(distance, per, color, label, ax):
-    # 1. 50m間隔のビンを作成
-    bin_size = 50
+    # 1. 100m間隔のビンを作成
+    bin_size = 100
     bins = np.arange(0, max(distance) + bin_size, bin_size) #等差配列
     
     # 2. Pandasを使って区間ごとに集計，分割してラベル付をするだけ
@@ -500,7 +500,7 @@ def add_errorbar_plot(distance, per, color, label, ax):
     df['bin'] = pd.cut(df['dist'], bins=bins, labels=bins[:-1] + bin_size/2)#distを50間隔でわけて，それぞれlabelをつける
     
     # 区間ごとの統計量を計算 groupbyによってlabelによって分けて，aggで3つの統計値を計算して，dropnaで値のない区間を削除
-    stats_df = df.groupby('bin')['per'].agg(['mean', 'count', 'std']).dropna()
+    stats_df = df.groupby('bin', observed=False)['per'].agg(['mean', 'count', 'std']).dropna()
     
     # 3. 95%信頼区間の計算
     # 信頼区間の半分幅 = t * (標準偏差 / sqrt(サンプル数))
@@ -688,8 +688,7 @@ def node_parse_trace_file(filepath, num_device):
                 c_rx_pkt_num_list += tmp_c_rx_pkt_num_list
                 d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
                 d_rx_pkt_num_list += tmp_d_rx_pkt_num_list
-                print(c_deq_pkt_num_list)
-                print(d_rx_pkt_num_list)
+                
                 safe_d_deq = np.where(tmp_d_deq_pkt_num_list == 0, 1, tmp_d_deq_pkt_num_list)
 
                 # 安全な分母で計算（0除算が発生しない）
@@ -703,7 +702,6 @@ def node_parse_trace_file(filepath, num_device):
                     np.round((tmp_c_deq_pkt_num_list - tmp_d_rx_pkt_num_list) / safe_c_deq, 3), 0.0)
                 tmp_delta_per = tmp_down_data_pkt_per_list - tmp_up_data_pkt_per_list
 
-                print(tmp_down_data_pkt_per_list)
                 # 1. PANごとの範囲（インデックス）を定義
                 pan1_idx = np.arange(3, NUM_DEV_GROUP + 3)  # 3 ~ 14
                 pan2_idx = np.arange(NUM_DEV_GROUP + 3, NUM_DEV_GROUP + NUM_DEV_GROUP + 3) # 15 ~ 26 

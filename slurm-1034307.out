@@ -1,1 +1,0 @@
-/var/spool/slurm/d/job1034307/slurm_script: 4 行: 29901 Segmentation fault      (コアダンプ) /home/arimoto/opt/scensim_env/scenargie_simulator/2.2/source/driot/sim "$CONFIG"
