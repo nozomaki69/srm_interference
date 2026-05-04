@@ -597,7 +597,7 @@ def interf_diff_errorbar(interf_dist_pan1, interf_diff, no_interf_dist_pan1, no_
     plt.close()
     
 def node_parse_trace_file(filepath, num_device):
-    size = 3 * num_device
+    size = 2 * NUM_DEV_GROUP + 3
 
     # 全て np.zeros で定義 (float型にしておくと計算時に安心です)
     # device → coordinator
@@ -635,8 +635,10 @@ def node_parse_trace_file(filepath, num_device):
 
         for line in f:
             parts = line.split()
+
             if not parts:
                 continue
+
             current_time = float(parts[1])
             if current_time < t * WINDOW_SIZE:
                 #coordinator
@@ -686,7 +688,8 @@ def node_parse_trace_file(filepath, num_device):
                 c_rx_pkt_num_list += tmp_c_rx_pkt_num_list
                 d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
                 d_rx_pkt_num_list += tmp_d_rx_pkt_num_list
-                #print(d_rx_pkt_num_list)
+                print(c_deq_pkt_num_list)
+                print(d_rx_pkt_num_list)
                 safe_d_deq = np.where(tmp_d_deq_pkt_num_list == 0, 1, tmp_d_deq_pkt_num_list)
 
                 # 安全な分母で計算（0除算が発生しない）
@@ -699,11 +702,11 @@ def node_parse_trace_file(filepath, num_device):
                 tmp_down_data_pkt_per_list = np.where(tmp_c_deq_pkt_num_list > 0, 
                     np.round((tmp_c_deq_pkt_num_list - tmp_d_rx_pkt_num_list) / safe_c_deq, 3), 0.0)
                 tmp_delta_per = tmp_down_data_pkt_per_list - tmp_up_data_pkt_per_list
-                #print(tmp_down_data_pkt_per_list)
 
+                print(tmp_down_data_pkt_per_list)
                 # 1. PANごとの範囲（インデックス）を定義
-                pan1_idx = np.arange(3, 15)  # 3 ~ 14
-                pan2_idx = np.arange(15, 27) # 15 ~ 26
+                pan1_idx = np.arange(3, NUM_DEV_GROUP + 3)  # 3 ~ 14
+                pan2_idx = np.arange(NUM_DEV_GROUP + 3, NUM_DEV_GROUP + NUM_DEV_GROUP + 3) # 15 ~ 26 
 
                 # 今回のループで外れ値と判定されたデバイスを記録する一時的な配列
                 current_outliers = np.zeros(size, dtype=bool)
@@ -763,7 +766,7 @@ def node_parse_trace_file(filepath, num_device):
         d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
         d_rx_pkt_num_list += tmp_d_rx_pkt_num_list
 
-        for device_id in range(3 * num_device):
+        for device_id in range(size):
             if d_deq_pkt_num_list[device_id]  != 0 and c_deq_pkt_num_list[device_id] != 0:
                 up_data_pkt_per_list[device_id] =  round((d_deq_pkt_num_list[device_id] - c_rx_pkt_num_list[device_id])/d_deq_pkt_num_list[device_id],3)
                 down_data_pkt_per_list[device_id] =  round((c_deq_pkt_num_list[device_id] - d_rx_pkt_num_list[device_id])/c_deq_pkt_num_list[device_id],3)
