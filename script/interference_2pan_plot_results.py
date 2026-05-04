@@ -37,7 +37,7 @@ pan1_offload_min = 0.1
 pan1_offload_max = 1.1
 pan2_offload_min = 0.7
 pan2_offload_max = 1.0
-WINDOW_SIZE = 20
+WINDOW_SIZE = 40
 NUM_COORD = 2
 NUM_DEV_GROUP = 50 # 各グループのデバイス数
 C1_DEV_RANGE = range(NUM_COORD + 1, NUM_COORD + NUM_DEV_GROUP + 1)  # 3 ~ 14
@@ -723,7 +723,7 @@ def node_parse_trace_file(filepath, num_device):
                         #print("mad : ", mad)
                         # σ相当のしきい値 (1.4826 * mad は標準偏差相当)
                         #1.0→σ, 1.96→2σ, 3.0→3σ
-                        threshold = median + 1.0 * (1.4826 * mad)
+                        threshold = median + 1.96 * (1.4826 * mad)
                         
                         # このPAN内での外れ値判定（PER > 0 かつ threshold超え）
                         pan_outlier_mask = (pan_values > threshold) & (pan_values > 0)
@@ -755,10 +755,10 @@ def node_parse_trace_file(filepath, num_device):
                 tmp_c_rx_pkt_num_list = np.zeros(size)
                 tmp_d_deq_pkt_num_list = np.zeros(size)
                 tmp_d_rx_pkt_num_list = np.zeros(size)
-        # if pan1_interf_flag == 1:
-        #     print("##########pan1#########")
-        # if pan2_interf_flag == 1:
-        #     print("##########pan2#########")
+        if pan1_interf_flag == 1:
+            print("##########pan1#########")
+        if pan2_interf_flag == 1:
+            print("##########pan2#########")
         c_deq_pkt_num_list += tmp_c_deq_pkt_num_list
         c_rx_pkt_num_list += tmp_c_rx_pkt_num_list
         d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
