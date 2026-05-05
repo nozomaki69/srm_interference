@@ -34,12 +34,6 @@ for config in "${configs[@]}"; do
   echo "Submitting: $config"
   sbatch --job-name="$JOB_NAME" "$SCRIPT_DIR/run_one_sim.slurm.sh" "$(realpath "$config")"
   count=$((count + 1))
-
-  # 100個ごとに5秒待機
-  if [ $((count % 200)) -eq 0 ]; then
-    echo "Current count: $count. Sleeping for 5s..."
-    sleep 10																																																																			
-  fi
 done
 
 echo "----------------------------------------"
