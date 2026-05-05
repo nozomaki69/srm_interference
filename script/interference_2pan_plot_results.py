@@ -37,7 +37,7 @@ pan1_offload_min = 0.1
 pan1_offload_max = 1.1
 pan2_offload_min = 0.7
 pan2_offload_max = 1.0
-WINDOW_SIZE = 20
+WINDOW_SIZE = 100
 NUM_COORD = 2
 NUM_DEV_GROUP = 50 # 各グループのデバイス数
 C1_DEV_RANGE = range(NUM_COORD + 1, NUM_COORD + NUM_DEV_GROUP + 1)  # 3 ~ 14
@@ -152,17 +152,17 @@ def main():
                                  results["pan1_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
                                  f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_diff.pdf") 
 
-            interf_diff_errorbar(results["distance_pan2"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 results["pan2_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 results["distance_pan2"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 results["pan2_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 f"pan1_{off_load_pan1}_PAN2_{off_load_pan2}_errorbar_diff.pdf")    
+            # interf_diff_errorbar(results["distance_pan2"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+            #                      results["pan2_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+            #                      results["distance_pan2"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+            #                      results["pan2_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+            #                      f"pan1_{off_load_pan1}_PAN2_{off_load_pan2}_errorbar_diff.pdf")    
 
-            interf_diff_errorbar(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 results["pan1_device_rssi"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 results["distance_pan2"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 results["pan2_device_rssi"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_rssi.pdf")     
+            # interf_diff_errorbar(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+            #                      results["pan1_device_rssi"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+            #                      results["distance_pan2"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+            #                      results["pan2_device_rssi"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+            #                      f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_rssi.pdf")     
             
     dist_list = [1000]
     for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
@@ -493,7 +493,7 @@ def parse_pos_file(filepath):
 def add_errorbar_plot(distance, per, color, label, ax):
     # 1. 100m間隔のビンを作成
     bin_size = 100
-    bins = np.arange(0, max(distance) + bin_size, bin_size) #等差配列
+    bins = np.arange(50, max(distance) + bin_size, bin_size) #等差配列
     
     # 2. Pandasを使って区間ごとに集計，分割してラベル付をするだけ
     df = pd.DataFrame({'dist': distance, 'per': per})
@@ -581,12 +581,12 @@ def interf_diff_errorbar(interf_dist_pan1, interf_diff, no_interf_dist_pan1, no_
 
     # 軸のフォーマット（ax.gca()を使わずに直接 ax を指定）
     ax.xaxis.set_major_formatter(mtick.StrMethodFormatter('{x:,.0f}'))
-    ax.xaxis.set_major_locator(mtick.MultipleLocator(400))
+    ax.xaxis.set_major_locator(mtick.MultipleLocator(1000))
 
     # 枠線の「上」と「右」を消す（さきほどのリクエストを反映）
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    #ax.set_ylim(-0.5, 0.5)
+    ax.set_ylim(-1.0, 0.5)
     # 最後に tight_layout
     fig.tight_layout()
     output_filename = os.path.join(PLOT_OUTPUT_DIR, filename)
@@ -722,11 +722,11 @@ def node_parse_trace_file(filepath, num_device):
                         #print("median : ", median)
                         #print("mad : ", mad)
                         # σ相当のしきい値 (1.4826 * mad は標準偏差相当)
-                        #1.0→σ, 1.96→2σ, 3.0→3σ
-                        threshold = median + 1.0 * (1.4826 * mad)
+                        #1.0→σ, 1.96→2σ, 3.0→3σ プラス方向だけ考える
+                        threshold = median + 1.96 * (1.4826 * mad)
                         
                         # このPAN内での外れ値判定（PER > 0 かつ threshold超え）
-                        pan_outlier_mask = (pan_values > threshold) & (pan_values > 0)
+                        pan_outlier_mask = (pan_values > threshold)
                         
                         # 全体配列の該当するインデックスに結果を書き込む
                         current_outliers[idx_range] = pan_outlier_mask
@@ -738,7 +738,7 @@ def node_parse_trace_file(filepath, num_device):
                 consecutive_interf_counter[current_outliers] += 1
                 #print(consecutive_interf_counter)
                 # 外れ値ではなかったデバイス：カウントをリセット（0に戻す）
-                #consecutive_interf_counter[~current_outliers] = 0
+                # consecutive_interf_counter[~current_outliers] = 0
 
                 #print(consecutive_interf_counter)
                 # カウントが3に達したデバイスの処理
@@ -772,9 +772,9 @@ def node_parse_trace_file(filepath, num_device):
                 d_rssi_ave_list[device_id] = round(d_rssi_sum_list[device_id] / d_rx_pkt_num_list[device_id], 3)
 
             # print("------------------")
-            # print(device_rssi_sum_list)
+        # print(d_rssi_sum_list)
             # print(device_receive_list)
-            # print(device_rssi_ave_list)
+        # print(d_rssi_ave_list)
             # print("------------------")
     return up_data_pkt_per_list, down_data_pkt_per_list, d_rssi_ave_list
 
