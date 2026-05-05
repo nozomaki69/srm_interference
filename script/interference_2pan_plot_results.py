@@ -873,8 +873,13 @@ def plot_roc_diff_curve(results, off_load, dist_mesure, filename, pan2_val= pan2
     fpr, tpr, thresholds = roc_curve(y_true, y_scores)
     roc_auc = auc(fpr, tpr)
     
+    # Youden's Index の計算
+    j_scores = tpr - fpr
+    best_idx = np.argmax(j_scores)
+    best_threshold = thresholds[best_idx]
+
     # プロット
-    plt.plot(fpr, tpr, lw=8, label=f'Offload {off_load} (AUC = {roc_auc:.3f})')
+    plt.plot(fpr, tpr, lw=8, label=f'Load: {off_load} (AUC: {roc_auc:.3f}) Best τ: {best_threshold}')
 
     # 対角線（ランダム推測）
     plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=3)
