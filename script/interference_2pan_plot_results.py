@@ -706,43 +706,20 @@ def node_parse_trace_file(filepath, num_device):
                 pan1_idx = np.arange(3, NUM_DEV_GROUP + 3)  # 3 ~ 14
                 pan2_idx = np.arange(NUM_DEV_GROUP + 3, NUM_DEV_GROUP + NUM_DEV_GROUP + 3) # 15 ~ 26 
 
-                # 今回のループで外れ値と判定されたデバイスを記録する一時的な配列
                 current_outliers = np.zeros(size, dtype=bool)
-                
                 for idx_range in [pan1_idx, pan2_idx]:
                     # そのPANに属するデバイスのPERを抽出
                     pan_values = tmp_delta_per[idx_range]
+                    print(pan_values)
+                    pan_outlier_mask = (pan_values > 0.0)     
+                    #全体配列の該当するインデックスに結果を書き込む
+                    current_outliers[idx_range] = pan_outlier_mask
                     
-                    # 0以外の値を抽出してMADを計算
-                    non_zero_values = pan_values[pan_values != 0]
-                    #print(non_zero_values)
-                    if len(non_zero_values) > 1:  # データが2つ以上あれば統計計算
-                        median = np.median(non_zero_values)
-                        mad = np.median(np.abs(non_zero_values - median))
-                        #print("median : ", median)
-                        #print("mad : ", mad)
-                        # σ相当のしきい値 (1.4826 * mad は標準偏差相当)
-                        #1.0→σ, 1.96→2σ, 3.0→3σ プラス方向だけ考える
-                        threshold = median + 1.96 * (1.4826 * mad)
-                        
-                        # このPAN内での外れ値判定（PER > 0 かつ threshold超え）
-                        pan_outlier_mask = (pan_values > threshold)
-                        
-                        # 全体配列の該当するインデックスに結果を書き込む
-                        current_outliers[idx_range] = pan_outlier_mask
-                        
-                        #print("threshold : ", threshold)
-                # --- 2. 連続性の判定とフラグ処理 (デバイスごと) ---
-
-                # 外れ値だったデバイス：カウントを+1
                 consecutive_interf_counter[current_outliers] += 1
-                #print(consecutive_interf_counter)
+                print(consecutive_interf_counter)
                 # 外れ値ではなかったデバイス：カウントをリセット（0に戻す）
                 # consecutive_interf_counter[~current_outliers] = 0
 
-                #print(consecutive_interf_counter)
-                # カウントが3に達したデバイスの処理
-                # 3以上になったらフラグを立て、detect_interf_num_listを更新
                 newly_detected = (consecutive_interf_counter >= 3)
                 if newly_detected[pan1_idx].any():
                     pan1_interf_flag = 1
@@ -750,15 +727,61 @@ def node_parse_trace_file(filepath, num_device):
                 # 4. PAN2の範囲内に True が1つでもあるかチェック
                 if newly_detected[pan2_idx].any():
                     pan2_interf_flag = 1
+#"-----------MAD------------"
+                # # 今回のループで外れ値と判定されたデバイスを記録する一時的な配列
+                # current_outliers = np.zeros(size, dtype=bool)
+                
+                # for idx_range in [pan1_idx, pan2_idx]:
+                #     # そのPANに属するデバイスのPERを抽出
+                #     pan_values = tmp_delta_per[idx_range]
                     
+                #     # 0以外の値を抽出してMADを計算
+                #     non_zero_values = pan_values[pan_values != 0]
+                #     #print(non_zero_values)
+                #     if len(non_zero_values) > 1:  # データが2つ以上あれば統計計算
+                #         median = np.median(non_zero_values)
+                #         mad = np.median(np.abs(non_zero_values - median))
+                #         #print("median : ", median)
+                #         #print("mad : ", mad)
+                #         # σ相当のしきい値 (1.4826 * mad は標準偏差相当)
+                #         #1.0→σ, 1.96→2σ, 3.0→3σ プラス方向だけ考える
+                #         threshold = median + 1.96 * (1.4826 * mad)
+                        
+                #         # このPAN内での外れ値判定（PER > 0 かつ threshold超え）
+                #         pan_outlier_mask = (pan_values > threshold)
+                        
+                #         # 全体配列の該当するインデックスに結果を書き込む
+                #         current_outliers[idx_range] = pan_outlier_mask
+                        
+                #         #print("threshold : ", threshold)
+                # # --- 2. 連続性の判定とフラグ処理 (デバイスごと) ---
+
+                # # 外れ値だったデバイス：カウントを+1
+                # consecutive_interf_counter[current_outliers] += 1
+                # #print(consecutive_interf_counter)
+                # # 外れ値ではなかったデバイス：カウントをリセット（0に戻す）
+                # # consecutive_interf_counter[~current_outliers] = 0
+
+                # #print(consecutive_interf_counter)
+                # # カウントが3に達したデバイスの処理
+                # # 3以上になったらフラグを立て、detect_interf_num_listを更新
+                # newly_detected = (consecutive_interf_counter >= 3)
+                # if newly_detected[pan1_idx].any():
+                #     pan1_interf_flag = 1
+
+                # # 4. PAN2の範囲内に True が1つでもあるかチェック
+                # if newly_detected[pan2_idx].any():
+                #     pan2_interf_flag = 1
+#"-----------MAD------------"       
+#              
                 tmp_c_deq_pkt_num_list = np.zeros(size)
                 tmp_c_rx_pkt_num_list = np.zeros(size)
                 tmp_d_deq_pkt_num_list = np.zeros(size)
                 tmp_d_rx_pkt_num_list = np.zeros(size)
-        # if pan1_interf_flag == 1:
-        #     print("##########pan1#########")
-        # if pan2_interf_flag == 1:
-        #     print("##########pan2#########")
+        if pan1_interf_flag == 1:
+            print("##########pan1#########")
+        if pan2_interf_flag == 1:
+            print("##########pan2#########")
         c_deq_pkt_num_list += tmp_c_deq_pkt_num_list
         c_rx_pkt_num_list += tmp_c_rx_pkt_num_list
         d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
@@ -879,7 +902,7 @@ def plot_roc_diff_curve(results, off_load, dist_mesure, filename, pan2_val= pan2
     best_threshold = thresholds[best_idx]
 
     # プロット
-    plt.plot(fpr, tpr, lw=8, label=f'Load: {off_load} (AUC: {roc_auc:.3f}) Best τ: {best_threshold}')
+    plt.plot(fpr, tpr, lw=8, label=f'Load: {off_load} (AUC: {roc_auc:.3f}) Best τ: {round(best_threshold,3)}')
 
     # 対角線（ランダム推測）
     plt.plot([0, 1], [0, 1], color='gray', linestyle='--', lw=3)
