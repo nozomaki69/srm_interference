@@ -18,9 +18,9 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 # --- パラメータ定義 ---
 
 CHANNELS = {
-    0:  {"ch": 0, "bandwidth": 150.0, "bitrate": 50e3,   "frame_size": 31,  "preamble_power": -97.0, "range_km": 1.4414098800604656, "ed_threshold_dbm": -87.0}, #周波数920MHz
-    1:  {"ch": 1, "bandwidth": 150.0, "bitrate": 50e3,   "frame_size": 31,  "preamble_power": -97.0, "range_km": 1.4414098800604656, "ed_threshold_dbm": -87.0}, #周波数921MHz
-    2:  {"ch": 2, "bandwidth": 600.0, "bitrate": 200e3,  "frame_size": 127,  "preamble_power": -90.97940008672037, "range_km": 1.0192307006600434, "ed_threshold_dbm": -80.97940008672037},#周波数920MHz
+    0:  {"ch": 0, "bandwidth": 150.0, "bitrate": 50e3,   "frame_size": 127,  "preamble_power": -97.0, "range_km": 1.4414098800604656, "ed_threshold_dbm": -87.0}, #周波数920MHz
+    1:  {"ch": 1, "bandwidth": 150.0, "bitrate": 50e3,   "frame_size": 127,  "preamble_power": -97.0, "range_km": 1.4414098800604656, "ed_threshold_dbm": -87.0}, #周波数921MHz
+    2:  {"ch": 2, "bandwidth": 600.0, "bitrate": 200e3,  "frame_size": 255,  "preamble_power": -90.97940008672037, "range_km": 1.0192307006600434, "ed_threshold_dbm": -80.97940008672037},#周波数920MHz
 }
 TARGET_BANDWIDTH_PATTERNS = [[0, 2],[1, 2]]
 NUM_DEVICE = 50
@@ -30,7 +30,7 @@ DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
 DISTANCES_M = 1500
 SIMULATION_SEEDS = 100
 MEASURE_START_SEC = 10.0
-MEASURE_DURATION_SEC = 100.0
+MEASURE_DURATION_SEC = 150.0
 MEASURE_END_SEC = MEASURE_START_SEC + MEASURE_DURATION_SEC
 SIM_DURATION_SEC = MEASURE_END_SEC + MEASURE_START_SEC
 MY_TRACE_TAGS = ['Application', 'Mac']
