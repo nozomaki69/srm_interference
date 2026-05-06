@@ -45,12 +45,12 @@ def plot_positions(positions, filename):
 
     # PAN1範囲 (1.4km)
     if coord1:
-        ax.plot(coord1[0], coord1[1], 'sb', markersize=10, label="Coord(PAN1)")
+        ax.plot(coord1[0], coord1[1], 'sb', markersize=10, label="PAN1 Coordinator")
         ax.add_patch(Circle((coord1[0], coord1[1]), 1.4, color='blue', alpha=0.05, fill=True))
 
     # PAN2範囲 (1.0km)
     if coord2:
-        ax.plot(coord2[0], coord2[1], 'sr', markersize=10, label="Coord(PAN2)")
+        ax.plot(coord2[0], coord2[1], 'sr', markersize=10, label="PAN2 Coordinator")
         ax.add_patch(Circle((coord2[0], coord2[1]), 1.0, color='red', alpha=0.05, fill=True))
 
     # デバイスプロット
@@ -60,11 +60,17 @@ def plot_positions(positions, filename):
         ax.plot(x, y, 'o', color=color, markersize=8, alpha=0.4, linestyle='')
 
     ax.set_aspect('equal', adjustable='box')
-    plt.xlabel("X (km)", fontsize=20)
-    plt.ylabel("Y (km)", fontsize=20)
-    plt.tick_params(labelsize=18)
+    plt.xlabel("x [km]", fontsize=25)
+    plt.ylabel("y [km]", fontsize=25)
+    plt.xticks(fontsize= 25)
+    plt.yticks(fontsize= 25)
+    leg = plt.legend(loc="lower right", fontsize=20)
+    leg.get_frame().set_linewidth(1.8)
+    plt.tick_params(axis="both",width=3.0, which="major", length=20)
+    
     plt.tight_layout()
-    plt.savefig(os.path.join(OUTPUT_DIR, filename.replace('.pos', f"_seed{seed}.png")))
+    plt.savefig(os.path.join(OUTPUT_DIR, filename.replace('.pos', f"_seed{seed}.pdf")), bbox_inches='tight', pad_inches=0.05)
+
     plt.close()
 
 def plot_centroids(stats):
@@ -93,8 +99,8 @@ def plot_centroids(stats):
     # 軸の設定
     ax.set_aspect('equal', adjustable='box')
     plt.title("Device Centroids across All Seeds", fontsize=20)
-    plt.xlabel("X (km)", fontsize=20)
-    plt.ylabel("Y (km)", fontsize=20)
+    plt.xlabel("x [m]", fontsize=20)
+    plt.ylabel("y [km]", fontsize=20)
     
     # 軸の範囲が自動で小さくなりすぎる場合は、ここで余裕を持たせる設定も可能
     # ax.autoscale(enable=True, tight=False)
@@ -102,7 +108,7 @@ def plot_centroids(stats):
     plt.tick_params(axis='both', labelsize=18)
     #plt.grid(True, linestyle=':', alpha=0.6)
     
-    output_path = os.path.join(OUTPUT_DIR, "all_seeds_centroids.png")
+    output_path = os.path.join(OUTPUT_DIR, "all_seeds_centroids.pdf")
     plt.savefig(output_path)
     plt.close()
     print(f"Centroid plot (enhanced visibility) saved to: {output_path}")

@@ -37,7 +37,7 @@ pan1_offload_min = 0.1
 pan1_offload_max = 1.1
 pan2_offload_min = 0.7
 pan2_offload_max = 1.0
-WINDOW_SIZE = 200
+WINDOW_SIZE = 10
 NUM_COORD = 2
 NUM_DEV_GROUP = 50 # 各グループのデバイス数
 C1_DEV_RANGE = range(NUM_COORD + 1, NUM_COORD + NUM_DEV_GROUP + 1)  # 3 ~ 14
@@ -266,7 +266,7 @@ def plot_distance_vs_per_lowess(
     mtick.StrMethodFormatter('{x:,.0f}')
     )
     plt.gca().xaxis.set_major_locator(
-    mtick.MultipleLocator(400)
+    mtick.MultipleLocator(1000)
     )
 
     os.makedirs(plot_dir, exist_ok=True)
@@ -409,7 +409,7 @@ def plot_distance_vs_per_up_down(distance, up_per, down_per, filename, plot_dir)
     mtick.StrMethodFormatter('{x:,.0f}')
     )
     plt.gca().xaxis.set_major_locator(
-    mtick.MultipleLocator(400)
+    mtick.MultipleLocator(1000)
     )
 
     os.makedirs(plot_dir, exist_ok=True)
@@ -435,7 +435,7 @@ def plot_distance_vs_per(distance, per, filename, color, legend_name, plot_dir):
     mtick.StrMethodFormatter('{x:,.0f}')
     )
     plt.gca().xaxis.set_major_locator(
-    mtick.MultipleLocator(400)
+    mtick.MultipleLocator(1000)
     )
 
     plt.gca().spines['right'].set_visible(False)
@@ -549,7 +549,7 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
 
     # 軸のフォーマット（ax.gca()を使わずに直接 ax を指定）
     ax.xaxis.set_major_formatter(mtick.StrMethodFormatter('{x:,.0f}'))
-    ax.xaxis.set_major_locator(mtick.MultipleLocator(400))
+    ax.xaxis.set_major_locator(mtick.MultipleLocator(1000))
 
     # 枠線の「上」と「右」を消す（さきほどのリクエストを反映）
     ax.spines['top'].set_visible(False)
@@ -576,7 +576,7 @@ def interf_diff_errorbar(interf_dist_pan1, interf_diff, no_interf_dist_pan1, no_
     ax.tick_params(axis="both", labelsize=FONT_SIZE, width=3.0, which="major", length=20)
 
     # 凡例の設定
-    leg = ax.legend(fontsize=FONT_SIZE)
+    leg = ax.legend(fontsize=FONT_SIZE -10)
     leg.get_frame().set_linewidth(1.8)
 
     # 軸のフォーマット（ax.gca()を使わずに直接 ax を指定）
@@ -701,25 +701,74 @@ def node_parse_trace_file(filepath, num_device):
                 tmp_down_data_pkt_per_list = np.where(tmp_c_deq_pkt_num_list > 0, 
                     np.round((tmp_c_deq_pkt_num_list - tmp_d_rx_pkt_num_list) / safe_c_deq, 3), 0.0)
                 tmp_delta_per = tmp_down_data_pkt_per_list - tmp_up_data_pkt_per_list
+                #print(tmp_delta_per)
 
                 # 1. PANごとの範囲（インデックス）を定義
-                pan1_idx = np.arange(3, NUM_DEV_GROUP + 3)  # 3 ~ 14
-                pan2_idx = np.arange(NUM_DEV_GROUP + 3, NUM_DEV_GROUP + NUM_DEV_GROUP + 3) # 15 ~ 26 
+                pan1_idx = np.arange(3, NUM_DEV_GROUP + 3)
+                pan2_idx = np.arange(NUM_DEV_GROUP + 3, NUM_DEV_GROUP + NUM_DEV_GROUP + 3)
+#----------------TAU---------------
+                # tau = 0.1
+                # current_outliers = np.zeros(size, dtype=bool)
+                # for idx_range in [pan1_idx, pan2_idx]:
+                #     # そのPANに属するデバイスのPERを抽出
+                #     pan_values = tmp_delta_per[idx_range]
+                #     #print(pan_values)
+                #     pan_outlier_mask = (pan_values > tau)     
+                #     #全体配列の該当するインデックスに結果を書き込む
+                #     current_outliers[idx_range] = pan_outlier_mask
+                    
+                # consecutive_interf_counter[current_outliers] += 1
+                # # 外れ値ではなかったデバイス：カウントをリセット（0に戻す）
+                # consecutive_interf_counter[~current_outliers] = 0
+                # #print(consecutive_interf_counter)
+                # newly_detected = (consecutive_interf_counter >=5)
+                # if newly_detected[pan1_idx].any():
+                #     pan1_interf_flag = 1
 
+                # # 4. PAN2の範囲内に True が1つでもあるかチェック
+                # if newly_detected[pan2_idx].any():
+                #     pan2_interf_flag = 1
+
+#----------------TAU---------------
+
+#"-----------MAD------------"
+                # 今回のループで外れ値と判定されたデバイスを記録する一時的な配列
                 current_outliers = np.zeros(size, dtype=bool)
+                
                 for idx_range in [pan1_idx, pan2_idx]:
                     # そのPANに属するデバイスのPERを抽出
                     pan_values = tmp_delta_per[idx_range]
-                    print(pan_values)
-                    pan_outlier_mask = (pan_values > 0.0)     
-                    #全体配列の該当するインデックスに結果を書き込む
-                    current_outliers[idx_range] = pan_outlier_mask
                     
-                consecutive_interf_counter[current_outliers] += 1
-                print(consecutive_interf_counter)
-                # 外れ値ではなかったデバイス：カウントをリセット（0に戻す）
-                # consecutive_interf_counter[~current_outliers] = 0
+                    # 0以外の値を抽出してMADを計算
+                    non_zero_values = pan_values[pan_values != 0]
+                    #print(non_zero_values)
+                    if len(non_zero_values) > 1:  # データが2つ以上あれば統計計算
+                        median = np.median(non_zero_values)
+                        mad = np.median(np.abs(non_zero_values - median))
+                        #print("median : ", median)
+                        #print("mad : ", mad)
+                        # σ相当のしきい値 (1.4826 * mad は標準偏差相当)
+                        #1.0→σ, 1.96→2σ, 3.0→3σ プラス方向だけ考える
+                        threshold = median + 3.0 * (1.4826 * mad)
+                        
+                        # このPAN内での外れ値判定（PER > 0 かつ threshold超え）
+                        pan_outlier_mask = (pan_values > threshold)
+                        
+                        # 全体配列の該当するインデックスに結果を書き込む
+                        current_outliers[idx_range] = pan_outlier_mask
+                        
+                        #print("threshold : ", threshold)
+                # --- 2. 連続性の判定とフラグ処理 (デバイスごと) ---
 
+                # 外れ値だったデバイス：カウントを+1
+                consecutive_interf_counter[current_outliers] += 1
+                #print(consecutive_interf_counter)
+                # 外れ値ではなかったデバイス：カウントをリセット（0に戻す）
+                consecutive_interf_counter[~current_outliers] = 0
+
+                #print(consecutive_interf_counter)
+                # カウントが3に達したデバイスの処理
+                # 3以上になったらフラグを立て、detect_interf_num_listを更新
                 newly_detected = (consecutive_interf_counter >= 3)
                 if newly_detected[pan1_idx].any():
                     pan1_interf_flag = 1
@@ -727,53 +776,8 @@ def node_parse_trace_file(filepath, num_device):
                 # 4. PAN2の範囲内に True が1つでもあるかチェック
                 if newly_detected[pan2_idx].any():
                     pan2_interf_flag = 1
-#"-----------MAD------------"
-                # # 今回のループで外れ値と判定されたデバイスを記録する一時的な配列
-                # current_outliers = np.zeros(size, dtype=bool)
-                
-                # for idx_range in [pan1_idx, pan2_idx]:
-                #     # そのPANに属するデバイスのPERを抽出
-                #     pan_values = tmp_delta_per[idx_range]
-                    
-                #     # 0以外の値を抽出してMADを計算
-                #     non_zero_values = pan_values[pan_values != 0]
-                #     #print(non_zero_values)
-                #     if len(non_zero_values) > 1:  # データが2つ以上あれば統計計算
-                #         median = np.median(non_zero_values)
-                #         mad = np.median(np.abs(non_zero_values - median))
-                #         #print("median : ", median)
-                #         #print("mad : ", mad)
-                #         # σ相当のしきい値 (1.4826 * mad は標準偏差相当)
-                #         #1.0→σ, 1.96→2σ, 3.0→3σ プラス方向だけ考える
-                #         threshold = median + 1.96 * (1.4826 * mad)
-                        
-                #         # このPAN内での外れ値判定（PER > 0 かつ threshold超え）
-                #         pan_outlier_mask = (pan_values > threshold)
-                        
-                #         # 全体配列の該当するインデックスに結果を書き込む
-                #         current_outliers[idx_range] = pan_outlier_mask
-                        
-                #         #print("threshold : ", threshold)
-                # # --- 2. 連続性の判定とフラグ処理 (デバイスごと) ---
-
-                # # 外れ値だったデバイス：カウントを+1
-                # consecutive_interf_counter[current_outliers] += 1
-                # #print(consecutive_interf_counter)
-                # # 外れ値ではなかったデバイス：カウントをリセット（0に戻す）
-                # # consecutive_interf_counter[~current_outliers] = 0
-
-                # #print(consecutive_interf_counter)
-                # # カウントが3に達したデバイスの処理
-                # # 3以上になったらフラグを立て、detect_interf_num_listを更新
-                # newly_detected = (consecutive_interf_counter >= 3)
-                # if newly_detected[pan1_idx].any():
-                #     pan1_interf_flag = 1
-
-                # # 4. PAN2の範囲内に True が1つでもあるかチェック
-                # if newly_detected[pan2_idx].any():
-                #     pan2_interf_flag = 1
 #"-----------MAD------------"       
-#              
+     
                 tmp_c_deq_pkt_num_list = np.zeros(size)
                 tmp_c_rx_pkt_num_list = np.zeros(size)
                 tmp_d_deq_pkt_num_list = np.zeros(size)
