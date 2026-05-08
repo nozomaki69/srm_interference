@@ -37,7 +37,7 @@ pan1_offload_min = 0.1
 pan1_offload_max = 1.1
 pan2_offload_min = 0.7
 pan2_offload_max = 1.0
-WINDOW_SIZE = 10
+WINDOW_SIZE = 100
 NUM_COORD = 2
 NUM_DEV_GROUP = 50 # 各グループのデバイス数
 C1_DEV_RANGE = range(NUM_COORD + 1, NUM_COORD + NUM_DEV_GROUP + 1)  # 3 ~ 14
@@ -58,11 +58,14 @@ def main():
         "pan2_ratio": {},
         "pan1_diff" : {},
         "pan2_diff" : {},
+        "pan1_ratio" : {},
+        "pan2_ratio" : {},
         "distance_pan1"  : {},
         "distance_pan2"  : {},
         "pan1_device_rssi": {},
         "pan2_device_rssi": {},
     }
+    interf_scenario_num = []
     for prefix_name in FILE_PREFIXES:
         print(f"\n===== Processing {prefix_name} files =====\n")
 
@@ -110,16 +113,29 @@ def main():
                 print(f"Found {len(pos_files)} pos files to process.")
 
                 # Data container for all runs
-                values = run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS)
-                #print(values)
+                values= run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS)
+                interf_scenario_num.append(sum(values["interf_flag"].values()))
+
                 #求めた距離ごとのノードの平均を二次元平面上にプロット
                 offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
                 results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], results["pan1_device_rssi"][offload], results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload], results["pan2_device_rssi"][offload] = run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS)
                 # results["pan1_ratio"][offload] = np.array(results["down_per_all_pan1"][offload])/np.array(results["up_per_all_pan1"][offload])
                 # results["pan2_ratio"][offload] = np.array(results["down_per_all_pan2"][offload])/np.array(results["up_per_all_pan2"][offload])
-                results["pan1_diff"][offload] = np.array(results["down_per_all_pan1"][offload])-np.array(results["up_per_all_pan1"][offload])
-                results["pan2_diff"][offload] = np.array(results["down_per_all_pan2"][offload])-np.array(results["up_per_all_pan2"][offload])
+                results["pan1_diff"][offload] = np.array(results["down_per_all_pan1"][offload]) - np.array(results["up_per_all_pan1"][offload])
+                results["pan2_diff"][offload] = np.array(results["down_per_all_pan2"][offload]) - np.array(results["up_per_all_pan2"][offload])
+                results["pan1_ratio"][offload] = np.divide(
+                    np.array(results["down_per_all_pan1"][offload]),
+                    np.array(results["up_per_all_pan1"][offload]),
+                    out=np.zeros_like(np.array(results["up_per_all_pan1"][offload]), dtype=float),
+                    where=np.array(results["up_per_all_pan1"][offload]) != 0
+                )
                 
+                results["pan2_ratio"][offload] = np.divide(
+                    np.array(results["down_per_all_pan2"][offload]),
+                    np.array(results["up_per_all_pan2"][offload]),
+                    out=np.zeros_like(np.array(results["up_per_all_pan2"][offload]), dtype=float),
+                    where=np.array(results["up_per_all_pan2"][offload]) != 0
+                )
                 print(f"{offload} finish")
     for prefix_name in FILE_PREFIXES:            
         base_plot_dir = "plots"            
@@ -172,8 +188,30 @@ def main():
 
     for dist in dist_list:
         plot_roc_diff_curves(results, dist, f"{pan2_offload_max}_ROC_diff_curve{dist}.pdf")
-        plot_roc_rssi_curves(results, dist, f"{pan2_offload_max}_ROC_rssi_curve{dist}.pdf")
+        plot_roc_rssi_curves(results, dist, f"{pan2_offload_max}_ROC_rssi_curve{dist}.pdf") 
+    
+    total_scenarios = 1  # seed数
 
+    # 前半10個がTP、後半10個がFP
+    tp_array = interf_scenario_num[:10]  # 干渉あり→干渉ありと判断
+    fp_array = interf_scenario_num[10:]  # 干渉なし→干渉ありと判断
+
+    loads = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+
+    for i, load in enumerate(loads):
+        tp = tp_array[i]
+        fp = fp_array[i]
+        fn = total_scenarios - tp
+        tn = total_scenarios - fp
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall    = tp / (tp + fn) if (tp + fn) > 0 else 0
+        fpr       = fp / (fp + tn) if (fp + tn) > 0 else 0
+        f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+
+        print(f"Load {int(load*100)}%: TP={tp}, FP={fp}, FN={fn}, TN={tn}, "
+            f"Precision={precision:.3f}, Recall={recall:.3f}, FPR={fpr:.3f}, F1={f1:.3f}")
+        
 def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_dir):
     # この関数の中に、実行したいプロット処理をすべて詰め込む
     offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
@@ -181,6 +219,7 @@ def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_
     # 1. 個別のプロット
     plot_distance_vs_per(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], f"pan1_up_scatter_{offload}.pdf", "blue", "UpLink", plot_dir)
     plot_distance_vs_per(results["distance_pan1"][offload], results["down_per_all_pan1"][offload], f"pan1_down_scatter_{offload}.pdf", "red", "DownLink", plot_dir)
+
     plot_distance_vs_per_up_down(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], f"pan1_up_and_down_per_scatter_{offload}.pdf", plot_dir)
     
     plot_distance_vs_per(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], f"pan2_up_scatter_{offload}.pdf", "blue", "UpLink", plot_dir)
@@ -284,14 +323,15 @@ def process_single_trace(filename, prefix_name, STATS_DIR, NUM_DEV_GROUP):
     filepath = os.path.join(STATS_DIR, filename)
     
     # 重い解析処理を実行
-    up_data_pdr_list, down_data_pdr_list, device_rssi_ave_list = node_parse_trace_file(filepath, NUM_DEV_GROUP)
+    up_data_pdr_list, down_data_pdr_list, device_rssi_ave_list, interf_flag = node_parse_trace_file(filepath, NUM_DEV_GROUP)
     
     # seed値と一緒に結果を返す
     return {
         "seed": seed,
         "up": up_data_pdr_list,
         "down": down_data_pdr_list,
-        "device_rssi": device_rssi_ave_list
+        "device_rssi": device_rssi_ave_list,
+        "interf_flag": interf_flag
     }
 
 # --- 2. メインの処理部分 ---
@@ -299,7 +339,8 @@ def run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MA
     values = {
         "up_data_pdr_list": {},
         "down_data_pdr_list": {},
-        "device_rssi_ave_list": {}
+        "device_rssi_ave_list": {},
+        "interf_flag": {}
     }
 
     with ProcessPoolExecutor(MAX_WORKERS) as executor:
@@ -316,6 +357,7 @@ def run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MA
                 values["up_data_pdr_list"][seed] = res["up"]
                 values["down_data_pdr_list"][seed] = res["down"]
                 values["device_rssi_ave_list"][seed] = res["device_rssi"]
+                values["interf_flag"][seed] = res["interf_flag"]
     return values
 
 def process_single_pos(filename, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE):
@@ -605,12 +647,16 @@ def node_parse_trace_file(filepath, num_device):
     tmp_c_rx_pkt_num_list = np.zeros(size)
     d_deq_pkt_num_list    = np.zeros(size)
     tmp_d_deq_pkt_num_list = np.zeros(size)
+    d_tx_pkt_num_list = np.zeros(size)
+    tmp_d_tx_pkt_num_list = np.zeros(size)
     d_rx_ack_num_list     = np.zeros(size)
     tmp_d_rx_ack_num_list = np.zeros(size)
 
     # coordinator → device
     c_deq_pkt_num_list     = np.zeros(size)
     tmp_c_deq_pkt_num_list = np.zeros(size)
+    c_tx_pkt_num_list = np.zeros(size)
+    tmp_c_tx_pkt_num_list = np.zeros(size)
     d_rx_pkt_num_list      = np.zeros(size)
     tmp_d_rx_pkt_num_list  = np.zeros(size)
 
@@ -621,18 +667,18 @@ def node_parse_trace_file(filepath, num_device):
     tmp_down_data_pkt_per_list = np.full(size, -1)
     #print(tmp_down_data_pkt_per_list)
 
+    delta_per = np.zeros(size)
     d_rssi_sum_list    = np.zeros(size)
     d_rssi_ave_list    = np.zeros(size)
     detect_interf_num_list  = np.zeros(size)
     consecutive_interf_counter = np.zeros(size)  # 連続カウント用
-
+    pan_sum_std = np.zeros(size)
     SENDER_ID_RANGE1 = [int(i) for i in range(3, num_device + 3)] 
 
     with open(filepath, "r") as f:
         t = 1
         pan1_interf_flag = 0
         pan2_interf_flag = 0
-
         for line in f:
             parts = line.split()
 
@@ -647,6 +693,14 @@ def node_parse_trace_file(filepath, num_device):
                     if "DataFrameDequeued" in parts[9]:
                         devicenum_ber = int(parts[15])
                         tmp_c_deq_pkt_num_list[devicenum_ber] += 1
+                    
+                    if "Tx-DATA" in parts[9]:
+                        devicenum_ber = int(parts[17])
+                        if "1" == parts[3]:
+                            tmp_c_tx_pkt_num_list[devicenum_ber] += 1 
+
+                        if "2" == parts[3]:
+                            tmp_c_tx_pkt_num_list[devicenum_ber] += 1 
 
                     #coordinatorが受信機
                     if "RxFrame" in parts[9]:
@@ -659,6 +713,7 @@ def node_parse_trace_file(filepath, num_device):
                                 tmp_c_rx_pkt_num_list[1] += 1
                             else:
                                 tmp_c_rx_pkt_num_list[2] += 1
+                    
 
                 #device
                 if "DrIotMac" in parts[5] and parts[3]!= "1" and parts[3]!= "2":
@@ -673,6 +728,13 @@ def node_parse_trace_file(filepath, num_device):
                             tmp_d_deq_pkt_num_list[1] += 1
                         else:
                             tmp_d_deq_pkt_num_list[2] += 1
+                    
+                    if "Tx-DATA" in parts[9]:
+                        tmp_d_tx_pkt_num_list[devicenum_ber] += 1 
+                        if devicenum_ber in SENDER_ID_RANGE1:
+                            tmp_d_tx_pkt_num_list[1] += 1
+                        else:
+                            tmp_d_tx_pkt_num_list[2] += 1
 
                     if "RxFrame" in parts[9]: 
                         if "ACK" in parts[15]:
@@ -685,8 +747,10 @@ def node_parse_trace_file(filepath, num_device):
             else:
                 t += 1
                 c_deq_pkt_num_list += tmp_c_deq_pkt_num_list
+                c_tx_pkt_num_list += tmp_c_tx_pkt_num_list
                 c_rx_pkt_num_list += tmp_c_rx_pkt_num_list
                 d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
+                d_tx_pkt_num_list += tmp_d_tx_pkt_num_list
                 d_rx_pkt_num_list += tmp_d_rx_pkt_num_list
                 
                 safe_d_deq = np.where(tmp_d_deq_pkt_num_list == 0, 1, tmp_d_deq_pkt_num_list)
@@ -694,103 +758,56 @@ def node_parse_trace_file(filepath, num_device):
                 # 安全な分母で計算（0除算が発生しない）
                 tmp_up_data_pkt_per_list = np.where(tmp_d_deq_pkt_num_list > 0, 
                     np.round((tmp_d_deq_pkt_num_list - tmp_c_rx_pkt_num_list) / safe_d_deq, 3), 0.0)
-                
+                # print(tmp_up_data_pkt_per_list)
                 # --- 下り (Down) の計算 ---
                 # 同じく分母が0の場所を1に置き換える
                 safe_c_deq = np.where(tmp_c_deq_pkt_num_list == 0, 1, tmp_c_deq_pkt_num_list)
                 tmp_down_data_pkt_per_list = np.where(tmp_c_deq_pkt_num_list > 0, 
                     np.round((tmp_c_deq_pkt_num_list - tmp_d_rx_pkt_num_list) / safe_c_deq, 3), 0.0)
+                # print(tmp_down_data_pkt_per_list)
                 tmp_delta_per = tmp_down_data_pkt_per_list - tmp_up_data_pkt_per_list
-                #print(tmp_delta_per)
 
                 # 1. PANごとの範囲（インデックス）を定義
                 pan1_idx = np.arange(3, NUM_DEV_GROUP + 3)
-                pan2_idx = np.arange(NUM_DEV_GROUP + 3, NUM_DEV_GROUP + NUM_DEV_GROUP + 3)
-#----------------TAU---------------
-                # tau = 0.1
-                # current_outliers = np.zeros(size, dtype=bool)
-                # for idx_range in [pan1_idx, pan2_idx]:
-                #     # そのPANに属するデバイスのPERを抽出
-                #     pan_values = tmp_delta_per[idx_range]
-                #     #print(pan_values)
-                #     pan_outlier_mask = (pan_values > tau)     
-                #     #全体配列の該当するインデックスに結果を書き込む
-                #     current_outliers[idx_range] = pan_outlier_mask
-                    
-                # consecutive_interf_counter[current_outliers] += 1
-                # # 外れ値ではなかったデバイス：カウントをリセット（0に戻す）
-                # consecutive_interf_counter[~current_outliers] = 0
-                # #print(consecutive_interf_counter)
-                # newly_detected = (consecutive_interf_counter >=5)
-                # if newly_detected[pan1_idx].any():
-                #     pan1_interf_flag = 1
+                pan2_idx = np.arange(NUM_DEV_GROUP + 3, NUM_DEV_GROUP + NUM_DEV_GROUP + 3)                
 
-                # # 4. PAN2の範囲内に True が1つでもあるかチェック
-                # if newly_detected[pan2_idx].any():
-                #     pan2_interf_flag = 1
-
-#----------------TAU---------------
-
-#"-----------MAD------------"
                 # 今回のループで外れ値と判定されたデバイスを記録する一時的な配列
                 current_outliers = np.zeros(size, dtype=bool)
-                
-                for idx_range in [pan1_idx, pan2_idx]:
-                    # そのPANに属するデバイスのPERを抽出
-                    pan_values = tmp_delta_per[idx_range]
-                    
-                    # 0以外の値を抽出してMADを計算
-                    non_zero_values = pan_values[pan_values != 0]
-                    #print(non_zero_values)
-                    if len(non_zero_values) > 1:  # データが2つ以上あれば統計計算
-                        median = np.median(non_zero_values)
-                        mad = np.median(np.abs(non_zero_values - median))
-                        #print("median : ", median)
-                        #print("mad : ", mad)
-                        # σ相当のしきい値 (1.4826 * mad は標準偏差相当)
-                        #1.0→σ, 1.96→2σ, 3.0→3σ プラス方向だけ考える
-                        threshold = median + 3.0 * (1.4826 * mad)
+               
+                pan1_values = tmp_delta_per[pan1_idx]
+                #print(pan1_values)
+                pan_outlier_mask = (pan1_values > 0.0)    
+                current_outliers[pan1_idx] = pan_outlier_mask
                         
-                        # このPAN内での外れ値判定（PER > 0 かつ threshold超え）
-                        pan_outlier_mask = (pan_values > threshold)
-                        
-                        # 全体配列の該当するインデックスに結果を書き込む
-                        current_outliers[idx_range] = pan_outlier_mask
-                        
-                        #print("threshold : ", threshold)
                 # --- 2. 連続性の判定とフラグ処理 (デバイスごと) ---
-
                 # 外れ値だったデバイス：カウントを+1
                 consecutive_interf_counter[current_outliers] += 1
+                
                 #print(consecutive_interf_counter)
-                # 外れ値ではなかったデバイス：カウントをリセット（0に戻す）
-                consecutive_interf_counter[~current_outliers] = 0
-
-                #print(consecutive_interf_counter)
-                # カウントが3に達したデバイスの処理
-                # 3以上になったらフラグを立て、detect_interf_num_listを更新
+                # --- PAN1の判定：5回中3回アウトとなるデバイスが5台以上いるか ---
                 newly_detected = (consecutive_interf_counter >= 3)
-                if newly_detected[pan1_idx].any():
+                #print(newly_detected[pan1_idx].sum())
+                if newly_detected[pan1_idx].sum() > 5:
                     pan1_interf_flag = 1
-
-                # 4. PAN2の範囲内に True が1つでもあるかチェック
-                if newly_detected[pan2_idx].any():
-                    pan2_interf_flag = 1
-#"-----------MAD------------"       
      
                 tmp_c_deq_pkt_num_list = np.zeros(size)
+                tmp_c_tx_pkt_num_list = np.zeros(size)
                 tmp_c_rx_pkt_num_list = np.zeros(size)
                 tmp_d_deq_pkt_num_list = np.zeros(size)
+                tmp_d_tx_pkt_num_list = np.zeros(size)
                 tmp_d_rx_pkt_num_list = np.zeros(size)
+
         if pan1_interf_flag == 1:
             print("##########pan1#########")
-        if pan2_interf_flag == 1:
-            print("##########pan2#########")
+        
         c_deq_pkt_num_list += tmp_c_deq_pkt_num_list
+        c_tx_pkt_num_list += tmp_c_tx_pkt_num_list
         c_rx_pkt_num_list += tmp_c_rx_pkt_num_list
         d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
+        d_tx_pkt_num_list += tmp_d_tx_pkt_num_list
         d_rx_pkt_num_list += tmp_d_rx_pkt_num_list
-
+        
+        
         for device_id in range(size):
             if d_deq_pkt_num_list[device_id]  != 0 and c_deq_pkt_num_list[device_id] != 0:
                 up_data_pkt_per_list[device_id] =  round((d_deq_pkt_num_list[device_id] - c_rx_pkt_num_list[device_id])/d_deq_pkt_num_list[device_id],3)
@@ -803,7 +820,7 @@ def node_parse_trace_file(filepath, num_device):
             # print(device_receive_list)
         # print(d_rssi_ave_list)
             # print("------------------")
-    return up_data_pkt_per_list, down_data_pkt_per_list, d_rssi_ave_list
+    return up_data_pkt_per_list, down_data_pkt_per_list, d_rssi_ave_list, pan1_interf_flag
 
 def plot_roc_diff_curves(results ,dist_mesure, filename, pan2_val=pan2_offload_max):
 
