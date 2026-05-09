@@ -114,7 +114,7 @@ def main():
 
                 # Data container for all runs
                 values= run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS)
-                interf_scenario_num.append(sum(values["interf_flag"].values()))
+                interf_scenario_num.append(values["interf_flag"].values())
 
                 #求めた距離ごとのノードの平均を二次元平面上にプロット
                 offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
@@ -190,27 +190,36 @@ def main():
         plot_roc_diff_curves(results, dist, f"{pan2_offload_max}_ROC_diff_curve{dist}.pdf")
         plot_roc_rssi_curves(results, dist, f"{pan2_offload_max}_ROC_rssi_curve{dist}.pdf") 
     
+
+    
+    data = [list(d) for d in interf_scenario_num]
+    print(data)
     total_scenarios = 1  # seed数
-
-    # 前半10個がTP、後半10個がFP
-    tp_array = interf_scenario_num[:10]  # 干渉あり→干渉ありと判断
-    fp_array = interf_scenario_num[10:]  # 干渉なし→干渉ありと判断
-
     loads = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
-    for i, load in enumerate(loads):
-        tp = tp_array[i]
-        fp = fp_array[i]
-        fn = total_scenarios - tp
-        tn = total_scenarios - fp
+    # 前半10個が干渉あり、後半10個が干渉なし
+    interf_data    = data[:10]   # 干渉ありシナリオ
+    no_interf_data = data[10:]   # 干渉なしシナリオ
 
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall    = tp / (tp + fn) if (tp + fn) > 0 else 0
-        fpr       = fp / (fp + tn) if (fp + tn) > 0 else 0
-        f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+    # 閾値（何台以上で干渉ありと判定するか）
+    for threshold in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
+        print(f"\n--- {threshold}devices ---")
+        for i, load in enumerate(loads):
+            # 干渉ありシナリオ: デバイス数>=thresholdならTP
+            tp = sum(1 for v in interf_data[i] if v >= threshold)
+            # 干渉なしシナリオ: デバイス数>=thresholdならFP
+            fp = sum(1 for v in no_interf_data[i] if v >= threshold)
+            
+            fn = total_scenarios - tp
+            tn = total_scenarios - fp
 
-        print(f"Load {int(load*100)}%: TP={tp}, FP={fp}, FN={fn}, TN={tn}, "
-            f"Precision={precision:.3f}, Recall={recall:.3f}, FPR={fpr:.3f}, F1={f1:.3f}")
+            precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+            recall    = tp / (tp + fn) if (tp + fn) > 0 else 0
+            fpr       = fp / (fp + tn) if (fp + tn) > 0 else 0
+            f1        = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+
+            print(f"Load {int(load*100)}%: TP={tp}, FP={fp}, FN={fn}, TN={tn}, "
+                f"Precision={precision:.3f}, Recall={recall:.3f}, FPR={fpr:.3f}, F1={f1:.3f}")
         
 def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_dir):
     # この関数の中に、実行したいプロット処理をすべて詰め込む
@@ -677,7 +686,7 @@ def node_parse_trace_file(filepath, num_device):
 
     with open(filepath, "r") as f:
         t = 1
-        pan1_interf_flag = 0
+        pan1_interf_num = 0
         pan2_interf_flag = 0
         for line in f:
             parts = line.split()
@@ -776,19 +785,16 @@ def node_parse_trace_file(filepath, num_device):
                
                 pan1_values = tmp_delta_per[pan1_idx]
                 #print(pan1_values)
+                #print(pan1_values)
                 pan_outlier_mask = (pan1_values > 0.0)    
                 current_outliers[pan1_idx] = pan_outlier_mask
-                        
+                       
                 # --- 2. 連続性の判定とフラグ処理 (デバイスごと) ---
                 # 外れ値だったデバイス：カウントを+1
                 consecutive_interf_counter[current_outliers] += 1
-                
+                #print(consecutive_interf_counter)
                 #print(consecutive_interf_counter)
                 # --- PAN1の判定：5回中3回アウトとなるデバイスが5台以上いるか ---
-                newly_detected = (consecutive_interf_counter >= 3)
-                #print(newly_detected[pan1_idx].sum())
-                if newly_detected[pan1_idx].sum() > 5:
-                    pan1_interf_flag = 1
      
                 tmp_c_deq_pkt_num_list = np.zeros(size)
                 tmp_c_tx_pkt_num_list = np.zeros(size)
@@ -796,9 +802,8 @@ def node_parse_trace_file(filepath, num_device):
                 tmp_d_deq_pkt_num_list = np.zeros(size)
                 tmp_d_tx_pkt_num_list = np.zeros(size)
                 tmp_d_rx_pkt_num_list = np.zeros(size)
-
-        if pan1_interf_flag == 1:
-            print("##########pan1#########")
+        newly_detected = (consecutive_interf_counter >= 3)
+        pan1_interf_num = int(newly_detected[pan1_idx].sum())
         
         c_deq_pkt_num_list += tmp_c_deq_pkt_num_list
         c_tx_pkt_num_list += tmp_c_tx_pkt_num_list
@@ -820,7 +825,7 @@ def node_parse_trace_file(filepath, num_device):
             # print(device_receive_list)
         # print(d_rssi_ave_list)
             # print("------------------")
-    return up_data_pkt_per_list, down_data_pkt_per_list, d_rssi_ave_list, pan1_interf_flag
+    return up_data_pkt_per_list, down_data_pkt_per_list, d_rssi_ave_list, pan1_interf_num
 
 def plot_roc_diff_curves(results ,dist_mesure, filename, pan2_val=pan2_offload_max):
 
