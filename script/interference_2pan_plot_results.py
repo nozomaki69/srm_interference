@@ -37,7 +37,7 @@ pan1_offload_min = 0.1
 pan1_offload_max = 1.1
 pan2_offload_min = 0.7
 pan2_offload_max = 1.0
-WINDOW_SIZE = 100
+WINDOW_SIZE = 50
 NUM_COORD = 2
 NUM_DEV_GROUP = 50 # 各グループのデバイス数
 C1_DEV_RANGE = range(NUM_COORD + 1, NUM_COORD + NUM_DEV_GROUP + 1)  # 3 ~ 14
@@ -62,8 +62,8 @@ def main():
         "pan2_ratio" : {},
         "distance_pan1"  : {},
         "distance_pan2"  : {},
-        "pan1_device_rssi": {},
-        "pan2_device_rssi": {},
+        "pan1_c_rssi": {},
+        "pan2_c_rssi": {},
     }
     interf_scenario_num = []
     for prefix_name in FILE_PREFIXES:
@@ -118,25 +118,11 @@ def main():
 
                 #求めた距離ごとのノードの平均を二次元平面上にプロット
                 offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
-                results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], results["pan1_device_rssi"][offload], results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload], results["pan2_device_rssi"][offload] = run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS)
-                # results["pan1_ratio"][offload] = np.array(results["down_per_all_pan1"][offload])/np.array(results["up_per_all_pan1"][offload])
-                # results["pan2_ratio"][offload] = np.array(results["down_per_all_pan2"][offload])/np.array(results["up_per_all_pan2"][offload])
+                results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], results["pan1_c_rssi"][offload], results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload], results["pan2_c_rssi"][offload] = run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS)
+                #print(results["pan1_c_rssi"][offload])
                 results["pan1_diff"][offload] = np.array(results["down_per_all_pan1"][offload]) - np.array(results["up_per_all_pan1"][offload])
                 results["pan2_diff"][offload] = np.array(results["down_per_all_pan2"][offload]) - np.array(results["up_per_all_pan2"][offload])
-                results["pan1_ratio"][offload] = np.divide(
-                    np.array(results["down_per_all_pan1"][offload]),
-                    np.array(results["up_per_all_pan1"][offload]),
-                    out=np.zeros_like(np.array(results["up_per_all_pan1"][offload]), dtype=float),
-                    where=np.array(results["up_per_all_pan1"][offload]) != 0
-                )
-                
-                results["pan2_ratio"][offload] = np.divide(
-                    np.array(results["down_per_all_pan2"][offload]),
-                    np.array(results["up_per_all_pan2"][offload]),
-                    out=np.zeros_like(np.array(results["up_per_all_pan2"][offload]), dtype=float),
-                    where=np.array(results["up_per_all_pan2"][offload]) != 0
-                )
-                print(f"{offload} finish")
+                #print(results["pan1_c_rssi"][offload])
     for prefix_name in FILE_PREFIXES:            
         base_plot_dir = "plots"            
         
@@ -157,7 +143,6 @@ def main():
                             f"pan1_{off_load_pan1}_pan2_{off_load_pan2}"
                         )
                     executor.submit(generate_all_plots, results, prefix_name, off_load_pan1, off_load_pan2, plot_dir)
-
         
     # for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
     off_load_pan2 = np.round(pan2_offload_max, 1)
@@ -180,21 +165,21 @@ def main():
             #                      results["pan2_device_rssi"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
             #                      f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_rssi.pdf")     
             
-    dist_list = [1000]
-    for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
-        for dist in dist_list:
-            plot_roc_diff_curve(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_{pan2_offload_max}_ROC_curve{dist}.pdf")
-            plot_roc_rssi_curve(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_{pan2_offload_max}_ROC_rssi_curve{dist}.pdf")
+    # dist_list = [1000]
+    # for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
+    #     for dist in dist_list:
+    #         plot_roc_diff_curve(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_{pan2_offload_max}_ROC_curve{dist}.pdf")
+    #         plot_roc_rssi_curve(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_{pan2_offload_max}_ROC_rssi_curve{dist}.pdf")
 
-    for dist in dist_list:
-        plot_roc_diff_curves(results, dist, f"{pan2_offload_max}_ROC_diff_curve{dist}.pdf")
-        plot_roc_rssi_curves(results, dist, f"{pan2_offload_max}_ROC_rssi_curve{dist}.pdf") 
+    # for dist in dist_list:
+    #     plot_roc_diff_curves(results, dist, f"{pan2_offload_max}_ROC_diff_curve{dist}.pdf")
+    #     plot_roc_rssi_curves(results, dist, f"{pan2_offload_max}_ROC_rssi_curve{dist}.pdf") 
     
 
     
     data = [list(d) for d in interf_scenario_num]
-    print(data)
-    total_scenarios = 1  # seed数
+    #print(data)
+    total_scenarios = 100  # seed数
     loads = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
     # 前半10個が干渉あり、後半10個が干渉なし
@@ -202,7 +187,7 @@ def main():
     no_interf_data = data[10:]   # 干渉なしシナリオ
 
     # 閾値（何台以上で干渉ありと判定するか）
-    for threshold in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
+    for threshold in [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1]:
         print(f"\n--- {threshold}devices ---")
         for i, load in enumerate(loads):
             # 干渉ありシナリオ: デバイス数>=thresholdならTP
@@ -225,16 +210,17 @@ def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_
     # この関数の中に、実行したいプロット処理をすべて詰め込む
     offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
     
-    # 1. 個別のプロット
+    # 1. 個別のプロッ
     plot_distance_vs_per(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], f"pan1_up_scatter_{offload}.pdf", "blue", "UpLink", plot_dir)
     plot_distance_vs_per(results["distance_pan1"][offload], results["down_per_all_pan1"][offload], f"pan1_down_scatter_{offload}.pdf", "red", "DownLink", plot_dir)
-
     plot_distance_vs_per_up_down(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], f"pan1_up_and_down_per_scatter_{offload}.pdf", plot_dir)
     
     plot_distance_vs_per(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], f"pan2_up_scatter_{offload}.pdf", "blue", "UpLink", plot_dir)
     plot_distance_vs_per(results["distance_pan2"][offload], results["down_per_all_pan2"][offload], f"pan2_down_scatter_{offload}.pdf", "red", "DownLink", plot_dir)
     plot_distance_vs_per_up_down(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload], f"pan2_up_and_down_per_scatter_{offload}.pdf", plot_dir)
-    
+    plot_delta_per_analysis(results["pan1_diff"][offload], results["pan1_c_rssi"][offload], f"pan1_box_{offload}.pdf", plot_dir)
+    plot_variance_distribution_boxplot(results["pan1_diff"][offload], results["pan1_c_rssi"][offload], f"pan1_s_{offload}.pdf", plot_dir)
+
     # 2. エラーバー付きのプロット
     plot_distance_vs_per_errorbar(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], 
                                   results["distance_pan1"][offload], results["down_per_all_pan1"][offload], 
@@ -244,7 +230,128 @@ def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_
                                   results["distance_pan2"][offload], results["down_per_all_pan2"][offload], 
                                   f"pan2_errorbar_{offload}.pdf", plot_dir)
 
+def plot_variance_distribution_boxplot(delta_per, rssi_list, filename, plot_dir):
+    # 1. 1次元配列に平坦化
+    rssi_list = np.array(rssi_list).flatten()
+    delta_per = np.array(delta_per).flatten()
+    
+    # seedごとの要素数（50個）
+    NUM_DEV_GROUP = 50
+    num_seeds = len(rssi_list) // NUM_DEV_GROUP
+    
+    # RSSIの境界設定
+    bins = np.arange(0, -121, -10)
+    
+    # 各RSSIビンごとに、各seedの分散値を格納するリストのリスト
+    # 例: variances_per_bin[0] = [seed0の0~-10の分散, seed1の0~-10の分散, ...]
+    variances_per_bin = [[] for _ in range(len(bins) - 1)]
+    bin_labels = [f"[{bins[i]}, {bins[i+1]})" for i in range(len(bins) - 1)]
+    
+    # 2. Seedごとにループを回して分散を計算
+    for s in range(num_seeds):
+        start_idx = s * NUM_DEV_GROUP
+        end_idx = (s + 1) * NUM_DEV_GROUP
+        
+        rssi_seed = rssi_list[start_idx:end_idx]
+        delta_seed = delta_per[start_idx:end_idx]
+        
+        # 0(無効データ)を除外
+        valid = rssi_seed != 0
+        r_v = rssi_seed[valid]
+        d_v = delta_seed[valid]
+        
+        for b in range(len(bins) - 1):
+            upper = bins[b]
+            lower = bins[b+1]
+            
+            # このseed内で、このRSSI区間に属するデータを抽出
+            mask = (r_v > lower) & (r_v <= upper)
+            bin_values = d_v[mask]
+            
+            # データが一定数（例えば2個以上）ある場合のみ分散を計算
+            if len(bin_values) > 1:
+                var_val = np.var(bin_values)
+                variances_per_bin[b].append(var_val)
 
+    # --- グラフ描画 ---
+    fig, ax = plt.subplots(figsize=(10, 10))
+    ax.tick_params(axis="both", labelsize=FONT_SIZE-20, width=3.0, which="major", length=20)
+    # データが存在する（1つ以上のseedで分散が計算できた）ビンのみ抽出
+    plot_data = []
+    plot_labels = []
+    for data, label in zip(variances_per_bin, bin_labels):
+        if len(data) > 0:
+            plot_data.append(data)
+            plot_labels.append(label)
+            
+    if plot_data:
+        plt.boxplot(plot_data, labels=plot_labels)
+    
+    # y軸は分散なので 0 以上。範囲はデータの最大値に合わせるか、固定する
+    plt.ylim(0, 0.2) # 分散の最大値に合わせて調整してください
+
+    # --- 保存処理 ---
+    os.makedirs(plot_dir, exist_ok=True)
+    output_path = os.path.join(plot_dir, filename)
+    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
+    plt.close()
+
+def plot_delta_per_analysis(delta_per, rssi_list, filename, plot_dir):
+    
+    # 2. RSSIが0のデータを除外
+    rssi_list = np.array(rssi_list).flatten()
+    delta_per = np.array(delta_per).flatten()
+    valid_mask = rssi_list != 0
+    delta_per_filtered = delta_per[valid_mask]
+    rssi_filtered = rssi_list[valid_mask]
+    # print(delta_per_filtered)
+    # print(rssi_filtered)
+    # 3. 0から-120まで10dBm刻みの境界
+    bins = np.arange(-50, -111, -10)
+    bin_data_list = []
+    labels = []
+    
+    for i in range(len(bins) - 1):
+        upper = bins[i]
+        lower = bins[i+1]
+        in_bin_mask = (rssi_filtered > lower) & (rssi_filtered <= upper)
+        bin_data = delta_per_filtered[in_bin_mask]
+        
+        # グラフのX軸ラベル（例: -100 to -90）
+        # ※ 数値を見やすくするため、小さい順（lower to upper）にしています
+        label = f"[{upper}, {lower})"
+        labels.append(label)
+        
+        if len(bin_data) > 0:
+            bin_data_list.append(bin_data)
+        else:
+            bin_data_list.append([])
+
+    # --- グラフ描画 ---
+    fig, ax = plt.subplots(figsize=(10, 10))
+    
+    # データが存在する区間のみプロット対象にする
+    plot_indices = [i for i, d in enumerate(bin_data_list) if len(d) > 0]
+    # フォントサイズの一括設定
+    ax.tick_params(axis="both", labelsize=FONT_SIZE-20, width=3.0, which="major", length=20)
+
+
+    # 軸のフォーマット（ax.gca()を使わずに直接 ax を指定）
+    ax.xaxis.set_major_formatter(mtick.StrMethodFormatter('{x:,.0f}'))
+    ax.xaxis.set_major_locator(mtick.MultipleLocator(1000))
+    if plot_indices:
+        plt.boxplot([bin_data_list[i] for i in plot_indices], 
+                    labels=[labels[i] for i in plot_indices])
+    plt.ylim(-1.0, 1.0)
+    # グラフの体裁を整える
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    # plt.xticks(rotation=30) # ラベルの重なり防止
+
+    # --- 保存処理 ---
+    os.makedirs(plot_dir, exist_ok=True)
+    output_path = os.path.join(plot_dir, filename)
+    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
+    plt.close()
 
 def plot_distance_vs_per_lowess(
     distance,
@@ -332,14 +439,14 @@ def process_single_trace(filename, prefix_name, STATS_DIR, NUM_DEV_GROUP):
     filepath = os.path.join(STATS_DIR, filename)
     
     # 重い解析処理を実行
-    up_data_pdr_list, down_data_pdr_list, device_rssi_ave_list, interf_flag = node_parse_trace_file(filepath, NUM_DEV_GROUP)
+    up_data_pdr_list, down_data_pdr_list, c_rssi_ave_list, interf_flag = node_parse_trace_file(filepath, NUM_DEV_GROUP)
     
     # seed値と一緒に結果を返す
     return {
         "seed": seed,
         "up": up_data_pdr_list,
         "down": down_data_pdr_list,
-        "device_rssi": device_rssi_ave_list,
+        "c_rssi": c_rssi_ave_list,
         "interf_flag": interf_flag
     }
 
@@ -348,7 +455,7 @@ def run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MA
     values = {
         "up_data_pdr_list": {},
         "down_data_pdr_list": {},
-        "device_rssi_ave_list": {},
+        "c_rssi_ave_list": {},
         "interf_flag": {}
     }
 
@@ -365,7 +472,7 @@ def run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MA
                 seed = res["seed"]
                 values["up_data_pdr_list"][seed] = res["up"]
                 values["down_data_pdr_list"][seed] = res["down"]
-                values["device_rssi_ave_list"][seed] = res["device_rssi"]
+                values["c_rssi_ave_list"][seed] = res["c_rssi"]
                 values["interf_flag"][seed] = res["interf_flag"]
     return values
 
@@ -379,8 +486,8 @@ def process_single_pos(filename, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE
     
     # このファイル（seed）での計算結果を一時的に保存するリスト
     tmp_res = {
-        "dist1": [], "up1": [], "down1": [], "pan1_device_rssi": [],
-        "dist2": [], "up2": [], "down2": [], "pan2_device_rssi": []
+        "dist1": [], "up1": [], "down1": [], "pan1_c_rssi": [],
+        "dist2": [], "up2": [], "down2": [], "pan2_c_rssi": []
     }
     #ここでpan1とpan2を両方同じリストで管理していたものを分ける
     # PAN1の計算
@@ -389,7 +496,7 @@ def process_single_pos(filename, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE
         tmp_res["dist1"].append(d)
         tmp_res["up1"].append(values["up_data_pdr_list"][seed][device_id])
         tmp_res["down1"].append(values["down_data_pdr_list"][seed][device_id])
-        tmp_res["pan1_device_rssi"].append(values["device_rssi_ave_list"][seed][device_id])
+        tmp_res["pan1_c_rssi"].append(values["c_rssi_ave_list"][seed][device_id])
 
     # PAN2の計算
     for device_id in C2_DEV_RANGE:
@@ -397,7 +504,7 @@ def process_single_pos(filename, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE
         tmp_res["dist2"].append(d)
         tmp_res["up2"].append(values["up_data_pdr_list"][seed][device_id])
         tmp_res["down2"].append(values["down_data_pdr_list"][seed][device_id])
-        tmp_res["pan2_device_rssi"].append(values["device_rssi_ave_list"][seed][device_id])
+        tmp_res["pan2_c_rssi"].append(values["c_rssi_ave_list"][seed][device_id])
     return tmp_res
 
 def run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS):
@@ -426,11 +533,11 @@ def run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE,
                 distance_to_interference_pan1.extend(res["dist1"])
                 up_per_all_pan1.extend(res["up1"])
                 down_per_all_pan1.extend(res["down1"])
-                pan1_device_rssi.extend(res["pan1_device_rssi"])
+                pan1_device_rssi.extend(res["pan1_c_rssi"])
                 distance_to_interference_pan2.extend(res["dist2"])
                 up_per_all_pan2.extend(res["up2"])
                 down_per_all_pan2.extend(res["down2"])
-                pan2_device_rssi.extend(res["pan2_device_rssi"])
+                pan2_device_rssi.extend(res["pan2_c_rssi"])
 
     return (distance_to_interference_pan1, up_per_all_pan1, down_per_all_pan1, pan1_device_rssi,
             distance_to_interference_pan2, up_per_all_pan2, down_per_all_pan2, pan2_device_rssi)
@@ -678,6 +785,10 @@ def node_parse_trace_file(filepath, num_device):
 
     delta_per = np.zeros(size)
     d_rssi_sum_list    = np.zeros(size)
+    c_rssi_sum_list    = np.zeros(size)
+    tmp_c_rssi_sum_list    = np.zeros(size)
+    c_rssi_ave_list    = np.zeros(size)
+    tmp_c_rssi_ave_list    = np.zeros(size)
     d_rssi_ave_list    = np.zeros(size)
     detect_interf_num_list  = np.zeros(size)
     consecutive_interf_counter = np.zeros(size)  # 連続カウント用
@@ -688,6 +799,8 @@ def node_parse_trace_file(filepath, num_device):
         t = 1
         pan1_interf_num = 0
         pan2_interf_flag = 0
+        max_variance = -1.0
+        max_variance_label = None
         for line in f:
             parts = line.split()
 
@@ -717,7 +830,7 @@ def node_parse_trace_file(filepath, num_device):
                         devicenum_ber = int(pkt_id.split('_')[0])
                         if "Data" in parts[15]:
                             tmp_c_rx_pkt_num_list[devicenum_ber] += 1
-
+                            tmp_c_rssi_sum_list[devicenum_ber] += float(parts[19])
                             if devicenum_ber in SENDER_ID_RANGE1:
                                 tmp_c_rx_pkt_num_list[1] += 1
                             else:
@@ -761,6 +874,7 @@ def node_parse_trace_file(filepath, num_device):
                 d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
                 d_tx_pkt_num_list += tmp_d_tx_pkt_num_list
                 d_rx_pkt_num_list += tmp_d_rx_pkt_num_list
+                c_rssi_sum_list += tmp_c_rssi_sum_list
                 
                 safe_d_deq = np.where(tmp_d_deq_pkt_num_list == 0, 1, tmp_d_deq_pkt_num_list)
 
@@ -775,35 +889,57 @@ def node_parse_trace_file(filepath, num_device):
                     np.round((tmp_c_deq_pkt_num_list - tmp_d_rx_pkt_num_list) / safe_c_deq, 3), 0.0)
                 # print(tmp_down_data_pkt_per_list)
                 tmp_delta_per = tmp_down_data_pkt_per_list - tmp_up_data_pkt_per_list
-
-                # 1. PANごとの範囲（インデックス）を定義
-                pan1_idx = np.arange(3, NUM_DEV_GROUP + 3)
-                pan2_idx = np.arange(NUM_DEV_GROUP + 3, NUM_DEV_GROUP + NUM_DEV_GROUP + 3)                
-
-                # 今回のループで外れ値と判定されたデバイスを記録する一時的な配列
-                current_outliers = np.zeros(size, dtype=bool)
-               
-                pan1_values = tmp_delta_per[pan1_idx]
-                #print(pan1_values)
-                #print(pan1_values)
-                pan_outlier_mask = (pan1_values > 0.0)    
-                current_outliers[pan1_idx] = pan_outlier_mask
-                       
-                # --- 2. 連続性の判定とフラグ処理 (デバイスごと) ---
-                # 外れ値だったデバイス：カウントを+1
-                consecutive_interf_counter[current_outliers] += 1
-                #print(consecutive_interf_counter)
-                #print(consecutive_interf_counter)
-                # --- PAN1の判定：5回中3回アウトとなるデバイスが5台以上いるか ---
-     
+                #print(len(tmp_delta_per))
+                tmp_c_rssi_ave_list = np.where(tmp_c_rx_pkt_num_list > 0, np.round(tmp_c_rssi_sum_list/tmp_c_rx_pkt_num_list, 1), 0.0)
+                #print(len(tmp_c_rssi_ave_list))
+                
+                # 1. 配列番号3〜52番目のみを抽出
+                # スライス [3:53] はインデックス3から52まで（計50要素）を意味します
+                delta_per_sliced = np.array(tmp_delta_per)[3:53]
+                rssi_sliced = np.array(tmp_c_rssi_ave_list)[3:53]
+                
+                # 2. RSSIが0のデータを除外するマスクを作成
+                valid_mask = rssi_sliced != 0
+                delta_per_filtered = delta_per_sliced[valid_mask]
+                rssi_filtered = rssi_sliced[valid_mask]
+                
+                # 3. 0から-120まで10dBm刻みの境界を定義 (0, -10, ..., -120)
+                bins = np.arange(-40, -110, -5)
+                
+                results = {}
+                
+                # 4. 各区間ごとにループを回して分散を計算
+                for i in range(len(bins) - 1):
+                    upper = bins[i]    # 例: 0
+                    lower = bins[i+1]  # 例: -10
+                    
+                    # 区間内のデータを抽出 (lower < rssi <= upper)
+                    in_bin_mask = (rssi_filtered > lower) & (rssi_filtered <= upper)
+                    bin_data = delta_per_filtered[in_bin_mask]
+                    
+                    # 5. データが存在する場合のみ分散を計算
+                    if len(bin_data) > 0:
+                        # データが1つだけだと分散は0になります
+                        variance = np.round(np.var(bin_data),4)
+                        count = len(bin_data)
+                        if variance > max_variance:
+                            max_variance = variance
+                    else:
+                        variance = None
+                        count = 0
+                        
+                    label = f"{upper}"
+                    results[label] = {"variance": variance, "count": count}
+                
                 tmp_c_deq_pkt_num_list = np.zeros(size)
                 tmp_c_tx_pkt_num_list = np.zeros(size)
                 tmp_c_rx_pkt_num_list = np.zeros(size)
                 tmp_d_deq_pkt_num_list = np.zeros(size)
                 tmp_d_tx_pkt_num_list = np.zeros(size)
                 tmp_d_rx_pkt_num_list = np.zeros(size)
-        newly_detected = (consecutive_interf_counter >= 3)
-        pan1_interf_num = int(newly_detected[pan1_idx].sum())
+                tmp_c_rssi_sum_list = np.zeros(size)
+        
+        pan1_interf_num = max_variance
         
         c_deq_pkt_num_list += tmp_c_deq_pkt_num_list
         c_tx_pkt_num_list += tmp_c_tx_pkt_num_list
@@ -811,21 +947,18 @@ def node_parse_trace_file(filepath, num_device):
         d_deq_pkt_num_list += tmp_d_deq_pkt_num_list
         d_tx_pkt_num_list += tmp_d_tx_pkt_num_list
         d_rx_pkt_num_list += tmp_d_rx_pkt_num_list
+        c_rssi_sum_list += tmp_c_rssi_sum_list
         
         
         for device_id in range(size):
             if d_deq_pkt_num_list[device_id]  != 0 and c_deq_pkt_num_list[device_id] != 0:
                 up_data_pkt_per_list[device_id] =  round((d_deq_pkt_num_list[device_id] - c_rx_pkt_num_list[device_id])/d_deq_pkt_num_list[device_id],3)
                 down_data_pkt_per_list[device_id] =  round((c_deq_pkt_num_list[device_id] - d_rx_pkt_num_list[device_id])/c_deq_pkt_num_list[device_id],3)
-            if d_rx_pkt_num_list[device_id] != 0:
-                d_rssi_ave_list[device_id] = round(d_rssi_sum_list[device_id] / d_rx_pkt_num_list[device_id], 3)
+        np.seterr(divide='ignore', invalid='ignore')
+        c_rssi_ave_list = np.where(c_rx_pkt_num_list > 0, np.round(c_rssi_sum_list/c_rx_pkt_num_list, 1), 0)
 
-            # print("------------------")
-        # print(d_rssi_sum_list)
-            # print(device_receive_list)
-        # print(d_rssi_ave_list)
-            # print("------------------")
-    return up_data_pkt_per_list, down_data_pkt_per_list, d_rssi_ave_list, pan1_interf_num
+
+    return up_data_pkt_per_list, down_data_pkt_per_list, c_rssi_ave_list, pan1_interf_num
 
 def plot_roc_diff_curves(results ,dist_mesure, filename, pan2_val=pan2_offload_max):
 
