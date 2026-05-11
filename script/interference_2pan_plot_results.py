@@ -288,8 +288,8 @@ def plot_variance_distribution_boxplot(delta_per, rssi_list, filename, plot_dir)
         plt.boxplot(plot_data, labels=plot_labels)
     
     # y軸は分散なので 0 以上。範囲はデータの最大値に合わせるか、固定する
-    plt.ylim(0, 0.2) # 分散の最大値に合わせて調整してください
-
+    plt.ylim(0, 0.3) # 分散の最大値に合わせて調整してください
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     # --- 保存処理 ---
     os.makedirs(plot_dir, exist_ok=True)
     output_path = os.path.join(plot_dir, filename)
