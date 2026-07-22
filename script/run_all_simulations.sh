@@ -33,7 +33,7 @@ echo "--------------------------------------------------"
 # -n 1: 一度に1つの引数（ファイル名）をコマンドに渡す
 # --no-run-if-empty: 入力がない場合はコマンドを実行しない
 # ./sim: 実行するシミュレーションコマンド
-ls -1 *.config | sort | xargs -P 7 -n 1 /opt/scenargie_simulator/source/driot/sim
+ls -1 *.config | sort | xargs -P $CORES -n 1 /opt/scenargie_simulator/source/driot/sim
 
 echo "--------------------------------------------------"
 echo "全てのシミュレーションが完了しました。"
