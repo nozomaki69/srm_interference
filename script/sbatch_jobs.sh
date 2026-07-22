@@ -32,7 +32,11 @@ count=0
 
 for config in "${configs[@]}"; do
   echo "Submitting: $config"
+<<<<<<< HEAD
   sbatch --partition="ubuntu" --job-name="$JOB_NAME" "$SCRIPT_DIR/run_one_sim.slurm.sh" "$(realpath "$config")"
+=======
+  sbatch --partition=ubuntu --job-name="$JOB_NAME" "$SCRIPT_DIR/run_one_sim.slurm.sh" "$(realpath "$config")"
+>>>>>>> 3df9b3284d3397f013c998960b60a8fa03560384
   count=$((count + 1))
 done
 

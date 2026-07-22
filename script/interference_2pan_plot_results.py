@@ -37,7 +37,7 @@ pan1_offload_min = 0.1
 pan1_offload_max = 1.1
 pan2_offload_min = 0.7
 pan2_offload_max = 1.0
-WINDOW_SIZE = 50
+WINDOW_SIZE = 150
 NUM_COORD = 2
 NUM_DEV_GROUP = 50 # 各グループのデバイス数
 C1_DEV_RANGE = range(NUM_COORD + 1, NUM_COORD + NUM_DEV_GROUP + 1)  # 3 ~ 14
@@ -288,8 +288,8 @@ def plot_variance_distribution_boxplot(delta_per, rssi_list, filename, plot_dir)
         plt.boxplot(plot_data, labels=plot_labels)
     
     # y軸は分散なので 0 以上。範囲はデータの最大値に合わせるか、固定する
-    plt.ylim(0, 0.2) # 分散の最大値に合わせて調整してください
-
+    plt.ylim(0, 0.4) # 分散の最大値に合わせて調整してください
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
     # --- 保存処理 ---
     os.makedirs(plot_dir, exist_ok=True)
     output_path = os.path.join(plot_dir, filename)
