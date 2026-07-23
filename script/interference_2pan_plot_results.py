@@ -35,11 +35,11 @@ FILE_PREFIXES = ["interf", "no_interf"]
 
 pan1_offload_min = 0.1
 pan1_offload_max = 1.1
-pan2_offload_min = 0.7
-pan2_offload_max = 1.0
-WINDOW_SIZE = 150
+pan2_offload_min = 0.1
+pan2_offload_max = 0.3
+WINDOW_SIZE = 100
 NUM_COORD = 2
-NUM_DEV_GROUP = 50 # 各グループのデバイス数
+NUM_DEV_GROUP = 10 # 各グループのデバイス数
 C1_DEV_RANGE = range(NUM_COORD + 1, NUM_COORD + NUM_DEV_GROUP + 1)  # 3 ~ 14
 C2_DEV_RANGE = range(NUM_COORD + NUM_DEV_GROUP + 1, NUM_COORD + (2 * NUM_DEV_GROUP) + 1) # 15 ~ 26
 BW1_kHZ = 150.0
@@ -64,6 +64,8 @@ def main():
         "distance_pan2"  : {},
         "pan1_c_rssi": {},
         "pan2_c_rssi": {},
+        "pan1_dispersion": {},
+        "pan2_dispersion": {},
     }
     interf_scenario_num = []
     for prefix_name in FILE_PREFIXES:
@@ -73,62 +75,60 @@ def main():
         print("--- Starting Result Aggregation and Plotting ---")
 
 
-        # for off_load_pan2 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
-        off_load_pan2 = np.round(pan2_offload_max, 1)
-        for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
-                print("start off_load_pan1/pan2:", off_load_pan1,"/",off_load_pan2)
+        for off_load_pan2 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+            for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
+                    print("start off_load_pan1/pan2:", off_load_pan1,"/",off_load_pan2)
 
-                if not os.path.isdir(STATS_DIR):
-                    print(
-                        f"Error: Statistics directory not found at '{STATS_DIR}'", file=sys.stderr
-                    )
-                    sys.exit(1)
+                    if not os.path.isdir(STATS_DIR):
+                        print(
+                            f"Error: Statistics directory not found at '{STATS_DIR}'", file=sys.stderr
+                        )
+                        sys.exit(1)
 
-                # Find all .stat files
-                stat_files = [f for f in os.listdir(STATS_DIR)
-                                if f.endswith(".stat")
-                                and f.startswith(prefix_name)
-                                and f"pan2_{off_load_pan2}" in f
-                                and f"pan1_{off_load_pan1}" in f
-                                ]
+                    # Find all .stat files
+                    stat_files = [f for f in os.listdir(STATS_DIR)
+                                    if f.endswith(".stat")
+                                    and f.startswith(prefix_name)
+                                    and f"pan2_{off_load_pan2}" in f
+                                    and f"pan1_{off_load_pan1}" in f
+                                    ]
+                    trace_files = [f for f in os.listdir(STATS_DIR)
+                                    if f.endswith(".trace")
+                                    and f.startswith(prefix_name)
+                                    and f"pan2_{off_load_pan2}" in f
+                                    and f"pan1_{off_load_pan1}" in f
+                                    ]
+                    pos_files = [f for f in os.listdir(STATS_DIR)
+                                    if f.endswith(".pos")
+                                    and f.startswith(prefix_name)
+                                    and f"pan2_{off_load_pan2}" in f
+                                    and f"pan1_{off_load_pan1}" in f
+                                    ]
+                    if not (stat_files or trace_files or pos_files):
+                        print("Warning: No .stat, .trace, or _seed0.pos files found. Nothing to plot.", file=sys.stderr)
+                        return
+                    
+                    print(f"Found {len(stat_files)} stat files to process.")
+                    print(f"Found {len(trace_files)} trace files to process.")
+                    print(f"Found {len(pos_files)} pos files to process.")
 
-                trace_files = [f for f in os.listdir(STATS_DIR)
-                                if f.endswith(".trace")
-                                and f.startswith(prefix_name)
-                                and f"pan2_{off_load_pan2}" in f
-                                and f"pan1_{off_load_pan1}" in f
-                                ]
-                pos_files = [f for f in os.listdir(STATS_DIR)
-                                if f.endswith(".pos")
-                                and f.startswith(prefix_name)
-                                and f"pan2_{off_load_pan2}" in f
-                                and f"pan1_{off_load_pan1}" in f
-                                ]
-                if not (stat_files or trace_files or pos_files):
-                    print("Warning: No .stat, .trace, or _seed0.pos files found. Nothing to plot.", file=sys.stderr)
-                    return
-                
-                print(f"Found {len(stat_files)} stat files to process.")
-                print(f"Found {len(trace_files)} trace files to process.")
-                print(f"Found {len(pos_files)} pos files to process.")
-
-                # Data container for all runs
-                values= run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS)
-                interf_scenario_num.append(values["interf_flag"].values())
-
-                #求めた距離ごとのノードの平均を二次元平面上にプロット
-                offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
-                results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], results["pan1_c_rssi"][offload], results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload], results["pan2_c_rssi"][offload] = run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS)
-                #print(results["pan1_c_rssi"][offload])
-                results["pan1_diff"][offload] = np.array(results["down_per_all_pan1"][offload]) - np.array(results["up_per_all_pan1"][offload])
-                results["pan2_diff"][offload] = np.array(results["down_per_all_pan2"][offload]) - np.array(results["up_per_all_pan2"][offload])
-                #print(results["pan1_c_rssi"][offload])
+                    # Data container for all runs
+                    values= run_parallel_analysis(trace_files, prefix_name, STATS_DIR, NUM_DEV_GROUP, MAX_WORKERS)
+                    interf_scenario_num.append(values["interf_flag"].values())
+                    results["pan1_dispersion"]
+                    #求めた距離ごとのノードの平均を二次元平面上にプロット
+                    offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
+                    results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], results["pan1_c_rssi"][offload], results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload], results["pan2_c_rssi"][offload] = run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE, MAX_WORKERS)
+                    #print(results["pan1_c_rssi"][offload])
+                    results["pan1_diff"][offload] = np.array(results["down_per_all_pan1"][offload]) - np.array(results["up_per_all_pan1"][offload])
+                    results["pan2_diff"][offload] = np.array(results["down_per_all_pan2"][offload]) - np.array(results["up_per_all_pan2"][offload])
+                    #print(results["pan1_c_rssi"][offload])
     for prefix_name in FILE_PREFIXES:            
         base_plot_dir = "plots"            
         
         with ProcessPoolExecutor(MAX_WORKERS) as executor:  # elgarやwagnerなら8〜16くらいがおすすめ
-            off_load_pan2 = np.round(pan2_offload_max, 1)
-            for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
+            for off_load_pan2 in np.round(np.arange(pan2_offload_min, pan2_offload_max, 0.1),1):
+                for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
                     if prefix_name == "interf":
                         plot_dir = os.path.join(
                             base_plot_dir,
@@ -144,42 +144,18 @@ def main():
                         )
                     executor.submit(generate_all_plots, results, prefix_name, off_load_pan1, off_load_pan2, plot_dir)
         
-    # for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
-    off_load_pan2 = np.round(pan2_offload_max, 1)
-    for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
-            interf_diff_errorbar(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 results["pan1_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 results["distance_pan1"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 results["pan1_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-                                 f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_diff.pdf") 
-
-            # interf_diff_errorbar(results["distance_pan2"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-            #                      results["pan2_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-            #                      results["distance_pan2"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-            #                      results["pan2_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-            #                      f"pan1_{off_load_pan1}_PAN2_{off_load_pan2}_errorbar_diff.pdf")    
-
-            # interf_diff_errorbar(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-            #                      results["pan1_device_rssi"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-            #                      results["distance_pan2"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-            #                      results["pan2_device_rssi"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
-            #                      f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_rssi.pdf")     
+    for off_load_pan2 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
+        for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
+                interf_diff_errorbar(results["distance_pan1"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                    results["pan1_diff"][f"interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                    results["distance_pan1"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                    results["pan1_diff"][f"no_interf_pan1_{off_load_pan1}_pan2_{off_load_pan2}"], 
+                                    f"PAN1_{off_load_pan1}_pan2_{off_load_pan2}_errorbar_diff.pdf")     
             
-    # dist_list = [1000]
-    # for off_load_pan1 in np.round(np.arange(pan1_offload_min, pan1_offload_max, 0.1),1):
-    #     for dist in dist_list:
-    #         plot_roc_diff_curve(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_{pan2_offload_max}_ROC_curve{dist}.pdf")
-    #         plot_roc_rssi_curve(results, off_load_pan1, dist, f"pan1_{off_load_pan1}_pan2_{pan2_offload_max}_ROC_rssi_curve{dist}.pdf")
-
-    # for dist in dist_list:
-    #     plot_roc_diff_curves(results, dist, f"{pan2_offload_max}_ROC_diff_curve{dist}.pdf")
-    #     plot_roc_rssi_curves(results, dist, f"{pan2_offload_max}_ROC_rssi_curve{dist}.pdf") 
-    
-
     
     data = [list(d) for d in interf_scenario_num]
-    #print(data)
-    total_scenarios = 100  # seed数
+    print(data)
+    total_scenarios = 5  # seed数
     loads = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 
     # 前半10個が干渉あり、後半10個が干渉なし
@@ -210,14 +186,6 @@ def generate_all_plots(results, prefix_name, off_load_pan1, off_load_pan2, plot_
     # この関数の中に、実行したいプロット処理をすべて詰め込む
     offload = f"{prefix_name}_pan1_{off_load_pan1}_pan2_{off_load_pan2}"
     
-    # 1. 個別のプロッ
-    plot_distance_vs_per(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], f"pan1_up_scatter_{offload}.pdf", "blue", "UpLink", plot_dir)
-    plot_distance_vs_per(results["distance_pan1"][offload], results["down_per_all_pan1"][offload], f"pan1_down_scatter_{offload}.pdf", "red", "DownLink", plot_dir)
-    plot_distance_vs_per_up_down(results["distance_pan1"][offload], results["up_per_all_pan1"][offload], results["down_per_all_pan1"][offload], f"pan1_up_and_down_per_scatter_{offload}.pdf", plot_dir)
-    
-    plot_distance_vs_per(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], f"pan2_up_scatter_{offload}.pdf", "blue", "UpLink", plot_dir)
-    plot_distance_vs_per(results["distance_pan2"][offload], results["down_per_all_pan2"][offload], f"pan2_down_scatter_{offload}.pdf", "red", "DownLink", plot_dir)
-    plot_distance_vs_per_up_down(results["distance_pan2"][offload], results["up_per_all_pan2"][offload], results["down_per_all_pan2"][offload], f"pan2_up_and_down_per_scatter_{offload}.pdf", plot_dir)
     plot_delta_per_analysis(results["pan1_diff"][offload], results["pan1_c_rssi"][offload], f"pan1_box_{offload}.pdf", plot_dir)
     plot_variance_distribution_boxplot(results["pan1_diff"][offload], results["pan1_c_rssi"][offload], f"pan1_s_{offload}.pdf", plot_dir)
 
@@ -353,82 +321,6 @@ def plot_delta_per_analysis(delta_per, rssi_list, filename, plot_dir):
     plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
-def plot_distance_vs_per_lowess(
-    distance,
-    up_per,
-    down_per,
-    filename,
-    plot_dir,
-    frac=0.2,
-    point_size=50,
-    alpha=0.2,
-):
-    """
-    距離 vs PER の散布図と LOWESS 曲線（uplink / downlink）を描画する
-
-    Parameters
-    ----------
-    distance : array-like
-        距離データ（x軸）
-    up_per : array-like
-        uplink PER
-    down_per : array-like
-        downlink PER
-    filename : str
-        出力ファイル名
-    frac : float
-        LOWESS の平滑化パラメータ
-    point_size : int
-        散布図の点サイズ
-    alpha : float
-        散布図の透過率
-    """
-    
-
-
-    # LOWESS
-    lowess_ul = lowess(up_per, distance, frac=frac, return_sorted=True)
-    lowess_dl = lowess(down_per, distance, frac=frac, return_sorted=True)
-
-    plt.figure(figsize=(13, 10))
-
-    # Scatter
-    plt.scatter(distance, up_per,
-                s=point_size, alpha=alpha, color="blue", label="Uplink")
-    plt.scatter(distance, down_per,
-                s=point_size, alpha=alpha, color="red", label="Downlink")
-
-    # LOWESS lines
-    plt.plot(lowess_ul[:, 0], lowess_ul[:, 1],
-             color="blue", linewidth=2, label="Uplink (LOWESS)")
-    plt.plot(lowess_dl[:, 0], lowess_dl[:, 1],
-             color="red", linewidth=2, label="Downlink (LOWESS)")
-
-    #plt.xlabel("d [m]", fontsize=FONT_SIZE + 20)
-    #plt.ylabel("PER",fontsize=FONT_SIZE+20)
-    plt.ylim(0.0, 1.0)
-    plt.xticks(fontsize=FONT_SIZE)
-    plt.yticks(fontsize=FONT_SIZE)
-    leg = plt.legend(fontsize=20)
-    leg.get_frame().set_linewidth(1.8)
-    plt.tight_layout()
-    plt.gca().spines['right'].set_visible(False)
-    plt.gca().spines['top'].set_visible(False)
-    plt.gca().spines['bottom'].set_linewidth(3.0)
-    plt.gca().spines['left'].set_linewidth(3.0)
-    plt.tick_params(axis="both", width=3.0, which="major", length=20)
-    plt.gca().xaxis.set_major_formatter(
-    mtick.StrMethodFormatter('{x:,.0f}')
-    )
-    plt.gca().xaxis.set_major_locator(
-    mtick.MultipleLocator(1000)
-    )
-
-    os.makedirs(plot_dir, exist_ok=True)
-    output_path = os.path.join(plot_dir, filename)
-    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
-    plt.close()
-
 def process_single_trace(filename, prefix_name, STATS_DIR, NUM_DEV_GROUP):
     # ファイル名から情報を抽出（元のループ内の処理）
     match = FILENAME_TRACE.match(filename.replace(f"{prefix_name}_", ""))
@@ -541,40 +433,6 @@ def run_pos_parallel(pos_files, prefix_name, values, C1_DEV_RANGE, C2_DEV_RANGE,
 
     return (distance_to_interference_pan1, up_per_all_pan1, down_per_all_pan1, pan1_device_rssi,
             distance_to_interference_pan2, up_per_all_pan2, down_per_all_pan2, pan2_device_rssi)
-
-def plot_distance_vs_per_up_down(distance, up_per, down_per, filename, plot_dir):
-    plt.figure(figsize=(13, 10))
-    plt.scatter(distance, up_per, color='blue', marker='o', s=50, label='UpLink')
-    plt.scatter(distance, down_per, color='red', marker='o', s=50, label='DownLink')
-
-    #plt.xlabel("d [m]",fontsize=65)
-    #plt.ylabel("PER",fontsize=65)
-    #plt.title(filename)
-
-    plt.ylim(0.0, 1.0)
-    plt.xticks(fontsize=FONT_SIZE)
-    plt.yticks(fontsize=FONT_SIZE)
-    leg = plt.legend(fontsize=FONT_SIZE)
-    leg.get_frame().set_linewidth(1.8)
-
-    plt.tight_layout()
-    plt.gca().spines['right'].set_visible(False)
-    plt.gca().spines['top'].set_visible(False)
-    plt.gca().spines['bottom'].set_linewidth(3.0)
-    plt.gca().spines['left'].set_linewidth(3.0)
-    plt.tick_params(axis="both",width=3.0, which="major", length=20)
-    plt.gca().xaxis.set_major_formatter(
-    mtick.StrMethodFormatter('{x:,.0f}')
-    )
-    plt.gca().xaxis.set_major_locator(
-    mtick.MultipleLocator(1000)
-    )
-
-    os.makedirs(plot_dir, exist_ok=True)
-    output_path = os.path.join(plot_dir, filename)
-    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.05)
-    plt.close()
-
 
 def plot_distance_vs_per(distance, per, filename, color, legend_name, plot_dir):
     plt.figure(figsize=(13, 10))
@@ -757,7 +615,6 @@ def interf_diff_errorbar(interf_dist_pan1, interf_diff, no_interf_dist_pan1, no_
 def node_parse_trace_file(filepath, num_device):
     size = 2 * NUM_DEV_GROUP + 3
 
-    # 全て np.zeros で定義 (float型にしておくと計算時に安心です)
     # device → coordinator
     c_rx_pkt_num_list     = np.zeros(size)
     tmp_c_rx_pkt_num_list = np.zeros(size)

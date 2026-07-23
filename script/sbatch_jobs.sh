@@ -10,6 +10,7 @@ cd "$CONFIG_DIR" || {
   echo "ERROR: cd failed: $CONFIG_DIR"
   exit 1
 }
+
 JOB_NAME="sim_arimoto"
 # -------------------------------
 # .config が存在するかチェック

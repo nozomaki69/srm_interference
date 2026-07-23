@@ -195,30 +195,20 @@ driot-bit-error-rate-curve-file = ref/driotmodes.ber
 {% endfor %}{# for node #}
 
 {% if band_name == "DrIotTestBand" %}
-    #Instance DrIotTestBand
-    #Component Channel
-    [DrIotTestBand] channel-count = 3
-    [DrIotTestBand] channel-0-frequency-mhz = 920
-    [DrIotTestBand] channel-0-bandwidth-mhz = 0.2
-    [DrIotTestBand] channel-0-transmit-spectral-mask-mhz-dbr = 0.1 0
-    [DrIotTestBand] channel-0-channel-interference-nominal-transmit-width-mhz = 0.2
-    [DrIotTestBand] channel-0-channel-interference-receive-width-mhz = 0.2
-    [DrIotTestBand] channel-1-frequency-mhz = 921
-    [DrIotTestBand] channel-1-bandwidth-mhz = 0.2
-    [DrIotTestBand] channel-1-transmit-spectral-mask-mhz-dbr = 0.1 0
-    [DrIotTestBand] channel-1-channel-interference-nominal-transmit-width-mhz = 0.2
-    [DrIotTestBand] channel-1-channel-interference-receive-width-mhz = 0.2
-    [DrIotTestBand] channel-2-frequency-mhz = 920
-    [DrIotTestBand] channel-2-bandwidth-mhz = 0.6
-    [DrIotTestBand] channel-2-transmit-spectral-mask-mhz-dbr = 0.3 0
-    [DrIotTestBand] channel-2-channel-interference-nominal-transmit-width-mhz = 0.6
-    [DrIotTestBand] channel-2-channel-interference-receive-width-mhz = 0.6
-    [DrIotTestBand] propagation-enable-mask-calculated-channel-interference = true
-    [DrIotTestBand] propagation-enable-inter-model-propagation-delay = true
-    [DrIotTestBand] enable-propagation-delay = true
-    [DrIotTestBand] max-signal-propagation-meters = 100000000.0
-    [DrIotTestBand] propagation-allow-multiple-interfaces-on-same-channel = true
-    [DrIotTestBand] fading-model = off
+    [DrIotTestBand] channel-count = {{ channels | length }}
+    {% for channel in channels %}
+        [DrIotTestBand] channel-{{ channel.id }}-frequency-mhz = {{ channel.freq_mhz }}
+        [DrIotTestBand] channel-{{ channel.id }}-bandwidth-mhz = {{ channel.width_mhz }}
+        [DrIotTestBand] channel-{{ channel.id }}-transmit-spectral-mask-mhz-dbr = {{ channel.width_mhz / 2 }} 0
+        [DrIotTestBand] channel-{{ channel.id }}-channel-interference-nominal-transmit-width-mhz = {{ channel.width_mhz }}
+        [DrIotTestBand] channel-{{ channel.id }}-channel-interference-receive-width-mhz = {{ channel.width_mhz }}
+    {% endfor %}
+        [DrIotTestBand] propagation-enable-mask-calculated-channel-interference = true
+        [DrIotTestBand] propagation-enable-inter-model-propagation-delay = true
+        [DrIotTestBand] enable-propagation-delay = true
+        [DrIotTestBand] max-signal-propagation-meters = 100000000.0
+        [DrIotTestBand] propagation-allow-multiple-interfaces-on-same-channel = true
+        [DrIotTestBand] fading-model = Off
 {% endif %}
 
 # end of file
