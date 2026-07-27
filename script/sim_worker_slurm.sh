@@ -6,4 +6,4 @@
 CONFIG_FILE=$1
 
 # シミュレーションの実行
-/home/arimoto/opt/scensim_env/scenargie_simulator/2.2/source/sim "$CONFIG_FILE"
+/home/arimoto/opt/scensim_env/scenargie_simulator/2.2/source/driot/sim "$CONFIG_FILE"
