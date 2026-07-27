@@ -76,7 +76,7 @@ MAXIMUM_COMMUNICATION_RANGE = {
     2: 1.0192307006600434,
 }
 
-TARGET_BANDWIDTH_PATTERNS = [[0, 0], [0, 1], [0, 2], [1, 1], [1, 2], [2, 2]]
+TARGET_BANDWIDTH_PATTERNS = [[0, 0], [0, 1], [0, 2], [1, 1], [1, 2], [2, 2], [0, 3], [0, 4], [0, 5], [1, 4], [1, 5], [2, 5]]
 NUM_DEVICE = 10
 DEVICE_ID_1 = list(range(3, NUM_DEVICE + 3))
 DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
@@ -143,13 +143,13 @@ def main():
         sys.exit(1)
         
     """メイン処理"""
-    interference = 0
     for bandwidth_pattern in TARGET_BANDWIDTH_PATTERNS:
+        interference_flag = 0
         pan1_bandwidth = CHANNELS[bandwidth_pattern[0]]["freq_mhz"]
         pan2_bandwidth = CHANNELS[bandwidth_pattern[1]]["freq_mhz"]
 
         if pan1_bandwidth == pan2_bandwidth:
-            interference = 1
+            interference_flag = 1
         
         for offered_load_pan2 in np.arange(pan2_offload_min, pan2_offload_max, 0.1):
             OFFERED_LOAD_PAN2 = round(float(offered_load_pan2), 1)
@@ -166,7 +166,7 @@ def main():
 
                         total_files = 0
                         
-                        if interference == 1:
+                        if interference_flag == 1:
                             prefix = f"interf_dist_{DISTANCES_M}m_channel_{bandwidth_pattern[0]}_vs_{bandwidth_pattern[1]}_pan1_{OFFERED_LOAD_PAN1}_pan2_{OFFERED_LOAD_PAN2}_seed{seed}"
                         else:
                             prefix = f"no_interf_dist_{DISTANCES_M}m_channel_{bandwidth_pattern[0]}_vs_{bandwidth_pattern[1]}_pan1_{OFFERED_LOAD_PAN1}_pan2_{OFFERED_LOAD_PAN2}_seed{seed}"
@@ -185,7 +185,7 @@ def main():
                             "associated_device_table": DEVICE_ID_1,  # Device ID 2を静的に関連付け
                             "init_block_index": 0,
                             "init_block_count": 1,
-                            "desired_channel_bandwidth": CHANNELS[bandwidth_pattern[0]]["width_mhz"]*10e3,
+                            "desired_channel_bandwidth": CHANNELS[bandwidth_pattern[0]]["width_mhz"]*1e3,
                             "desired_block_count": 1,
                             "cbr_applications": [],
                             "preamble_power": CHANNELS[bandwidth_pattern[0]]["rx_sensitivity_dbm"],
@@ -194,7 +194,7 @@ def main():
                         for dev_id in DEVICE_ID_1:
                             coordinator_node_1["cbr_applications"].append({
                                     "dst": dev_id,  # Coordinator 1宛て
-                                    "bps": ((CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"]*10e3/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN1),
+                                    "bps": ((CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN1),
                                     "start": MEASURE_START_SEC,
                                     "end": MEASURE_END_SEC,
                                     "jitter": 1.0,
@@ -212,7 +212,7 @@ def main():
                             "associated_device_table": DEVICE_ID_2,
                             "init_block_index": 0,
                             "init_block_count": 1,
-                            "desired_channel_bandwidth": CHANNELS[bandwidth_pattern[1]]["width_mhz"]*10e3,
+                            "desired_channel_bandwidth": CHANNELS[bandwidth_pattern[1]]["width_mhz"]*1e3,
                             "desired_block_count": 1,
                             "cbr_applications": [],
                             "preamble_power": CHANNELS[bandwidth_pattern[1]]["rx_sensitivity_dbm"],
@@ -221,7 +221,7 @@ def main():
                         for dev_id in DEVICE_ID_2:
                             coordinator_node_2["cbr_applications"].append({
                                     "dst": dev_id,  # Coordinator 1宛て
-                                    "bps": ((CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"]*10e3/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN2),
+                                    "bps": ((CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN2),
                                     "start": MEASURE_START_SEC,
                                     "end": MEASURE_END_SEC,
                                     "jitter": 1.0,
@@ -240,7 +240,7 @@ def main():
                                 "associated": True,  # 静的に関連付け済み
                                 "cbr_applications": [{
                                     "dst": 1,  # Coordinator 1宛て
-                                    "bps": ((CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"]*10e3/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN1),
+                                    "bps": ((CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN1),
                                     "start": MEASURE_START_SEC,
                                     "end": MEASURE_END_SEC,
                                     "jitter": 20.0,
@@ -263,7 +263,7 @@ def main():
                                 "associated": True,  # 静的に関連付け済み
                                 "cbr_applications": [{
                                     "dst": 2,  # Coordinator 1宛て
-                                    "bps": ((CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"]*10e3/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN2),
+                                    "bps": ((CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * OFFERED_LOAD_PAN2),
                                     "start": MEASURE_START_SEC,
                                     "end": MEASURE_END_SEC,
                                     "jitter": 20.0,

@@ -145,7 +145,7 @@ driot-bit-error-rate-curve-file = ref/driotmodes.ber
         [{{ node.id }};{{ interface_name }}] driot-phy-cca-mode = {{ cca_mode }}
 
         {# チャネルは2種類 #}
-        [{{ node.id }};{{ interface_name }}] driot-symbol-rate-map = 200.0 50000 600.0 200000
+        [{{ node.id }};{{ interface_name }}] driot-symbol-rate-map = 150.0 50000 300.0 100000 600.0 200000
         [{{ node.id }};{{ interface_name }}] driot-symbol-duration-type = Auto
         [{{ node.id }};{{ interface_name }}] driot-phy-parameter-type = Fixed
         [{{ node.id }};{{ interface_name }}] driot-max-frame-size = 2047
