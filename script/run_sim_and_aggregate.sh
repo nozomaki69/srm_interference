@@ -10,7 +10,7 @@ NUM_DEVICE=10
 OUTPUT_CSV="$CMD_DIR/plots/simulation_results.csv"
 
 # ★何ファイルごとに集計と削除を行うか（並列数7の倍数がおすすめ）
-BATCH_SIZE=35
+BATCH_SIZE=100
 
 # ==========================================
 # 2. 初期準備

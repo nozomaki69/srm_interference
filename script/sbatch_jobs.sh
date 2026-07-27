@@ -1,67 +1,99 @@
 #!/bin/bash
-#SBATCH -o /home/arimoto/opt/scensim_env/scenargie_simulator/2.2/scenarios_linux/srm_interference/commandline/logs/%x_%j.out
-#SBATCH -e /home/arimoto/opt/scensim_env/scenargie_simulator/2.2/scenarios_linux/srm_interference/commandline/logs/%x_%j.err
 
-CMD_DIR=/home/arimoto/opt/scensim_env/scenargie_simulator/2.2/scenarios_linux/srm_interference/commandline
-SCRIPT_DIR="$CMD_DIR/script"
-CONFIG_DIR="$CMD_DIR"   # ← config があるディレクトリに応じて変更
+# ==========================================
+# 1. パスと変数の設定
+# ==========================================
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
+CMD_DIR=$(cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd)
 
-# CSVを出力するディレクトリ
-PLOTS_DIR="$CMD_DIR/plots"
-mkdir -p "$PLOTS_DIR"
+NUM_DEVICE=10
+OUTPUT_CSV="$CMD_DIR/plots/simulation_results.csv"
 
-cd "$CONFIG_DIR" || {
-  echo "ERROR: cd failed: $CONFIG_DIR"
-  exit 1
-}
+# 何ファイルごとに集計と削除を行うか
+BATCH_SIZE=100
 
-JOB_NAME="sim_arimoto"
-NUM_DEVICE=10  # デバイス数
+# ==========================================
+# 2. 初期準備
+# ==========================================
+cd "$CMD_DIR" || exit
 
-# 過去の一時CSVや最終結果が残っていればリセット
-rm -f "$PLOTS_DIR"/temp_*.csv
-rm -f "$PLOTS_DIR"/simulation_results.csv
-
-# -------------------------------
-# .config が存在するかチェック
-# -------------------------------
+# 既存の .config ファイルを配列として取得
 shopt -s nullglob
-configs=(*.config)
+CONFIG_FILES=( *.config )
+shopt -u nullglob
 
-echo "Current directory: $(pwd)"
-echo "Number of config files: ${#configs[@]}"
+TOTAL_FILES=${#CONFIG_FILES[@]}
 
-if [ ${#configs[@]} -eq 0 ]; then
-  echo "ERROR: .config ファイルが1件も見つかりません"
-  exit 1
+if [ "$TOTAL_FILES" -eq 0 ]; then
+  echo "警告: 実行対象の .config ファイルが '$CMD_DIR' 内に見つかりません。"
+  exit 0
 fi
 
-# -------------------------------
-# sbatch 投入
-# -------------------------------
-count=0
-JOB_IDS=()
+# plotsディレクトリを作成
+mkdir -p "$CMD_DIR/plots"
 
-for config in "${configs[@]}"; do
-  echo "Submitting: $config"
-  
-  # ジョブごとの専用一時CSVファイル名を定義
-  TEMP_CSV="$PLOTS_DIR/temp_${config}.csv"
-  
-  # --parsable をつけてジョブIDだけを受け取るようにし、引数にNUM_DEVICEとTEMP_CSVを追加
-  JOB_ID=$(sbatch --parsable --partition=ubuntu --job-name="$JOB_NAME" "$SCRIPT_DIR/run_one_sim.slurm.sh" "$(realpath "$config")" "$NUM_DEVICE" "$TEMP_CSV")
-  JOB_IDS+=("$JOB_ID")
-  count=$((count + 1))
+# スクリプト実行時に古いCSVが残っていれば削除（リセット）する
+if [ -f "$OUTPUT_CSV" ]; then
+    echo "古いCSVファイルが見つかりました。削除してリセットします: $OUTPUT_CSV"
+    rm -f "$OUTPUT_CSV"
+fi
+
+echo "========================================"
+echo "シミュレーションバッチ処理を開始します"
+echo "対象ディレクトリ: $CMD_DIR"
+echo "総ファイル数: $TOTAL_FILES"
+echo "バッチサイズ: $BATCH_SIZE ファイルごとに集計"
+echo "========================================"
+
+# ==========================================
+# 3. バッチ処理ループ
+# ==========================================
+for (( i=0; i<$TOTAL_FILES; i+=$BATCH_SIZE )); do
+    
+    BATCH_FILES=("${CONFIG_FILES[@]:$i:$BATCH_SIZE}")
+    NUM_IN_BATCH=${#BATCH_FILES[@]}
+    
+    echo "--------------------------------------------------"
+    echo "バッチ実行開始: $((i+1)) 〜 $((i+NUM_IN_BATCH)) / $TOTAL_FILES"
+    
+    # ------------------------------------------------
+    # SLURMへのジョブ投入フェーズ
+    # ------------------------------------------------
+    JOB_IDS=()
+    for config in "${BATCH_FILES[@]}"; do
+        # sbatchで1つずつ投入し、--parsable でジョブIDを取得
+        JID=$(sbatch --parsable --partition=ubuntu "$SCRIPT_DIR/sim_worker_slurm.sh" "$(realpath "$config")")
+        JOB_IDS+=("$JID")
+    done
+    
+    # ジョブIDをカンマ区切りに変換 (例: 101,102,103)
+    DEPENDENCIES=$(IFS=,; echo "${JOB_IDS[*]}")
+    
+    echo "${#JOB_IDS[@]} 件のジョブをSLURMに投入しました。完了を待機しています..."
+    
+    # ------------------------------------------------
+    # 待機フェーズ（このバッチの全ジョブが終わるまでストップ）
+    # ------------------------------------------------
+    # wait_dummy という何もしないジョブを --wait オプション付きで投入。
+    # 依存関係により、上記の全ジョブが終わるまでこの行でスクリプトが一時停止します。
+    sbatch --wait --partition=ubuntu --dependency=afterany:${DEPENDENCIES} --job-name="wait_dummy" --output=/dev/null --error=/dev/null --wrap="exit 0"
+    
+    echo "バッチのシミュレーション完了。集計（追記）を開始します..."
+    
+    # ------------------------------------------------
+    # 集計・削除フェーズ
+    # ------------------------------------------------
+    # Pythonスクリプトを実行（Python側で追記モードにしてあること！）
+    if python3 "$SCRIPT_DIR/aggregate_results.py" "$CMD_DIR" "$NUM_DEVICE" "$OUTPUT_CSV"; then
+        echo "集計成功！処理済みの .trace ファイルを削除します..."
+        rm -f "$CMD_DIR"/*.trace
+    else
+        echo "エラー: 集計処理中に問題が発生しました。"
+        echo "調査のため処理を中断し、.trace ファイルを残します。"
+        exit 1
+    fi
+    
 done
 
-echo "----------------------------------------"
-echo "Total submitted jobs: $count"
-
-# -------------------------------
-# 全シミュレーション完了後にマージジョブを投入
-# -------------------------------
-if [ ${#JOB_IDS[@]} -gt 0 ]; then
-    DEPENDENCIES=$(IFS=,; echo "${JOB_IDS[*]}")
-    sbatch --partition=ubuntu --job-name="merge_csv" --dependency=afterany:${DEPENDENCIES} "$SCRIPT_DIR/merge_csv.slurm.sh" "$PLOTS_DIR"
-    echo "すべてのシミュレーションジョブを投入しました。全完了後に自動でCSVがマージされます。"
-fi
+echo "========================================"
+echo "すべてのシミュレーションと集計が完了しました！"
