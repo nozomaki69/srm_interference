@@ -6,4 +6,4 @@
 CONFIG_FILE=$1
 
 # シミュレーションの実行
-/opt/scenargie_simulator/source/driot/sim "$CONFIG_FILE"
+/home/arimoto/opt/scensim_env/scenargie_simulator/2.2/scenarios_linux/srm_interference/commandline "$CONFIG_FILE"
