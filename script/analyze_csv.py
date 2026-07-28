@@ -40,24 +40,24 @@ FONT_SIZE = 45
 # チャネル番号 -> 帯域(kbps)
 CHANNEL_KBPS = {0: 50, 1: 100, 2: 200, 3: 50, 4: 100, 5: 200}
 
-# 干渉あり / なし の (PAN1_CH, PAN2_CH) 組み合わせ（順不同。内部でソートして照合する）
-# INTERF_PAIRS = {(0, 0), (0, 1), (0, 2), (1, 1), (1, 2), (2, 2)}
-# NO_INTERF_PAIRS = {(0, 3), (0, 4), (0, 5), (1, 4), (1, 5), (2, 5)}
-INTERF_PAIRS = {(0, 0)}
-NO_INTERF_PAIRS = {(0, 3)}
+# チャネル番号 -> 中心周波数(MHz)。generate_config.py の CHANNELS と同じ値。
+# 0,1,2 は base_freq_mhz、3,4,5 は base_freq_mhz-1 なので、同じ周波数同士の
+# 組み合わせだけが干渉する（generate_config.py の interference_flag 判定と同一基準）。
+CHANNEL_FREQ_MHZ = {0: 920, 1: 920, 2: 920, 3: 919, 4: 919, 5: 919}
 
 
 # ============================================================
 # ユーティリティ
 # ============================================================
 def get_interf_label(pan1_ch, pan2_ch):
-    """(PAN1_CH, PAN2_CH) から 'interf' / 'no_interf' / None を判定する"""
-    key = tuple(sorted((pan1_ch, pan2_ch)))
-    if key in INTERF_PAIRS:
-        return "interf"
-    if key in NO_INTERF_PAIRS:
-        return "no_interf"
-    return None
+    """
+    (PAN1_CH, PAN2_CH) から 'interf' / 'no_interf' を判定する。
+    generate_config.py の `CHANNELS[bw0]["freq_mhz"] == CHANNELS[bw1]["freq_mhz"]`
+    と全く同じ基準（周波数が一致していれば干渉あり）で判定するため、
+    .config/.pos/.trace/.stat ファイル名のプレフィックス (interf_ / no_interf_)
+    と必ず一致する。
+    """
+    return "interf" if CHANNEL_FREQ_MHZ[pan1_ch] == CHANNEL_FREQ_MHZ[pan2_ch] else "no_interf"
 
 
 def get_bandwidth_label(pan1_ch, pan2_ch):
@@ -67,8 +67,16 @@ def get_bandwidth_label(pan1_ch, pan2_ch):
 
 
 def pos_filename(pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload, seed):
+    """
+    .pos ファイル名を組み立てる。
+    generate_config.py は干渉の有無で "interf_" / "no_interf_" のどちらかの
+    プレフィックスでファイルを生成しているため、ここでも同じ判定を使う
+    （以前は "interf_" 固定になっており、no_interf の組み合わせで
+    ファイルが見つからないバグがあった）。
+    """
+    prefix = get_interf_label(pan1_ch, pan2_ch)  # 'interf' or 'no_interf'
     return (
-        f"interf_dist_{distance}m_channel_{pan1_ch}_vs_{pan2_ch}"
+        f"{prefix}_dist_{distance}m_channel_{pan1_ch}_vs_{pan2_ch}"
         f"_pan1_{pan1_offload}_pan2_{pan2_offload}_seed{seed}.pos"
     )
 
@@ -131,6 +139,7 @@ def load_and_aggregate(csv_file, stats_dir):
 
             # --- .pos ファイルから座標を取得（seed ごとに個別ファイル） ---
             fname = pos_filename(pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload, seed)
+            print("----",fname)
             if fname not in pos_cache:
                 fpath = os.path.join(stats_dir, fname)
                 if os.path.isfile(fpath):
@@ -183,6 +192,7 @@ def _calc_distance(positions, dev_id, ref_id):
     """positions が無い、あるいは該当ノードが無い場合は NaN を返す。"""
     if positions is None or dev_id not in positions or ref_id not in positions:
         return np.nan
+
     dx = positions[dev_id][0] - positions[ref_id][0]
     dy = positions[dev_id][1] - positions[ref_id][1]
     return float(np.sqrt(dx ** 2 + dy ** 2))
@@ -217,8 +227,9 @@ def plot_delta_per_analysis(delta_per, rssi_list, filename, plot_dir):
     ax.xaxis.set_major_locator(mtick.MultipleLocator(1000))
 
     if plot_indices:
-        plt.boxplot([bin_data_list[i] for i in plot_indices],
-                     labels=[labels[i] for i in plot_indices])
+        ax.boxplot([bin_data_list[i] for i in plot_indices])
+        ax.set_xticks(range(1, len(plot_indices) + 1))
+        ax.set_xticklabels([labels[i] for i in plot_indices])
     plt.ylim(-1.0, 1.0)
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
 
@@ -267,7 +278,9 @@ def plot_variance_distribution_boxplot(delta_per, rssi_list, filename, plot_dir)
             plot_labels.append(label)
 
     if plot_data:
-        plt.boxplot(plot_data, labels=plot_labels)
+        ax.boxplot(plot_data)
+        ax.set_xticks(range(1, len(plot_labels) + 1))
+        ax.set_xticklabels(plot_labels)
 
     plt.ylim(0, 0.4)
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
@@ -359,9 +372,6 @@ def main():
         pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload = condition_key
 
         interf_label = get_interf_label(pan1_ch, pan2_ch)
-        if interf_label is None:
-            print(f"Warning: unknown channel pair ({pan1_ch}, {pan2_ch}) - skipping")
-            continue
         bw_label = get_bandwidth_label(pan1_ch, pan2_ch)
 
         plot_dir = os.path.join(PLOT_BASE_DIR, bw_label, f"{distance}m", interf_label)
