@@ -30,7 +30,7 @@ STATS_DIR = os.path.join(SCRIPT_DIR, "..")                         # .pos ファ
 CSV_FILE = os.path.join(SCRIPT_DIR, "..", "plots", "simulation_results.csv")
 PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 
-NUM_DEVICE = 10
+NUM_DEVICE = 50
 PAN1_DEVS = list(range(3, 3 + NUM_DEVICE))          # 3..12
 PAN2_DEVS = list(range(3 + NUM_DEVICE, 3 + 2 * NUM_DEVICE))  # 13..22
 RSSI_START_IDX = 10 + 8 * NUM_DEVICE                # 90
