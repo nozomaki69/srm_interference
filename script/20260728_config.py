@@ -160,8 +160,8 @@ def main():
                         np.random.seed(seed)
 
                         #エンドデバイスの分布範囲
-                        x1, y1 = generate_uniform_circle_coords(0, 0, round(MAXIMUM_COMMUNICATION_RANGE[bandwidth_pattern[0]],2)*1000, NUM_DEVICE)
-                        x2, y2 = generate_uniform_circle_coords(DISTANCES_M, 0,  round(MAXIMUM_COMMUNICATION_RANGE[bandwidth_pattern[1]],2)*1000, NUM_DEVICE)
+                        x1, y1 = generate_uniform_circle_coords(0, 0, MAXIMUM_COMMUNICATION_RANGE[bandwidth_pattern[0]], NUM_DEVICE)
+                        x2, y2 = generate_uniform_circle_coords(DISTANCES_M, 0, MAXIMUM_COMMUNICATION_RANGE[bandwidth_pattern[1]], NUM_DEVICE)
 
                         total_files = 0
                         

@@ -3,11 +3,11 @@
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 CMD_DIR=$(cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd)
 
-NUM_DEVICE=10
+NUM_DEVICE=50
 OUTPUT_CSV="$CMD_DIR/plots/simulation_results.csv"
 
 # 何ファイルごとに集計と削除を行うか
-BATCH_SIZE=100
+BATCH_SIZE=1000
 
 cd "$CMD_DIR" || exit
 
