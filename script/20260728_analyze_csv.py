@@ -30,7 +30,7 @@ STATS_DIR = os.path.join(SCRIPT_DIR, "..")                         # .pos ファ
 CSV_FILE = os.path.join(SCRIPT_DIR, "..", "plots", "simulation_results.csv")
 PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 
-NUM_DEVICE = 10
+NUM_DEVICE = 50
 PAN1_DEVS = list(range(3, 3 + NUM_DEVICE))          # 3..12
 PAN2_DEVS = list(range(3 + NUM_DEVICE, 3 + 2 * NUM_DEVICE))  # 13..22
 RSSI_START_IDX = 10 + 8 * NUM_DEVICE                # 90
@@ -139,6 +139,7 @@ def load_and_aggregate(csv_file, stats_dir):
 
             # --- .pos ファイルから座標を取得（seed ごとに個別ファイル） ---
             fname = pos_filename(pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload, seed)
+            print("----",fname)
             if fname not in pos_cache:
                 fpath = os.path.join(stats_dir, fname)
                 if os.path.isfile(fpath):
@@ -191,6 +192,7 @@ def _calc_distance(positions, dev_id, ref_id):
     """positions が無い、あるいは該当ノードが無い場合は NaN を返す。"""
     if positions is None or dev_id not in positions or ref_id not in positions:
         return np.nan
+
     dx = positions[dev_id][0] - positions[ref_id][0]
     dy = positions[dev_id][1] - positions[ref_id][1]
     return float(np.sqrt(dx ** 2 + dy ** 2))
@@ -356,166 +358,6 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
 
 
 # ============================================================
-# 干渉検知（帯域幅ペアごとに interf/no_interf を比較）
-# ============================================================
-# ΔPER(DL-UL)の分散を見る際のRSSIビン境界（plot_variance_distribution_boxplotと同じ）
-VARIANCE_RSSI_BINS = np.arange(0, -121, -10)
-
-# 分散のしきい値の探索範囲。ΔPERは[-1, 1]なので分散の理論上限は1だが、
-# 実データではもっと小さい値になるはず。0〜1を0.01刻みで細かく探索する。
-VARIANCE_THRESHOLDS = np.round(np.arange(0.0, 1.001, 0.01), 3)
-
-
-def compute_seed_max_variance(delta_per, rssi_list, num_devices):
-    """
-    delta_per, rssi_list: Seedごとに num_devices 個ずつ連続して並んだ1次元配列。
-    各SeedについてRSSIを10dBmビンに分け、ビンごとのΔPER分散を計算し、
-    そのSeed内での最大分散値を「干渉指標」として返す。
-
-    戻り値: 各Seedの最大分散値のリスト（長さ = num_seeds）。
-    有効なビン（データ点2個以上）が1つも無いSeedは 0.0 とする。
-    """
-    rssi_list = np.asarray(rssi_list, dtype=float)
-    delta_per = np.asarray(delta_per, dtype=float)
-    num_seeds = len(rssi_list) // num_devices
-
-    seed_max_variances = []
-    for s in range(num_seeds):
-        start = s * num_devices
-        end = (s + 1) * num_devices
-        rssi_seed = rssi_list[start:end]
-        delta_seed = delta_per[start:end]
-
-        valid = rssi_seed != 0
-        r_v = rssi_seed[valid]
-        d_v = delta_seed[valid]
-
-        max_var = 0.0
-        for b in range(len(VARIANCE_RSSI_BINS) - 1):
-            upper, lower = VARIANCE_RSSI_BINS[b], VARIANCE_RSSI_BINS[b + 1]
-            mask = (r_v > lower) & (r_v <= upper)
-            bin_values = d_v[mask]
-            if len(bin_values) > 1:
-                var_val = np.var(bin_values)
-                if var_val > max_var:
-                    max_var = var_val
-
-        seed_max_variances.append(max_var)
-
-    return seed_max_variances
-
-
-def evaluate_interference_detection(interf_values, no_interf_values):
-    """
-    interf_values / no_interf_values: 干渉あり／なしシナリオでの、各Seedの
-    干渉指標（compute_seed_max_variance の出力）。
-    分散のしきい値を振り、F1が最大となるしきい値と、その時の
-    TP/FP/FN/TN・Precision/Recall/FPR/F1 を返す。
-    """
-    n_pos = len(interf_values)
-    n_neg = len(no_interf_values)
-
-    best = None
-    for th in VARIANCE_THRESHOLDS:
-        tp = sum(1 for v in interf_values if v >= th)
-        fp = sum(1 for v in no_interf_values if v >= th)
-        fn = n_pos - tp
-        tn = n_neg - fp
-
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
-
-        if best is None or f1 > best["f1"]:
-            best = {
-                "threshold": th, "tp": tp, "fp": fp, "fn": fn, "tn": tn,
-                "precision": precision, "recall": recall, "fpr": fpr, "f1": f1,
-            }
-
-    best["n_interf_seeds"] = n_pos
-    best["n_no_interf_seeds"] = n_neg
-    return best
-
-
-def run_interference_detection(data):
-    """
-    帯域幅の組み合わせ（例: 50vs50）ごとに、干渉あり／なしシナリオの
-    ΔPER分散（RSSIビンごとの最大値, Seed単位）を比較し、干渉検知の
-    最適しきい値とその性能指標を求める。PAN1・PAN2それぞれについて行う。
-    """
-    # (bandwidth_label, distance, pan1_offload, pan2_offload) -> {'interf': key, 'no_interf': key}
-    groups = defaultdict(dict)
-    for condition_key in data.keys():
-        pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload = condition_key
-        bw_label = get_bandwidth_label(pan1_ch, pan2_ch)
-        interf_label = get_interf_label(pan1_ch, pan2_ch)
-        group_key = (bw_label, distance, pan1_offload, pan2_offload)
-        groups[group_key][interf_label] = condition_key
-
-    rows = []
-    for (bw_label, distance, pan1_offload, pan2_offload), pair in sorted(groups.items()):
-        if "interf" not in pair or "no_interf" not in pair:
-            # 対になるシナリオ（干渉あり/なし両方）が揃っていない場合はスキップ
-            continue
-
-        interf_entry = data[pair["interf"]]
-        no_interf_entry = data[pair["no_interf"]]
-
-        for pan_name, dl_key, ul_key, rssi_key in [
-            ("PAN1", "pan1_dl", "pan1_ul", "pan1_rssi"),
-            ("PAN2", "pan2_dl", "pan2_ul", "pan2_rssi"),
-        ]:
-            interf_delta = np.array(interf_entry[dl_key]) - np.array(interf_entry[ul_key])
-            no_interf_delta = np.array(no_interf_entry[dl_key]) - np.array(no_interf_entry[ul_key])
-
-            interf_values = compute_seed_max_variance(interf_delta, interf_entry[rssi_key], NUM_DEVICE)
-            no_interf_values = compute_seed_max_variance(no_interf_delta, no_interf_entry[rssi_key], NUM_DEVICE)
-
-            if len(interf_values) == 0 or len(no_interf_values) == 0:
-                print(f"Warning: no seed data for {bw_label} {distance}m pan1_{pan1_offload}_pan2_{pan2_offload} ({pan_name}) - skipping")
-                continue
-
-            result = evaluate_interference_detection(interf_values, no_interf_values)
-
-            rows.append({
-                "bandwidth": bw_label,
-                "distance": distance,
-                "pan1_offload": pan1_offload,
-                "pan2_offload": pan2_offload,
-                "pan": pan_name,
-                "best_threshold": result["threshold"],
-                "TP": result["tp"],
-                "FP": result["fp"],
-                "FN": result["fn"],
-                "TN": result["tn"],
-                "precision": round(result["precision"], 3),
-                "recall": round(result["recall"], 3),
-                "fpr": round(result["fpr"], 3),
-                "f1": round(result["f1"], 3),
-                "n_interf_seeds": result["n_interf_seeds"],
-                "n_no_interf_seeds": result["n_no_interf_seeds"],
-            })
-
-    return rows
-
-
-def save_interference_detection_csv(rows, output_path):
-    fieldnames = [
-        "bandwidth", "distance", "pan1_offload", "pan2_offload", "pan",
-        "best_threshold", "TP", "FP", "FN", "TN",
-        "precision", "recall", "fpr", "f1",
-        "n_interf_seeds", "n_no_interf_seeds",
-    ]
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
-
-
-# ============================================================
 # メイン処理
 # ============================================================
 def main():
@@ -525,13 +367,6 @@ def main():
     print(f"--- Loading {CSV_FILE} ---")
     data = load_and_aggregate(CSV_FILE, STATS_DIR)
     print(f"--- Loaded {len(data)} conditions ---")
-
-    # --- 干渉検知（帯域幅ペアごとに interf/no_interf を比較, プロットはしない） ---
-    print("--- Running interference detection analysis ---")
-    interference_rows = run_interference_detection(data)
-    interference_csv_path = os.path.join(PLOT_BASE_DIR, "interference_detection_results.csv")
-    save_interference_detection_csv(interference_rows, interference_csv_path)
-    print(f"--- Saved {len(interference_rows)} rows to {interference_csv_path} ---")
 
     for condition_key, entry in data.items():
         pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload = condition_key
