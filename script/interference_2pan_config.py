@@ -80,7 +80,7 @@ MAXIMUM_COMMUNICATION_RANGE = {
 }
 
 #TARGET_BANDWIDTH_PATTERNS = [[0, 0], [0, 1], [0, 2], [1, 1], [1, 2], [2, 2], [0, 3], [0, 4], [0, 5], [1, 4], [1, 5], [2, 5]]
-TARGET_BANDWIDTH_PATTERNS = [[0, 0], [0, 3]]
+TARGET_BANDWIDTH_PATTERNS = [[0, 2], [0, 5]]
 
 NUM_DEVICE = 50
 DEVICE_ID_1 = list(range(3, NUM_DEVICE + 3))
@@ -105,9 +105,9 @@ POS_TEMPLATE = "TEMPLATE.pos.j2"
 STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 
 pan1_offload_min = 10
-pan1_offload_max = 100
-pan2_offload_min = 10
-pan2_offload_max = 11
+pan1_offload_max = 110
+pan2_offload_min = 100
+pan2_offload_max = 101
 
 
 def generate_uniform_circle_coords(center_x, center_y, radius, num_devices):
