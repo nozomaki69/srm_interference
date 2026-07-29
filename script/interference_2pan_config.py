@@ -89,7 +89,7 @@ DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
 DISTANCES_M = 1500
 SIMULATION_SEEDS = 100
 MEASURE_START_SEC = 20.0
-MEASURE_DURATION_SEC = 100.0
+MEASURE_DURATION_SEC = 150.0
 MEASURE_END_SEC = MEASURE_START_SEC + MEASURE_DURATION_SEC
 SIM_DURATION_SEC = MEASURE_END_SEC + MEASURE_START_SEC
 MY_TRACE_TAGS = ['Mac'] #MY_TRACE_TAGS = ['Application']
@@ -106,8 +106,8 @@ STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 
 pan1_offload_min = 10
 pan1_offload_max = 110
-pan2_offload_min = 100
-pan2_offload_max = 101
+pan2_offload_min = 70
+pan2_offload_max = 71
 
 
 def generate_uniform_circle_coords(center_x, center_y, radius, num_devices):
@@ -199,7 +199,7 @@ def main():
                                     "start": MEASURE_START_SEC,
                                     "end": MEASURE_END_SEC,
                                     "jitter": 1.0,
-                                    "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
+                                    "payload_size": 127 - 15,  # MACヘッダを引いたサイズ
                                     "is_ack_required": True,
                             })
                         all_nodes.append(coordinator_node_1)
@@ -245,7 +245,7 @@ def main():
                                     "start": MEASURE_START_SEC,
                                     "end": MEASURE_END_SEC,
                                     "jitter": 20.0,
-                                    "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
+                                    "payload_size": 127 - 15,  # MACヘッダを引いたサイズ
                                     "is_ack_required": True,
                                 }],
                                 "preamble_power": CHANNELS[bandwidth_pattern[0]]["rx_sensitivity_dbm"],
