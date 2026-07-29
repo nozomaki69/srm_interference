@@ -197,7 +197,8 @@ def main():
                                     "start": MEASURE_START_SEC,
                                     "end": MEASURE_END_SEC,
                                     "jitter": 1.0,
-                                    "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
+                                    #"payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
+                                    "payload_size": 127 - 15,
                                     "is_ack_required": True,
                             })
                         all_nodes.append(coordinator_node_1)
@@ -243,7 +244,7 @@ def main():
                                     "start": MEASURE_START_SEC,
                                     "end": MEASURE_END_SEC,
                                     "jitter": 20.0,
-                                    "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
+                                    "payload_size": 127 - 15,
                                     "is_ack_required": True,
                                 }],
                                 "preamble_power": CHANNELS[bandwidth_pattern[0]]["rx_sensitivity_dbm"],
