@@ -28,7 +28,7 @@ CHANNELS = [
         "freq_mhz": base_freq_mhz,
         "width_mhz": 300e3 / 1e6, #0.3
         "rx_sensitivity_dbm": -93.989700,
-        "bitrate_kbps": 200,
+        "bitrate_kbps": 100,
     },  
     #Operating mode #3
     {
@@ -36,11 +36,11 @@ CHANNELS = [
         "freq_mhz": base_freq_mhz,
         "width_mhz": 600e3 / 1e6, #0.6
         "rx_sensitivity_dbm": -90.979400,
-        "bitrate_kbps": 600,
+        "bitrate_kbps": 200,
     }, 
     {
         "id": 3,
-        "freq_mhz": base_freq_mhz -1,
+        "freq_mhz": base_freq_mhz +1,
         "width_mhz": 150e3 / 1e6, #0.15
         "rx_sensitivity_dbm": -97.0,
         "bitrate_kbps": 50,
@@ -48,7 +48,7 @@ CHANNELS = [
     #Operating mode #2
     {
         "id": 4,
-        "freq_mhz": base_freq_mhz -1,
+        "freq_mhz": base_freq_mhz +1,
         "width_mhz": 300e3 / 1e6, #0.3
         "rx_sensitivity_dbm": -93.989700,
         "bitrate_kbps": 100,
@@ -56,7 +56,7 @@ CHANNELS = [
     #Operating mode #3
     {
         "id": 5,
-        "freq_mhz": base_freq_mhz-1,
+        "freq_mhz": base_freq_mhz +1,
         "width_mhz": 600e3 / 1e6, #0.6
         "rx_sensitivity_dbm": -90.979400,
         "bitrate_kbps": 200,
@@ -80,7 +80,7 @@ MAXIMUM_COMMUNICATION_RANGE = {
 }
 
 #TARGET_BANDWIDTH_PATTERNS = [[0, 0], [0, 1], [0, 2], [1, 1], [1, 2], [2, 2], [0, 3], [0, 4], [0, 5], [1, 4], [1, 5], [2, 5]]
-TARGET_BANDWIDTH_PATTERNS = [[0, 2], [0, 5]]
+TARGET_BANDWIDTH_PATTERNS = [[0, 2], [3, 2]]
 
 NUM_DEVICE = 50
 DEVICE_ID_1 = list(range(3, NUM_DEVICE + 3))
@@ -89,7 +89,7 @@ DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
 DISTANCES_M = 1500
 SIMULATION_SEEDS = 100
 MEASURE_START_SEC = 20.0
-MEASURE_DURATION_SEC = 150.0
+MEASURE_DURATION_SEC = 100.0
 MEASURE_END_SEC = MEASURE_START_SEC + MEASURE_DURATION_SEC
 SIM_DURATION_SEC = MEASURE_END_SEC + MEASURE_START_SEC
 MY_TRACE_TAGS = ['Mac'] #MY_TRACE_TAGS = ['Application']
@@ -106,8 +106,8 @@ STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 
 pan1_offload_min = 10
 pan1_offload_max = 110
-pan2_offload_min = 10
-pan2_offload_max = 110
+pan2_offload_min = 100
+pan2_offload_max = 101
 
 
 def generate_uniform_circle_coords(center_x, center_y, radius, num_devices):
@@ -226,7 +226,7 @@ def main():
                                     "start": MEASURE_START_SEC,
                                     "end": MEASURE_END_SEC,
                                     "jitter": 1.0,
-                                    "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
+                                    "payload_size": FRAME_SIZE+ 5 - 15,  # MACヘッダを引いたサイズ
                                     "is_ack_required": True,
                             })
                         all_nodes.append(coordinator_node_2)
@@ -268,7 +268,7 @@ def main():
                                     "start": MEASURE_START_SEC,
                                     "end": MEASURE_END_SEC,
                                     "jitter": 20.0,
-                                    "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
+                                    "payload_size": FRAME_SIZE+5 - 15,  # MACヘッダを引いたサイズ
                                     "is_ack_required": True,
                                 }],
                                 "preamble_power": CHANNELS[bandwidth_pattern[1]]["rx_sensitivity_dbm"],

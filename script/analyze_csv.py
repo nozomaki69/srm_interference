@@ -43,7 +43,7 @@ CHANNEL_KBPS = {0: 50, 1: 100, 2: 200, 3: 50, 4: 100, 5: 200}
 # チャネル番号 -> 中心周波数(MHz)。generate_config.py の CHANNELS と同じ値。
 # 0,1,2 は base_freq_mhz、3,4,5 は base_freq_mhz-1 なので、同じ周波数同士の
 # 組み合わせだけが干渉する（generate_config.py の interference_flag 判定と同一基準）。
-CHANNEL_FREQ_MHZ = {0: 920, 1: 920, 2: 920, 3: 919, 4: 919, 5: 919}
+CHANNEL_FREQ_MHZ = {0: 920, 1: 920, 2: 920, 3: 921, 4: 921, 5: 921}
 
 
 # ============================================================
