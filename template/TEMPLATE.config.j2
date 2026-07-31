@@ -145,7 +145,7 @@ driot-bit-error-rate-curve-file = ref/driotmodes.ber
         [{{ node.id }};{{ interface_name }}] driot-phy-cca-mode = {{ cca_mode }}
 
         {# チャネルは2種類 #}
-        [{{ node.id }};{{ interface_name }}] driot-symbol-rate-map = 200.0 50000 600.0 200000
+        [{{ node.id }};{{ interface_name }}] driot-symbol-rate-map = 150.0 50000 600.0 200000
         [{{ node.id }};{{ interface_name }}] driot-symbol-duration-type = Auto
         [{{ node.id }};{{ interface_name }}] driot-phy-parameter-type = Fixed
         [{{ node.id }};{{ interface_name }}] driot-max-frame-size = 2047
@@ -199,15 +199,15 @@ driot-bit-error-rate-curve-file = ref/driotmodes.ber
     #Component Channel
     [DrIotTestBand] channel-count = 3
     [DrIotTestBand] channel-0-frequency-mhz = 920
-    [DrIotTestBand] channel-0-bandwidth-mhz = 0.2
-    [DrIotTestBand] channel-0-transmit-spectral-mask-mhz-dbr = 0.1 0
-    [DrIotTestBand] channel-0-channel-interference-nominal-transmit-width-mhz = 0.2
-    [DrIotTestBand] channel-0-channel-interference-receive-width-mhz = 0.2
+    [DrIotTestBand] channel-0-bandwidth-mhz = 0.15
+    [DrIotTestBand] channel-0-transmit-spectral-mask-mhz-dbr = 0.075 0
+    [DrIotTestBand] channel-0-channel-interference-nominal-transmit-width-mhz = 0.15
+    [DrIotTestBand] channel-0-channel-interference-receive-width-mhz = 0.15
     [DrIotTestBand] channel-1-frequency-mhz = 921
-    [DrIotTestBand] channel-1-bandwidth-mhz = 0.2
-    [DrIotTestBand] channel-1-transmit-spectral-mask-mhz-dbr = 0.1 0
-    [DrIotTestBand] channel-1-channel-interference-nominal-transmit-width-mhz = 0.2
-    [DrIotTestBand] channel-1-channel-interference-receive-width-mhz = 0.2
+    [DrIotTestBand] channel-1-bandwidth-mhz = 0.15
+    [DrIotTestBand] channel-1-transmit-spectral-mask-mhz-dbr = 0.075 0
+    [DrIotTestBand] channel-1-channel-interference-nominal-transmit-width-mhz = 0.15
+    [DrIotTestBand] channel-1-channel-interference-receive-width-mhz = 0.15
     [DrIotTestBand] channel-2-frequency-mhz = 920
     [DrIotTestBand] channel-2-bandwidth-mhz = 0.6
     [DrIotTestBand] channel-2-transmit-spectral-mask-mhz-dbr = 0.3 0
