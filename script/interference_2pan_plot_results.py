@@ -37,7 +37,7 @@ pan1_offload_min = 0.1
 pan1_offload_max = 1.1
 pan2_offload_min = 0.7
 pan2_offload_max = 1.0
-WINDOW_SIZE = 100
+WINDOW_SIZE = 119
 NUM_COORD = 2
 NUM_DEV_GROUP = 50 # 各グループのデバイス数
 C1_DEV_RANGE = range(NUM_COORD + 1, NUM_COORD + NUM_DEV_GROUP + 1)  # 3 ~ 14
@@ -904,7 +904,7 @@ def node_parse_trace_file(filepath, num_device):
                 rssi_filtered = rssi_sliced[valid_mask]
                 
                 # 3. 0から-120まで10dBm刻みの境界を定義 (0, -10, ..., -120)
-                bins = np.arange(-40, -110, -5)
+                bins = np.arange(-40, -110, -10)
                 
                 results = {}
                 
