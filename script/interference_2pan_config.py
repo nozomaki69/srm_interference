@@ -106,8 +106,8 @@ STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 
 pan1_offload_min = 10
 pan1_offload_max = 110
-pan2_offload_min = 100
-pan2_offload_max = 101
+pan2_offload_min = 10
+pan2_offload_max = 110
 
 
 def generate_uniform_circle_coords(center_x, center_y, radius, num_devices):
