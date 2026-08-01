@@ -6,25 +6,16 @@ CMD_DIR=$(cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd)
 NUM_DEVICE=50
 OUTPUT_CSV="$CMD_DIR/plots/simulation_results.csv"
 
-# 何ファイルごとに集計と削除を行うか
+# 1バッチあたりの生成・シミュレーション・集計件数
 BATCH_SIZE=1000
 
 # .trace ファイルの解析を何並列のSLURMジョブに分割するか
 PARSE_PARALLEL=50
 
+# configファイル生成スクリプト (ファイル名が違う場合はここを変更してください)
+GEN_CONFIG_SCRIPT="$SCRIPT_DIR/interference_2pan_config.py"
+
 cd "$CMD_DIR" || exit
-
-# 既存の .config ファイルを配列として取得
-shopt -s nullglob
-CONFIG_FILES=( *.config )
-shopt -u nullglob
-
-TOTAL_FILES=${#CONFIG_FILES[@]}
-
-if [ "$TOTAL_FILES" -eq 0 ]; then
-  echo "警告: 実行対象の .config ファイルが '$CMD_DIR' 内に見つかりません。"
-  exit 0
-fi
 
 # plots / manifest / ログ用ディレクトリを作成
 mkdir -p "$CMD_DIR/plots"
@@ -37,22 +28,60 @@ if [ -f "$OUTPUT_CSV" ]; then
     rm -f "$OUTPUT_CSV"
 fi
 
+# 前回実行時の残留ファイルをクリーンアップ
+# (.config/.pos/.statconfig/.trace/.stat はすべて1バッチ限りの使い捨てファイルとして扱う)
+shopt -s nullglob
+STALE_FILES=( *.config *.pos *.statconfig *.trace *.stat )
+shopt -u nullglob
+if [ "${#STALE_FILES[@]}" -gt 0 ]; then
+    echo "警告: 前回実行時の残留ファイルが ${#STALE_FILES[@]} 件見つかりました。削除してクリーンな状態から開始します。"
+    rm -f "${STALE_FILES[@]}"
+fi
+
+# 全体のシミュレーション組み合わせ数を取得
+TOTAL_COMBOS=$(python3 "$GEN_CONFIG_SCRIPT" --print-total)
+
+if [ -z "$TOTAL_COMBOS" ] || [ "$TOTAL_COMBOS" -eq 0 ]; then
+    echo "警告: 生成対象のシミュレーション組み合わせが見つかりません。"
+    exit 0
+fi
+
 echo "========================================"
 echo "シミュレーションバッチ処理を開始します"
 echo "対象ディレクトリ: $CMD_DIR"
-echo "総ファイル数: $TOTAL_FILES"
-echo "バッチサイズ: $BATCH_SIZE ファイルごとに集計"
+echo "総組み合わせ数: $TOTAL_COMBOS"
+echo "バッチサイズ: $BATCH_SIZE 件ごとに 生成 → 実行 → 集計 → 削除"
 echo "解析並列数: $PARSE_PARALLEL"
 echo "========================================"
 
+CURSOR=0
 
-for (( i=0; i<$TOTAL_FILES; i+=$BATCH_SIZE )); do
+while [ "$CURSOR" -lt "$TOTAL_COMBOS" ]; do
 
-    BATCH_FILES=("${CONFIG_FILES[@]:$i:$BATCH_SIZE}")
-    NUM_IN_BATCH=${#BATCH_FILES[@]}
+    BATCH_END=$((CURSOR + BATCH_SIZE))
+    if [ "$BATCH_END" -gt "$TOTAL_COMBOS" ]; then
+        BATCH_END=$TOTAL_COMBOS
+    fi
 
     echo "--------------------------------------------------"
-    echo "バッチ実行開始: $((i+1)) 〜 $((i+NUM_IN_BATCH)) / $TOTAL_FILES"
+    echo "バッチ実行開始: $((CURSOR+1)) 〜 $BATCH_END / $TOTAL_COMBOS"
+
+    # ---------- 0) configファイル群を生成 ----------
+    echo "configファイルを生成しています..."
+    if ! python3 "$GEN_CONFIG_SCRIPT" --start "$CURSOR" --count "$BATCH_SIZE"; then
+        echo "エラー: configファイルの生成に失敗しました。"
+        exit 1
+    fi
+
+    shopt -s nullglob
+    BATCH_FILES=( *.config )
+    shopt -u nullglob
+    NUM_IN_BATCH=${#BATCH_FILES[@]}
+
+    if [ "$NUM_IN_BATCH" -eq 0 ]; then
+        echo "エラー: configファイルが生成されませんでした。"
+        exit 1
+    fi
 
     # ---------- 1) シミュレーションをSLURMに並列投入 ----------
     JOB_IDS=()
@@ -80,6 +109,7 @@ for (( i=0; i<$TOTAL_FILES; i+=$BATCH_SIZE )); do
 
     if [ "$NUM_TRACES" -eq 0 ]; then
         echo "警告: .trace ファイルが見つかりません。このバッチの解析をスキップします。"
+        CURSOR=$BATCH_END
         continue
     fi
 
@@ -100,20 +130,20 @@ for (( i=0; i<$TOTAL_FILES; i+=$BATCH_SIZE )); do
         CHUNK_FILES=("${TRACE_FILES[@]:$j:$CHUNK_SIZE}")
 
         # このチャンクが担当する trace ファイルの一覧(manifest)を書き出す
-        MANIFEST_FILE="$MANIFEST_DIR/manifest_batch${i}_chunk${CHUNK_IDX}.txt"
+        MANIFEST_FILE="$MANIFEST_DIR/manifest_cursor${CURSOR}_chunk${CHUNK_IDX}.txt"
         : > "$MANIFEST_FILE"
         for tf in "${CHUNK_FILES[@]}"; do
             realpath "$tf" >> "$MANIFEST_FILE"
         done
 
-        PARTIAL_CSV="$CMD_DIR/plots/partial_batch${i}_chunk${CHUNK_IDX}.csv"
+        PARTIAL_CSV="$CMD_DIR/plots/partial_cursor${CURSOR}_chunk${CHUNK_IDX}.csv"
         PARTIAL_CSVS+=("$PARTIAL_CSV")
 
         # このチャンク専用のジョブを投入。結果はヘッダー無しの部分CSVに書き込む
         PJID=$(sbatch --parsable --partition=ubuntu \
             --job-name="parse_c${CHUNK_IDX}" \
-            --output="$LOG_DIR/parse_batch${i}_chunk${CHUNK_IDX}.out" \
-            --error="$LOG_DIR/parse_batch${i}_chunk${CHUNK_IDX}.err" \
+            --output="$LOG_DIR/parse_cursor${CURSOR}_chunk${CHUNK_IDX}.out" \
+            --error="$LOG_DIR/parse_cursor${CURSOR}_chunk${CHUNK_IDX}.err" \
             --wrap="python3 '$SCRIPT_DIR/create_csv.py' '$CMD_DIR' '$NUM_DEVICE' '$PARTIAL_CSV' '$MANIFEST_FILE'")
         PARSE_JOB_IDS+=("$PJID")
     done
@@ -144,14 +174,16 @@ for (( i=0; i<$TOTAL_FILES; i+=$BATCH_SIZE )); do
     done
 
     if [ "$MERGE_OK" = true ]; then
-        echo "マージ成功！処理済みの .trace / 部分CSV / manifest を削除します..."
-        rm -f "$CMD_DIR"/*.trace
+        echo "マージ成功！このバッチの .trace / .config / .pos / .stat / .statconfig / 部分CSV / manifest を削除します..."
+        rm -f "$CMD_DIR"/*.trace "$CMD_DIR"/*.config "$CMD_DIR"/*.stat "$CMD_DIR"/*.statconfig
         rm -f "${PARTIAL_CSVS[@]}"
-        rm -f "$MANIFEST_DIR"/manifest_batch${i}_*.txt
+        rm -f "$MANIFEST_DIR"/manifest_cursor${CURSOR}_*.txt
     else
         echo "エラー: 集計処理中に問題が発生しました。"
         exit 1
     fi
+
+    CURSOR=$BATCH_END
 
 done
 

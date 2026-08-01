@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-simulation_results.csv を読み込み、PAN1_CH / PAN2_CH / Distance / PAN1_Offload /
-PAN2_Offload の組み合わせ（条件）ごとに Seed をまたいで集計し、
-PER (Packet Error Rate) と RSSI、距離（.pos ファイルから算出）に関する
-統計プロットを出力する。
-
-出力先: plots/{帯域の組み合わせ}/{距離}m/{interf|no_interf}/
-"""
 
 import os
 import re
@@ -114,9 +106,14 @@ def load_and_aggregate(csv_file, stats_dir):
     CSV を読み込み、(PAN1_CH, PAN2_CH, Distance, PAN1_Offload, PAN2_Offload) を
     条件キーとして、全 Seed x 全デバイス分の UL/DL PER・RSSI・(.pos から算出した)
     距離を1つの配列に蓄積する。
+
+    各 .pos ファイルは、最初に参照(読み込み)された時点でディスクから削除する。
+    以降そのファイルが必要になった場合は pos_cache 内のデータをそのまま使い回す。
     """
     data = defaultdict(make_empty_condition_data)
     pos_cache = {}  # 同じ .pos ファイルを何度も読まないようにキャッシュ
+    deleted_pos_count = 0
+    missing_pos_count = 0
 
     with open(csv_file, mode="r", encoding="utf-8") as f:
         reader = csv.reader(f)
@@ -143,9 +140,16 @@ def load_and_aggregate(csv_file, stats_dir):
                 fpath = os.path.join(stats_dir, fname)
                 if os.path.isfile(fpath):
                     pos_cache[fname] = parse_pos_file(fpath)
+                    # 参照した時点でこのファイルはもう不要なので削除する
+                    try:
+                        os.remove(fpath)
+                        deleted_pos_count += 1
+                    except OSError as e:
+                        print(f"Warning: failed to delete pos file {fpath}: {e}")
                 else:
                     print(f"Warning: pos file not found: {fpath}")
                     pos_cache[fname] = None
+                    missing_pos_count += 1
             positions = pos_cache[fname]
 
             entry = data[condition_key]
@@ -184,6 +188,7 @@ def load_and_aggregate(csv_file, stats_dir):
                 entry["pan2_rssi"].append(rssi)
                 entry["pan2_dist"].append(_calc_distance(positions, dev, 1))
 
+    print(f"--- .pos files consumed & deleted: {deleted_pos_count}, missing: {missing_pos_count} ---")
     return data
 
 

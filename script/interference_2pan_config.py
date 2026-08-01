@@ -4,6 +4,8 @@ import os
 import sys
 import random
 import math
+import argparse
+import itertools
 import numpy as np
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
@@ -85,7 +87,6 @@ TARGET_BANDWIDTH_PATTERNS = [[0, 2], [3, 2]]
 NUM_DEVICE = 50
 DEVICE_ID_1 = list(range(3, NUM_DEVICE + 3))
 DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
-
 DISTANCES_M = 1500
 SIMULATION_SEEDS = 100
 MEASURE_START_SEC = 20.0
@@ -109,6 +110,16 @@ pan1_offload_max = 110
 pan2_offload_min = 10
 pan2_offload_max = 110
 
+# --- 全パラメータの組み合わせを事前に確定させておく ---
+# 元の入れ子ループと同じ順序 (bandwidth_pattern -> offered_load_pan2 -> offered_load_pan1 -> seed)
+# で並べることで、"全体の何番目から何個" というバッチ指定が可能になる。
+ALL_COMBOS = list(itertools.product(
+    TARGET_BANDWIDTH_PATTERNS,
+    range(pan2_offload_min, pan2_offload_max, 10),
+    range(pan1_offload_min, pan1_offload_max, 10),
+    range(SIMULATION_SEEDS),
+))
+
 
 def generate_uniform_circle_coords(center_x, center_y, radius, num_devices):
     """
@@ -129,7 +140,12 @@ def generate_uniform_circle_coords(center_x, center_y, radius, num_devices):
     
     return x, y
 
-def main():
+
+def generate_batch(combos):
+    """
+    combos: [(bandwidth_pattern, offered_load_pan2, offered_load_pan1, seed), ...]
+    のリストを受け取り、実際に .config / .pos / .statconfig を生成する。
+    """
     try:
         env = Environment(
             loader=FileSystemLoader(TEMPLATE_DIR),
@@ -146,179 +162,197 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
-        
-    """メイン処理"""
-    for bandwidth_pattern in TARGET_BANDWIDTH_PATTERNS:
+
+    total_files = 0
+
+    for bandwidth_pattern, offered_load_pan2, offered_load_pan1, seed in combos:
         interference_flag = 0
         pan1_bandwidth = CHANNELS[bandwidth_pattern[0]]["freq_mhz"]
         pan2_bandwidth = CHANNELS[bandwidth_pattern[1]]["freq_mhz"]
 
         if pan1_bandwidth == pan2_bandwidth:
             interference_flag = 1
-        
-        for offered_load_pan2 in range(pan2_offload_min, pan2_offload_max, 10):
-            for offered_load_pan1 in range(pan1_offload_min, pan1_offload_max, 10):
-                    for seed in range(SIMULATION_SEEDS):
-                        np.random.seed(seed)
 
-                        #エンドデバイスの分布範囲
-                        x1, y1 = generate_uniform_circle_coords(0, 0, int(round(MAXIMUM_COMMUNICATION_RANGE[bandwidth_pattern[0]],1)*1000), NUM_DEVICE)
-                        x2, y2 = generate_uniform_circle_coords(DISTANCES_M, 0,  int(round(MAXIMUM_COMMUNICATION_RANGE[bandwidth_pattern[1]],1)*1000), NUM_DEVICE)
+        np.random.seed(seed)
 
-                        total_files = 0
-                        
-                        if interference_flag == 1:
-                            prefix = f"interf_dist_{DISTANCES_M}m_channel_{bandwidth_pattern[0]}_vs_{bandwidth_pattern[1]}_pan1_{offered_load_pan1}_pan2_{offered_load_pan2}_seed{seed}"
-                        else:
-                            prefix = f"no_interf_dist_{DISTANCES_M}m_channel_{bandwidth_pattern[0]}_vs_{bandwidth_pattern[1]}_pan1_{offered_load_pan1}_pan2_{offered_load_pan2}_seed{seed}"
-                        
-                        all_nodes = [] # 新しいノードリストを初期化
+        #エンドデバイスの分布範囲
+        x1, y1 = generate_uniform_circle_coords(0, 0, int(round(MAXIMUM_COMMUNICATION_RANGE[bandwidth_pattern[0]],1)*1000), NUM_DEVICE)
+        x2, y2 = generate_uniform_circle_coords(DISTANCES_M, 0,  int(round(MAXIMUM_COMMUNICATION_RANGE[bandwidth_pattern[1]],1)*1000), NUM_DEVICE)
 
-                        print(prefix)
+        if interference_flag == 1:
+            prefix = f"interf_dist_{DISTANCES_M}m_channel_{bandwidth_pattern[0]}_vs_{bandwidth_pattern[1]}_pan1_{offered_load_pan1}_pan2_{offered_load_pan2}_seed{seed}"
+        else:
+            prefix = f"no_interf_dist_{DISTANCES_M}m_channel_{bandwidth_pattern[0]}_vs_{bandwidth_pattern[1]}_pan1_{offered_load_pan1}_pan2_{offered_load_pan2}_seed{seed}"
 
-                        # Coordinatorノードの定義
-                        coordinator_node_1= {
-                            "id": 1,
-                            "pan_id": 0,
-                            "mode": "coordinator",
-                            "pos_list": [{"time": 0, "x": 0, "y": 0}],
-                            "interfaces": [{"mode": "PanCoordinator", "init_ch": bandwidth_pattern[0]}],
-                            "associated_device_table": DEVICE_ID_1,  # Device ID 2を静的に関連付け
-                            "init_block_index": 0,
-                            "init_block_count": 1,
-                            "desired_channel_bandwidth": CHANNELS[bandwidth_pattern[0]]["width_mhz"]*1e3,
-                            "desired_block_count": 1,
-                            "cbr_applications": [],
-                            "preamble_power": CHANNELS[bandwidth_pattern[0]]["rx_sensitivity_dbm"],
-                            "ed_threshold_dbm": ED_THRESHOLDS[bandwidth_pattern[0]],
-                        }
-                        for dev_id in DEVICE_ID_1:
-                            coordinator_node_1["cbr_applications"].append({
-                                    "dst": dev_id,  # Coordinator 1宛て
-                                    "bps": ((CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * offered_load_pan1 * 0.01),
-                                    "start": MEASURE_START_SEC,
-                                    "end": MEASURE_END_SEC,
-                                    "jitter": 1.0,
-                                    "payload_size": 127 - 15,  # MACヘッダを引いたサイズ
-                                    "is_ack_required": True,
-                            })
-                        all_nodes.append(coordinator_node_1)
+        all_nodes = [] # 新しいノードリストを初期化
 
-                        coordinator_node_2 = {
-                            "id": 2,
-                            "pan_id": 1, # PAN IDを2に設定（衝突回避のため）
-                            "mode": "coordinator",
-                            "pos_list": [{"time": 0, "x": DISTANCES_M, "y": 0}], 
-                            "interfaces": [{"mode": "PanCoordinator", "init_ch": bandwidth_pattern[1]}],
-                            "associated_device_table": DEVICE_ID_2,
-                            "init_block_index": 0,
-                            "init_block_count": 1,
-                            "desired_channel_bandwidth": CHANNELS[bandwidth_pattern[1]]["width_mhz"]*1e3,
-                            "desired_block_count": 1,
-                            "cbr_applications": [],
-                            "preamble_power": CHANNELS[bandwidth_pattern[1]]["rx_sensitivity_dbm"],
-                            "ed_threshold_dbm": ED_THRESHOLDS[bandwidth_pattern[1]],
-                        }
-                        for dev_id in DEVICE_ID_2:
-                            coordinator_node_2["cbr_applications"].append({
-                                    "dst": dev_id,  # Coordinator 1宛て
-                                    "bps": ((CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * offered_load_pan2 * 0.01),
-                                    "start": MEASURE_START_SEC,
-                                    "end": MEASURE_END_SEC,
-                                    "jitter": 1.0,
-                                    "payload_size": FRAME_SIZE+ 5 - 15,  # MACヘッダを引いたサイズ
-                                    "is_ack_required": True,
-                            })
-                        all_nodes.append(coordinator_node_2)
+        print(prefix)
 
-                        for i, dev_id in enumerate(DEVICE_ID_1):
-                            device_node_1 = {
-                                "id": dev_id,
-                                "pan_id": 0,
-                                "mode": "device",
-                                "pos_list": [{"time": 0, "x": x1[i], "y": y1[i]}],
-                                "interfaces": [{"mode": "Device", "init_ch": bandwidth_pattern[0]}],
-                                "associated": True,  # 静的に関連付け済み
-                                "cbr_applications": [{
-                                    "dst": 1,  # Coordinator 1宛て
-                                    "bps": ((CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * offered_load_pan1 * 0.01),
-                                    "start": MEASURE_START_SEC,
-                                    "end": MEASURE_END_SEC,
-                                    "jitter": 20.0,
-                                    "payload_size": 127 - 15,  # MACヘッダを引いたサイズ
-                                    "is_ack_required": True,
-                                }],
-                                "preamble_power": CHANNELS[bandwidth_pattern[0]]["rx_sensitivity_dbm"],
-                                "ed_threshold_dbm": ED_THRESHOLDS[bandwidth_pattern[0]],
-                            }
-                            all_nodes.append(device_node_1)
+        # Coordinatorノードの定義
+        coordinator_node_1= {
+            "id": 1,
+            "pan_id": 0,
+            "mode": "coordinator",
+            "pos_list": [{"time": 0, "x": 0, "y": 0}],
+            "interfaces": [{"mode": "PanCoordinator", "init_ch": bandwidth_pattern[0]}],
+            "associated_device_table": DEVICE_ID_1,  # Device ID 2を静的に関連付け
+            "init_block_index": 0,
+            "init_block_count": 1,
+            "desired_channel_bandwidth": CHANNELS[bandwidth_pattern[0]]["width_mhz"]*1e3,
+            "desired_block_count": 1,
+            "cbr_applications": [],
+            "preamble_power": CHANNELS[bandwidth_pattern[0]]["rx_sensitivity_dbm"],
+            "ed_threshold_dbm": ED_THRESHOLDS[bandwidth_pattern[0]],
+        }
+        for dev_id in DEVICE_ID_1:
+            coordinator_node_1["cbr_applications"].append({
+                    "dst": dev_id,  # Coordinator 1宛て
+                    "bps": ((CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * offered_load_pan1 * 0.01),
+                    "start": MEASURE_START_SEC,
+                    "end": MEASURE_END_SEC,
+                    "jitter": 1.0,
+                    "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
+                    "is_ack_required": True,
+            })
+        all_nodes.append(coordinator_node_1)
+
+        coordinator_node_2 = {
+            "id": 2,
+            "pan_id": 1, # PAN IDを2に設定（衝突回避のため）
+            "mode": "coordinator",
+            "pos_list": [{"time": 0, "x": DISTANCES_M, "y": 0}], 
+            "interfaces": [{"mode": "PanCoordinator", "init_ch": bandwidth_pattern[1]}],
+            "associated_device_table": DEVICE_ID_2,
+            "init_block_index": 0,
+            "init_block_count": 1,
+            "desired_channel_bandwidth": CHANNELS[bandwidth_pattern[1]]["width_mhz"]*1e3,
+            "desired_block_count": 1,
+            "cbr_applications": [],
+            "preamble_power": CHANNELS[bandwidth_pattern[1]]["rx_sensitivity_dbm"],
+            "ed_threshold_dbm": ED_THRESHOLDS[bandwidth_pattern[1]],
+        }
+        for dev_id in DEVICE_ID_2:
+            coordinator_node_2["cbr_applications"].append({
+                    "dst": dev_id,  # Coordinator 1宛て
+                    "bps": ((CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * offered_load_pan2 * 0.01),
+                    "start": MEASURE_START_SEC,
+                    "end": MEASURE_END_SEC,
+                    "jitter": 1.0,
+                    "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
+                    "is_ack_required": True,
+            })
+        all_nodes.append(coordinator_node_2)
+
+        for i, dev_id in enumerate(DEVICE_ID_1):
+            device_node_1 = {
+                "id": dev_id,
+                "pan_id": 0,
+                "mode": "device",
+                "pos_list": [{"time": 0, "x": x1[i], "y": y1[i]}],
+                "interfaces": [{"mode": "Device", "init_ch": bandwidth_pattern[0]}],
+                "associated": True,  # 静的に関連付け済み
+                "cbr_applications": [{
+                    "dst": 1,  # Coordinator 1宛て
+                    "bps": ((CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * offered_load_pan1 * 0.01),
+                    "start": MEASURE_START_SEC,
+                    "end": MEASURE_END_SEC,
+                    "jitter": 20.0,
+                    "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
+                    "is_ack_required": True,
+                }],
+                "preamble_power": CHANNELS[bandwidth_pattern[0]]["rx_sensitivity_dbm"],
+                "ed_threshold_dbm": ED_THRESHOLDS[bandwidth_pattern[0]],
+            }
+            all_nodes.append(device_node_1)
+
+        for i, dev_id in enumerate(DEVICE_ID_2):
+            device_node_2 = {
+                "id": dev_id,
+                "pan_id": 1,
+                "mode": "device",
+                "pos_list": [{"time": 0, "x": x2[i], "y": y2[i]}],
+                "interfaces": [{"mode": "Device", "init_ch": bandwidth_pattern[1]}],
+                "associated": True,  # 静的に関連付け済み
+                "cbr_applications": [{
+                    "dst": 2,  # Coordinator 1宛て
+                    "bps": ((CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * offered_load_pan2 * 0.01),
+                    "start": MEASURE_START_SEC,
+                    "end": MEASURE_END_SEC,
+                    "jitter": 20.0,
+                    "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
+                    "is_ack_required": True,
+                }],
+                "preamble_power": CHANNELS[bandwidth_pattern[1]]["rx_sensitivity_dbm"],
+                "ed_threshold_dbm": ED_THRESHOLDS[bandwidth_pattern[1]],
+            }
+            all_nodes.append(device_node_2)
+
+        # テンプレートに渡すメインのコンテキスト
+        context = {
+            "label": prefix,
+            "config_filename_prefix": prefix,
+            "seed": seed,
+            "sim_time": MEASURE_END_SEC,
+            "mobility_seed": seed,
+            "band_name": "DrIotTestBand",
+            "measure_start": MEASURE_START_SEC,
+            "measure_end": SIM_DURATION_SEC - 10.0,
+            "is_6lowpan_enabled": False,
+            "advertising_channel_number": 0,
+            "nodes": all_nodes,
+            "tx_power": 13.010299956639813, # dBm
+            "trace_tags": MY_TRACE_TAGS,
+            "cca_mode": "ED_or_CS",
+            "channels": CHANNELS,
+
+        }
+
+        # --- ファイル生成 ---
+        try:
+            # .config
+            with open(os.path.join(OUTPUT_DIR, f"{prefix}.config"), "w") as f:
+                f.write(config_template.render(context))
+            # .pos
+            with open(os.path.join(OUTPUT_DIR, f"{prefix}.pos"), "w") as f:
+                f.write(pos_template.render(context))
+            # .statconfig
+            with open(os.path.join(OUTPUT_DIR, f"{prefix}.statconfig"), "w") as f:
+                f.write(stat_template.render(context))
+
+            total_files += 3
+        except Exception as e:
+            print(
+                f"\nError: Problem occurred while generating files for {prefix}.",
+                file=sys.stderr,
+            )
+            print(f"  Details: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    return len(combos), total_files
 
 
-                        for i, dev_id in enumerate(DEVICE_ID_2):
-                            device_node_2 = {
-                                "id": dev_id,
-                                "pan_id": 1,
-                                "mode": "device",
-                                "pos_list": [{"time": 0, "x": x2[i], "y": y2[i]}],
-                                "interfaces": [{"mode": "Device", "init_ch": bandwidth_pattern[1]}],
-                                "associated": True,  # 静的に関連付け済み
-                                "cbr_applications": [{
-                                    "dst": 2,  # Coordinator 1宛て
-                                    "bps": ((CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * offered_load_pan2 * 0.01),
-                                    "start": MEASURE_START_SEC,
-                                    "end": MEASURE_END_SEC,
-                                    "jitter": 20.0,
-                                    "payload_size": FRAME_SIZE+5 - 15,  # MACヘッダを引いたサイズ
-                                    "is_ack_required": True,
-                                }],
-                                "preamble_power": CHANNELS[bandwidth_pattern[1]]["rx_sensitivity_dbm"],
-                                "ed_threshold_dbm": ED_THRESHOLDS[bandwidth_pattern[1]],
-                            }
-                            all_nodes.append(device_node_2)
+def main():
+    parser = argparse.ArgumentParser(description="シミュレーション用 .config/.pos/.statconfig をバッチ生成する")
+    parser.add_argument("--start", type=int, default=0, help="全組み合わせの中の開始インデックス(0始まり)")
+    parser.add_argument("--count", type=int, default=None, help="生成する組み合わせ数(省略時は start 以降の残り全部)")
+    parser.add_argument("--print-total", action="store_true", help="全組み合わせ数だけを標準出力して終了する")
+    args = parser.parse_args()
 
+    if args.print_total:
+        print(len(ALL_COMBOS))
+        return
 
-                            # テンプレートに渡すfメインのコンテキスト
-                        context = {
-                            "label": prefix,
-                            "config_filename_prefix": prefix,
-                            "seed": seed,
-                            "sim_time": MEASURE_END_SEC,
-                            "mobility_seed": seed,
-                            "band_name": "DrIotTestBand",
-                            "measure_start": MEASURE_START_SEC,
-                            "measure_end": SIM_DURATION_SEC - 10.0,
-                            "is_6lowpan_enabled": False,
-                            "advertising_channel_number": 0,
-                            "nodes": all_nodes,
-                            "tx_power": 13.010299956639813, # dBm
-                            "trace_tags": MY_TRACE_TAGS,
-                            "cca_mode": "ED_or_CS",
-                            "channels": CHANNELS,
+    start = args.start
+    count = args.count if args.count is not None else (len(ALL_COMBOS) - start)
+    batch = ALL_COMBOS[start:start + count]
 
-                        }
+    if not batch:
+        print(f"生成対象がありません (start={start}, total={len(ALL_COMBOS)})。", file=sys.stderr)
+        return
 
-                        # --- ファイル生成 ---
-                        try:
-                            # .config
-                            with open(os.path.join(OUTPUT_DIR, f"{prefix}.config"), "w") as f:
-                                f.write(config_template.render(context))
-                            # .pos
-                            with open(os.path.join(OUTPUT_DIR, f"{prefix}.pos"), "w") as f:
-                                f.write(pos_template.render(context))
-                            # .statconfig
-                            with open(os.path.join(OUTPUT_DIR, f"{prefix}.statconfig"), "w") as f:
-                                f.write(stat_template.render(context))
-
-                            total_files += 3
-                        except Exception as e:
-                            print(
-                                f"\nError: Problem occurred while generating files for {prefix}.",
-                                file=sys.stderr,
-                            )
-                            print(f"  Details: {e}", file=sys.stderr)
-                            sys.exit(1)
+    num_combos, total_files = generate_batch(batch)
+    print(f"Generated {num_combos} combinations ({total_files} files) for range [{start}, {start + num_combos})")
 
 
 if __name__ == "__main__":
     main()
-
