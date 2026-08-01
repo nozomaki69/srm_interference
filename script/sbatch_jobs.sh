@@ -7,7 +7,7 @@ NUM_DEVICE=50
 OUTPUT_CSV="$CMD_DIR/plots/simulation_results.csv"
 
 # 1バッチあたりの生成・シミュレーション・集計件数
-BATCH_SIZE=1000
+BATCH_SIZE=2000
 
 # .trace ファイルの解析を何並列のSLURMジョブに分割するか
 PARSE_PARALLEL=50
