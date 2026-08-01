@@ -15,6 +15,12 @@ PARSE_PARALLEL=50
 # configファイル生成スクリプト (ファイル名が違う場合はここを変更してください)
 GEN_CONFIG_SCRIPT="$SCRIPT_DIR/interference_2pan_config.py"
 
+# 全バッチ終了後に実行する解析スクリプト
+ANALYZE_SCRIPT="$SCRIPT_DIR/analyze_csv.py"
+# analyze_csv.py が出力した interference_detection_results.csv からヒートマップを作るスクリプト
+HEATMAP_SCRIPT="$SCRIPT_DIR/plot_heatmaps.py"
+HEATMAP_SCRIPT="$SCRIPT_DIR/plot_heatmaps.py"
+
 cd "$CMD_DIR" || exit
 
 # plots / manifest / ログ用ディレクトリを作成
@@ -29,7 +35,10 @@ if [ -f "$OUTPUT_CSV" ]; then
 fi
 
 # 前回実行時の残留ファイルをクリーンアップ
-# (.config/.pos/.statconfig/.trace/.stat はすべて1バッチ限りの使い捨てファイルとして扱う)
+# 注意: .pos はバッチ完了時には消さず、解析スクリプト(plot_results.py等)が
+# 全バッチ終了後に参照した時点で削除する運用のため、この起動時クリーンアップで
+# まとめて消える。まだ解析していない前回分の .pos が残っている場合は、
+# run_simulations.sh を再実行する前に解析スクリプトを実行しておくこと。
 shopt -s nullglob
 STALE_FILES=( *.config *.pos *.statconfig *.trace *.stat )
 shopt -u nullglob
@@ -174,7 +183,9 @@ while [ "$CURSOR" -lt "$TOTAL_COMBOS" ]; do
     done
 
     if [ "$MERGE_OK" = true ]; then
-        echo "マージ成功！このバッチの .trace / .config / .pos / .stat / .statconfig / 部分CSV / manifest を削除します..."
+        # .pos は解析スクリプト(plot_results.py 等)が全バッチ終了後に距離計算のため
+        # 参照するので、ここでは削除しない。参照された時点でそちらが削除する。
+        echo "マージ成功！このバッチの .trace / .config / .stat / .statconfig / 部分CSV / manifest を削除します..."
         rm -f "$CMD_DIR"/*.trace "$CMD_DIR"/*.config "$CMD_DIR"/*.stat "$CMD_DIR"/*.statconfig
         rm -f "${PARTIAL_CSVS[@]}"
         rm -f "$MANIFEST_DIR"/manifest_cursor${CURSOR}_*.txt
@@ -189,3 +200,23 @@ done
 
 echo "========================================"
 echo "すべてのシミュレーションと集計が完了しました！"
+echo "========================================"
+
+echo "解析スクリプトを実行します: $ANALYZE_SCRIPT"
+if python3 "$ANALYZE_SCRIPT"; then
+    echo "解析が完了しました。"
+else
+    echo "エラー: $ANALYZE_SCRIPT の実行に失敗しました。"
+    exit 1
+fi
+
+echo "ヒートマップ生成スクリプトを実行します: $HEATMAP_SCRIPT"
+if python3 "$HEATMAP_SCRIPT"; then
+    echo "ヒートマップ生成が完了しました。"
+else
+    echo "エラー: $HEATMAP_SCRIPT の実行に失敗しました。"
+    exit 1
+fi
+
+echo "========================================"
+echo "すべての処理が完了しました！"

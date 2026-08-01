@@ -20,7 +20,7 @@ CHANNELS = [
     {
         "id": 0,
         "freq_mhz": base_freq_mhz,
-        "width_mhz": 150e3 / 1e6, #0.15
+        "width_mhz": 100e3 / 1e6, #0.15
         "rx_sensitivity_dbm": -97.0,
         "bitrate_kbps": 50,
     },
@@ -28,7 +28,7 @@ CHANNELS = [
     {
         "id": 1,
         "freq_mhz": base_freq_mhz,
-        "width_mhz": 300e3 / 1e6, #0.3
+        "width_mhz": 200e3 / 1e6, #0.3
         "rx_sensitivity_dbm": -93.989700,
         "bitrate_kbps": 100,
     },  
@@ -36,14 +36,14 @@ CHANNELS = [
     {
         "id": 2,
         "freq_mhz": base_freq_mhz,
-        "width_mhz": 600e3 / 1e6, #0.6
+        "width_mhz": 400e3 / 1e6, #0.6
         "rx_sensitivity_dbm": -90.979400,
         "bitrate_kbps": 200,
     }, 
     {
         "id": 3,
         "freq_mhz": base_freq_mhz +1,
-        "width_mhz": 150e3 / 1e6, #0.15
+        "width_mhz": 100e3 / 1e6, #0.15
         "rx_sensitivity_dbm": -97.0,
         "bitrate_kbps": 50,
     },
@@ -51,7 +51,7 @@ CHANNELS = [
     {
         "id": 4,
         "freq_mhz": base_freq_mhz +1,
-        "width_mhz": 300e3 / 1e6, #0.3
+        "width_mhz": 200e3 / 1e6, #0.3
         "rx_sensitivity_dbm": -93.989700,
         "bitrate_kbps": 100,
     },  
@@ -59,7 +59,7 @@ CHANNELS = [
     {
         "id": 5,
         "freq_mhz": base_freq_mhz +1,
-        "width_mhz": 600e3 / 1e6, #0.6
+        "width_mhz": 400e3 / 1e6, #0.6
         "rx_sensitivity_dbm": -90.979400,
         "bitrate_kbps": 200,
     },  
@@ -81,13 +81,12 @@ MAXIMUM_COMMUNICATION_RANGE = {
     5: 1.0192307006600434,
 }
 
-#TARGET_BANDWIDTH_PATTERNS = [[0, 0], [0, 1], [0, 2], [1, 1], [1, 2], [2, 2], [0, 3], [0, 4], [0, 5], [1, 4], [1, 5], [2, 5]]
-TARGET_BANDWIDTH_PATTERNS = [[0, 2], [3, 2]]
+TARGET_BANDWIDTH_PATTERNS = [[0, 0], [0, 1], [0, 2], [1, 1], [1, 2], [2, 2], [0, 3], [0, 4], [0, 5], [1, 4], [1, 5], [2, 5]]
+#TARGET_BANDWIDTH_PATTERNS = [[0, 2], [3, 2]]
 
 NUM_DEVICE = 50
 DEVICE_ID_1 = list(range(3, NUM_DEVICE + 3))
 DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
-DISTANCES_M = 1500
 SIMULATION_SEEDS = 100
 MEASURE_START_SEC = 20.0
 MEASURE_DURATION_SEC = 100.0
@@ -176,8 +175,13 @@ def generate_batch(combos):
         np.random.seed(seed)
 
         #エンドデバイスの分布範囲
-        x1, y1 = generate_uniform_circle_coords(0, 0, int(round(MAXIMUM_COMMUNICATION_RANGE[bandwidth_pattern[0]],1)*1000), NUM_DEVICE)
-        x2, y2 = generate_uniform_circle_coords(DISTANCES_M, 0,  int(round(MAXIMUM_COMMUNICATION_RANGE[bandwidth_pattern[1]],1)*1000), NUM_DEVICE)
+        # それぞれの通信範囲を計算
+        range1 = int(round(MAXIMUM_COMMUNICATION_RANGE[bandwidth_pattern[0]], 1) * 1000)
+        range2 = int(round(MAXIMUM_COMMUNICATION_RANGE[bandwidth_pattern[1]], 1) * 1000)
+
+        DISTANCES_M = max(range1, range2) + 100
+        x1, y1 = generate_uniform_circle_coords(0, 0, range1, NUM_DEVICE)
+        x2, y2 = generate_uniform_circle_coords(DISTANCES_M, 0, range2, NUM_DEVICE)
 
         if interference_flag == 1:
             prefix = f"interf_dist_{DISTANCES_M}m_channel_{bandwidth_pattern[0]}_vs_{bandwidth_pattern[1]}_pan1_{offered_load_pan1}_pan2_{offered_load_pan2}_seed{seed}"
