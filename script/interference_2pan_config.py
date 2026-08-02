@@ -107,7 +107,7 @@ STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 pan1_offload_min = 10
 pan1_offload_max = 110
 pan2_offload_min = 10
-pan2_offload_max = 11
+pan2_offload_max = 110
 
 # --- 全パラメータの組み合わせを事前に確定させておく ---
 # 元の入れ子ループと同じ順序 (bandwidth_pattern -> offered_load_pan2 -> offered_load_pan1 -> seed)
