@@ -63,7 +63,7 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
     fig_h = 0.9 * len(rows)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
-    im = ax.imshow(f1_pivot.values, cmap="YlGnBu", vmin=0, vmax=1, aspect="auto")
+    im = ax.imshow(f1_pivot.values, cmap="YlGnBu", vmin=0.5, vmax=1, aspect="auto")
 
     ax.set_xticks(range(len(cols)))
     ax.set_xticklabels(cols)
@@ -79,11 +79,11 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
             th_val = th_pivot.iloc[i, j]
             if pd.isna(f1_val):
                 continue
-            text_color = "white" if f1_val > 0.6 else "black"
+            text_color = "white" if f1_val >= 0.8 else "black"
             # Removed Japanese, changed to "Th=" to save space, increased font size
             ax.text(
-                j, i, f"Th={th_val:.2f}\nF1={f1_val:.2f}",
-                ha="center", va="center", color=text_color, fontsize=10, fontweight="bold"
+                j, i, f"Tau: {th_val:.2f}\nF1: {f1_val:.2f}",
+                ha="center", va="center", color=text_color, fontsize=9, fontweight="bold"
             )
 
     cbar = fig.colorbar(im, ax=ax)
