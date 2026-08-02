@@ -443,7 +443,7 @@ VARIANCE_RSSI_BINS = np.arange(0, -121, -10)
 
 # 分散のしきい値の探索範囲。ΔPERは[-1, 1]なので分散の理論上限は1だが、
 # 実データではもっと小さい値になるはず。0〜1を0.001刻みで細かく探索する。
-VARIANCE_THRESHOLDS = np.round(np.arange(0.0, 1.001, 0.001), 4)
+VARIANCE_THRESHOLDS = np.round(np.arange(0.0, 1.001, 0.01), 4)
 
 
 def compute_seed_max_variance(delta_per, rssi_list, num_devices):
