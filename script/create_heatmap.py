@@ -79,7 +79,7 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
             th_val = th_pivot.iloc[i, j]
             if pd.isna(f1_val):
                 continue
-            text_color = "white" if f1_val >= 0.8 else "black"
+            text_color = "white" if f1_val >= 0.74 else "black"
             # Removed Japanese, changed to "Th=" to save space, increased font size
             ax.text(
                 j, i, f"Tau: {th_val:.2f}\nF1: {f1_val:.2f}",
