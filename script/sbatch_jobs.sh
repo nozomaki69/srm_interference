@@ -18,8 +18,7 @@ GEN_CONFIG_SCRIPT="$SCRIPT_DIR/interference_2pan_config.py"
 # 全バッチ終了後に実行する解析スクリプト
 ANALYZE_SCRIPT="$SCRIPT_DIR/analyze_csv.py"
 # analyze_csv.py が出力した interference_detection_results.csv からヒートマップを作るスクリプト
-HEATMAP_SCRIPT="$SCRIPT_DIR/plot_heatmaps.py"
-HEATMAP_SCRIPT="$SCRIPT_DIR/plot_heatmaps.py"
+HEATMAP_SCRIPT="$SCRIPT_DIR/create_heatmap.py"
 
 cd "$CMD_DIR" || exit
 
@@ -35,7 +34,7 @@ if [ -f "$OUTPUT_CSV" ]; then
 fi
 
 # 前回実行時の残留ファイルをクリーンアップ
-# 注意: .pos はバッチ完了時には消さず、解析スクリプト(plot_results.py等)が
+# 注意: .pos はバッチ完了時には消さず、解析スクリプト(analyze_csv.py等)が
 # 全バッチ終了後に参照した時点で削除する運用のため、この起動時クリーンアップで
 # まとめて消える。まだ解析していない前回分の .pos が残っている場合は、
 # run_simulations.sh を再実行する前に解析スクリプトを実行しておくこと。
@@ -96,7 +95,12 @@ while [ "$CURSOR" -lt "$TOTAL_COMBOS" ]; do
     JOB_IDS=()
     for config in "${BATCH_FILES[@]}"; do
         # sbatchで1つずつ投入し、--parsable でジョブIDを取得
-        JID=$(sbatch --parsable --partition=ubuntu "$SCRIPT_DIR/sim_worker_slurm.sh" "$(realpath "$config")")
+        # --output/--error を明示しないと slurm-<jobid>.out がCMD_DIR直下に
+        # 大量に作られてしまうので、解析ジョブと同様にLOG_DIRへ逃がす
+        JID=$(sbatch --parsable --partition=ubuntu \
+            --output="$LOG_DIR/sim_%j.out" \
+            --error="$LOG_DIR/sim_%j.err" \
+            "$SCRIPT_DIR/sim_worker_slurm.sh" "$(realpath "$config")")
         JOB_IDS+=("$JID")
     done
 
@@ -183,7 +187,7 @@ while [ "$CURSOR" -lt "$TOTAL_COMBOS" ]; do
     done
 
     if [ "$MERGE_OK" = true ]; then
-        # .pos は解析スクリプト(plot_results.py 等)が全バッチ終了後に距離計算のため
+        # .pos は解析スクリプト(analyze_csv.py)が全バッチ終了後に距離計算のため
         # 参照するので、ここでは削除しない。参照された時点でそちらが削除する。
         echo "マージ成功！このバッチの .trace / .config / .stat / .statconfig / 部分CSV / manifest を削除します..."
         rm -f "$CMD_DIR"/*.trace "$CMD_DIR"/*.config "$CMD_DIR"/*.stat "$CMD_DIR"/*.statconfig

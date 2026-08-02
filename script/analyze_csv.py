@@ -4,6 +4,7 @@
 import os
 import re
 import csv
+import json
 from collections import defaultdict
 
 import numpy as np
@@ -21,6 +22,11 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STATS_DIR = os.path.join(SCRIPT_DIR, "..")                         # .pos ファイルの場所
 CSV_FILE = os.path.join(SCRIPT_DIR, "..", "plots", "simulation_results.csv")
 PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
+
+# .pos から抽出した座標を永続化しておくCSV。
+# 一度参照した .pos ファイルはここに保存してから削除するので、
+# .pos が無くなった後の再実行でもここから読み込める。
+POSITIONS_CSV = os.path.join(PLOT_BASE_DIR, "positions.csv")
 
 NUM_DEVICE = 50
 PAN1_DEVS = list(range(3, 3 + NUM_DEVICE))          # 3..12
@@ -92,6 +98,47 @@ def parse_pos_file(filepath):
 
 
 # ============================================================
+# 座標の永続化 (positions.csv)
+# ============================================================
+def load_saved_positions(path):
+    """
+    既に positions.csv に保存済みの座標をすべて読み込む。
+    .pos ファイルが既に削除されていても、ここに載っていればそのまま使える。
+    戻り値: { pos_filename: {node_id: (x, y), ...}, ... }
+    """
+    saved = {}
+    if not os.path.isfile(path):
+        return saved
+
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        for row in reader:
+            if len(row) < 2:
+                continue
+            fname, positions_json = row[0], row[1]
+            try:
+                raw = json.loads(positions_json)
+                saved[fname] = {int(k): tuple(v) for k, v in raw.items()}
+            except (ValueError, json.JSONDecodeError):
+                # 壊れた行はスキップ（該当ファイルは再度 .pos が必要になるが、
+                # .pos 側が既に削除済みの場合は Warning: pos file not found として扱われる）
+                continue
+    return saved
+
+
+def append_position_to_csv(path, fname, positions, write_header):
+    """positions.csv に1件(1 .posファイル分)を追記する。"""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(["fname", "positions_json"])
+        positions_json = json.dumps({str(k): list(v) for k, v in positions.items()})
+        writer.writerow([fname, positions_json])
+
+
+# ============================================================
 # CSV 読み込み & 集計
 # ============================================================
 def make_empty_condition_data():
@@ -107,13 +154,20 @@ def load_and_aggregate(csv_file, stats_dir):
     条件キーとして、全 Seed x 全デバイス分の UL/DL PER・RSSI・(.pos から算出した)
     距離を1つの配列に蓄積する。
 
-    各 .pos ファイルは、最初に参照(読み込み)された時点でディスクから削除する。
-    以降そのファイルが必要になった場合は pos_cache 内のデータをそのまま使い回す。
+    各 .pos ファイルは、最初に参照(読み込み)された時点で座標を positions.csv に
+    保存してからディスクから削除する。座標が既に positions.csv に保存済みの
+    場合は、.pos ファイルの有無に関わらずそちらを使う(再実行時に .pos が
+    無くても解析できる)。
     """
     data = defaultdict(make_empty_condition_data)
-    pos_cache = {}  # 同じ .pos ファイルを何度も読まないようにキャッシュ
+    pos_cache = {}  # このプロセス内で同じ .pos を何度も読まないようにするキャッシュ
     deleted_pos_count = 0
     missing_pos_count = 0
+    reused_from_csv_count = 0
+
+    # 既に保存済みの座標を先に読み込んでおく
+    saved_positions = load_saved_positions(POSITIONS_CSV)
+    positions_csv_exists = os.path.isfile(POSITIONS_CSV)
 
     with open(csv_file, mode="r", encoding="utf-8") as f:
         reader = csv.reader(f)
@@ -134,22 +188,40 @@ def load_and_aggregate(csv_file, stats_dir):
 
             condition_key = (pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload)
 
-            # --- .pos ファイルから座標を取得（seed ごとに個別ファイル） ---
+            # --- 座標を取得（seed ごとに個別の .pos / positions.csv の1行に対応） ---
             fname = pos_filename(pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload, seed)
             if fname not in pos_cache:
-                fpath = os.path.join(stats_dir, fname)
-                if os.path.isfile(fpath):
-                    pos_cache[fname] = parse_pos_file(fpath)
-                    # 参照した時点でこのファイルはもう不要なので削除する
-                    try:
-                        os.remove(fpath)
-                        deleted_pos_count += 1
-                    except OSError as e:
-                        print(f"Warning: failed to delete pos file {fpath}: {e}")
+                if fname in saved_positions:
+                    # positions.csv に既に保存済み -> .pos を読まずにそちらを使う
+                    pos_cache[fname] = saved_positions[fname]
+                    reused_from_csv_count += 1
+                    # 万一 .pos がまだ残っていたら(前回の削除失敗など)ついでに消しておく
+                    fpath = os.path.join(stats_dir, fname)
+                    if os.path.isfile(fpath):
+                        try:
+                            os.remove(fpath)
+                        except OSError:
+                            pass
                 else:
-                    print(f"Warning: pos file not found: {fpath}")
-                    pos_cache[fname] = None
-                    missing_pos_count += 1
+                    fpath = os.path.join(stats_dir, fname)
+                    if os.path.isfile(fpath):
+                        positions = parse_pos_file(fpath)
+                        pos_cache[fname] = positions
+                        # 削除する前に座標を positions.csv に保存する
+                        append_position_to_csv(
+                            POSITIONS_CSV, fname, positions,
+                            write_header=not positions_csv_exists,
+                        )
+                        positions_csv_exists = True
+                        try:
+                            os.remove(fpath)
+                            deleted_pos_count += 1
+                        except OSError as e:
+                            print(f"Warning: failed to delete pos file {fpath}: {e}")
+                    else:
+                        print(f"Warning: pos file not found (and not in positions.csv either): {fpath}")
+                        pos_cache[fname] = None
+                        missing_pos_count += 1
             positions = pos_cache[fname]
 
             entry = data[condition_key]
@@ -188,7 +260,10 @@ def load_and_aggregate(csv_file, stats_dir):
                 entry["pan2_rssi"].append(rssi)
                 entry["pan2_dist"].append(_calc_distance(positions, dev, 1))
 
-    print(f"--- .pos files consumed & deleted: {deleted_pos_count}, missing: {missing_pos_count} ---")
+    print(
+        f"--- positions: newly saved & .pos deleted: {deleted_pos_count}, "
+        f"reused from positions.csv: {reused_from_csv_count}, missing: {missing_pos_count} ---"
+    )
     return data
 
 
@@ -367,8 +442,8 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
 VARIANCE_RSSI_BINS = np.arange(0, -121, -10)
 
 # 分散のしきい値の探索範囲。ΔPERは[-1, 1]なので分散の理論上限は1だが、
-# 実データではもっと小さい値になるはず。0〜1を0.01刻みで細かく探索する。
-VARIANCE_THRESHOLDS = np.round(np.arange(0.0, 1.001, 0.01), 3)
+# 実データではもっと小さい値になるはず。0〜1を0.001刻みで細かく探索する。
+VARIANCE_THRESHOLDS = np.round(np.arange(0.0, 1.001, 0.001), 4)
 
 
 def compute_seed_max_variance(delta_per, rssi_list, num_devices):
