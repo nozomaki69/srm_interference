@@ -520,7 +520,7 @@ def evaluate_interference_detection(interf_values, no_interf_values):
 
 def run_interference_detection(data):
     """
-    帯域幅の組み合わせ（例: 50vs50）ごとに、干渉あり／なしシナリオの
+    帯域幅の組み合わせ（例: 50vs50）ごとに、干渉あり/なしシナリオの
     ΔPER分散（RSSIビンごとの最大値, Seed単位）を比較し、干渉検知の
     最適しきい値とその性能指標を求める。PAN1・PAN2それぞれについて行う。
     """
