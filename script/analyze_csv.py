@@ -28,7 +28,7 @@ PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 # .pos が無くなった後の再実行でもここから読み込める。
 POSITIONS_CSV = os.path.join(PLOT_BASE_DIR, "positions.csv")
 
-NUM_DEVICE = 50
+NUM_DEVICE = 30
 PAN1_DEVS = list(range(3, 3 + NUM_DEVICE))          # 3..12
 PAN2_DEVS = list(range(3 + NUM_DEVICE, 3 + 2 * NUM_DEVICE))  # 13..22
 RSSI_START_IDX = 10 + 8 * NUM_DEVICE                # 90

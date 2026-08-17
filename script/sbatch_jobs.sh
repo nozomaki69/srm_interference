@@ -3,7 +3,7 @@
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 CMD_DIR=$(cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd)
 
-NUM_DEVICE=50
+NUM_DEVICE=30
 OUTPUT_CSV="$CMD_DIR/plots/simulation_results.csv"
 
 # 1バッチあたりの生成・シミュレーション・集計件数

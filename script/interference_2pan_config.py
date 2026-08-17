@@ -84,12 +84,12 @@ MAXIMUM_COMMUNICATION_RANGE = {
 TARGET_BANDWIDTH_PATTERNS = [[0, 0], [0, 1], [0, 2], [1, 1], [1, 2], [2, 2], [0, 3], [0, 4], [0, 5], [1, 4], [1, 5], [2, 5]]
 #TARGET_BANDWIDTH_PATTERNS = [[0, 2], [3, 2]]
 
-NUM_DEVICE = 10
+NUM_DEVICE = 30
 DEVICE_ID_1 = list(range(3, NUM_DEVICE + 3))
 DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
 SIMULATION_SEEDS = 1
 MEASURE_START_SEC = 20.0
-MEASURE_DURATION_SEC = 30.0
+MEASURE_DURATION_SEC = 100.0
 MEASURE_END_SEC = MEASURE_START_SEC + MEASURE_DURATION_SEC
 SIM_DURATION_SEC = MEASURE_END_SEC + MEASURE_START_SEC
 MY_TRACE_TAGS = ['Mac'] #MY_TRACE_TAGS = ['Application']
@@ -105,9 +105,9 @@ POS_TEMPLATE = "TEMPLATE.pos.j2"
 STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 
 pan1_offload_min = 10
-pan1_offload_max = 11
+pan1_offload_max = 110
 pan2_offload_min = 10
-pan2_offload_max = 11
+pan2_offload_max = 110
 
 # --- 全パラメータの組み合わせを事前に確定させておく ---
 # 元の入れ子ループと同じ順序 (bandwidth_pattern -> offered_load_pan2 -> offered_load_pan1 -> seed)
