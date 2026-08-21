@@ -50,7 +50,7 @@ CHANNEL_FREQ_MHZ = {0: 920, 1: 920, 2: 920, 3: 921, 4: 921, 5: 921}
 #   - plot_variance_distribution_boxplot   (ΔPER分散の箱ひげ図)
 #   - compute_seed_max_variance / VARIANCE_RSSI_BINS (干渉検知に使うRSSIビン)
 # 例: 10 -> 5 に変更すると、10dBm刻みだったビンがすべて5dBm刻みになる。
-RSSI_BIN_SIZE_DBM = 5
+RSSI_BIN_SIZE_DBM = 10
 
 # plot_delta_per_analysis で使うRSSI範囲(dBm)。上限・下限のレンジ自体は
 # 固定のまま、RSSI_BIN_SIZE_DBM に応じてビンの本数だけが自動で変わる。
