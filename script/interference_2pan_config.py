@@ -12,7 +12,7 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 # --- パラメータ定義 ---
 
 base_freq_mhz = 920  #920MHz
-FRAME_SIZE = 250
+FRAME_SIZE = 64
 CHANNELS = [
     #IEEE 802.15.4(2024), pp.719
     #非同期検波と仮定し、カーソンの定理よりチャネルの帯域幅は伝送速度の3倍
