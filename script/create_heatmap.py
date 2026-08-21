@@ -39,7 +39,7 @@ def load_data(path: str) -> pd.DataFrame:
     df = df.rename(columns=COLUMN_RENAME)
     return df
 
-def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_dir: str, max_load: int = 100):
+def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_dir: str, max_load: int = 50):
     sub = df[
         (df["band_pair"] == band_pair)
         & (df["distance"] == distance)
