@@ -82,7 +82,7 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
             text_color = "white" if f1_val > 0.6 else "black"
             # Removed Japanese, changed to "Th=" to save space, increased font size
             ax.text(
-                j, i, f"Tau: {th_val:.2f}\nF1: {f1_val:.2f}",
+                j, i, f"Tau: {th_val:.3f}\nF1: {f1_val:.3f}",
                 ha="center", va="center", color=text_color, fontsize=9, fontweight="bold"
             )
 
