@@ -13,7 +13,7 @@ PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 INPUT_CSV = os.path.join(PLOT_BASE_DIR, "interference_detection_results.csv")
 OUTPUT_DIR = os.path.join(PLOT_BASE_DIR, "heatmaps")
 
-LOAD_RANGE = list(range(10, 101, 10))
+LOAD_RANGE = list(range(5, 51, 5))
 
 COLUMN_RENAME = {
     "bandwidth": "band_pair",
@@ -39,7 +39,7 @@ def load_data(path: str) -> pd.DataFrame:
     df = df.rename(columns=COLUMN_RENAME)
     return df
 
-def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_dir: str, max_load: int = 100):
+def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_dir: str, max_load: int = 50):
     sub = df[
         (df["band_pair"] == band_pair)
         & (df["distance"] == distance)

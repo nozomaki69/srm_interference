@@ -104,18 +104,18 @@ CONFIG_TEMPLATE = "TEMPLATE.config.j2"
 POS_TEMPLATE = "TEMPLATE.pos.j2"
 STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 
-pan1_offload_min = 10
-pan1_offload_max = 110
-pan2_offload_min = 10
-pan2_offload_max = 110
+pan1_offload_min = 5
+pan1_offload_max = 51
+pan2_offload_min = 5
+pan2_offload_max = 51
 
 # --- 全パラメータの組み合わせを事前に確定させておく ---
 # 元の入れ子ループと同じ順序 (bandwidth_pattern -> offered_load_pan2 -> offered_load_pan1 -> seed)
 # で並べることで、"全体の何番目から何個" というバッチ指定が可能になる。
 ALL_COMBOS = list(itertools.product(
     TARGET_BANDWIDTH_PATTERNS,
-    range(pan2_offload_min, pan2_offload_max, 10),
-    range(pan1_offload_min, pan1_offload_max, 10),
+    range(pan2_offload_min, pan2_offload_max, 5),
+    range(pan1_offload_min, pan1_offload_max, 5),
     range(SIMULATION_SEEDS),
 ))
 

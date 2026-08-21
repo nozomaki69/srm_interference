@@ -43,10 +43,40 @@ CHANNEL_KBPS = {0: 50, 1: 100, 2: 200, 3: 50, 4: 100, 5: 200}
 # 組み合わせだけが干渉する（generate_config.py の interference_flag 判定と同一基準）。
 CHANNEL_FREQ_MHZ = {0: 920, 1: 920, 2: 920, 3: 921, 4: 921, 5: 921}
 
+# --- RSSIビン設定 -----------------------------------------------------
+# RSSIビンの幅(dBm)。★ここを変更するだけで、以下の解析すべてのビン幅が
+# 一括で変わる★:
+#   - plot_delta_per_analysis              (ΔPERの箱ひげ図)
+#   - plot_variance_distribution_boxplot   (ΔPER分散の箱ひげ図)
+#   - compute_seed_max_variance / VARIANCE_RSSI_BINS (干渉検知に使うRSSIビン)
+# 例: 10 -> 5 に変更すると、10dBm刻みだったビンがすべて5dBm刻みになる。
+RSSI_BIN_SIZE_DBM = 5
+
+# plot_delta_per_analysis で使うRSSI範囲(dBm)。上限・下限のレンジ自体は
+# 固定のまま、RSSI_BIN_SIZE_DBM に応じてビンの本数だけが自動で変わる。
+RSSI_BOX_UPPER_DBM = -50
+RSSI_BOX_LOWER_DBM = -110
+
+# plot_variance_distribution_boxplot / 干渉検知(VARIANCE_RSSI_BINS)で使うRSSI範囲(dBm)。
+RSSI_VAR_UPPER_DBM = 0
+RSSI_VAR_LOWER_DBM = -120
+
 
 # ============================================================
 # ユーティリティ
 # ============================================================
+def make_rssi_bins(upper, lower, bin_size):
+    """
+    upper(dBm) から lower(dBm) まで bin_size(dBm) 刻みのビン境界配列を作る共通ヘルパー。
+    RSSI_BIN_SIZE_DBM を変更するだけで、これを呼んでいる箇所すべてのビン幅が
+    一括で変わるようにするためにこの関数を経由させている。
+    upper > lower を想定（例: upper=-50, lower=-110, bin_size=10）。
+    """
+    # stop は「lower を確実に含み、その1つ下の境界は含まない」ように
+    # bin_size の半分だけ余分に伸ばしておく（丸め誤差対策）。
+    return np.arange(upper, lower - bin_size / 2, -bin_size)
+
+
 def get_interf_label(pan1_ch, pan2_ch):
     """
     (PAN1_CH, PAN2_CH) から 'interf' / 'no_interf' を判定する。
@@ -286,7 +316,7 @@ def plot_delta_per_analysis(delta_per, rssi_list, filename, plot_dir):
     delta_per_filtered = delta_per[valid_mask]
     rssi_filtered = rssi_list[valid_mask]
 
-    bins = np.arange(-50, -111, -10)
+    bins = make_rssi_bins(RSSI_BOX_UPPER_DBM, RSSI_BOX_LOWER_DBM, RSSI_BIN_SIZE_DBM)
     bin_data_list = []
     labels = []
 
@@ -321,7 +351,7 @@ def plot_variance_distribution_boxplot(delta_per, rssi_list, filename, plot_dir)
     delta_per = np.array(delta_per, dtype=float).flatten()
 
     num_seeds = len(rssi_list) // NUM_DEVICE
-    bins = np.arange(0, -121, -10)
+    bins = make_rssi_bins(RSSI_VAR_UPPER_DBM, RSSI_VAR_LOWER_DBM, RSSI_BIN_SIZE_DBM)
 
     variances_per_bin = [[] for _ in range(len(bins) - 1)]
     bin_labels = [f"[{bins[i]}, {bins[i + 1]})" for i in range(len(bins) - 1)]
@@ -439,7 +469,7 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
 # 干渉検知（帯域幅ペアごとに interf/no_interf を比較）
 # ============================================================
 # ΔPER(DL-UL)の分散を見る際のRSSIビン境界（plot_variance_distribution_boxplotと同じ）
-VARIANCE_RSSI_BINS = np.arange(0, -121, -10)
+VARIANCE_RSSI_BINS = make_rssi_bins(RSSI_VAR_UPPER_DBM, RSSI_VAR_LOWER_DBM, RSSI_BIN_SIZE_DBM)
 
 # 分散のしきい値の探索範囲。ΔPERは[-1, 1]なので分散の理論上限は1だが、
 # 実データではもっと小さい値になるはず。0〜1を0.001刻みで細かく探索する。
@@ -449,7 +479,7 @@ VARIANCE_THRESHOLDS = np.round(np.arange(0.0, 1.001, 0.001), 4)
 def compute_seed_max_variance(delta_per, rssi_list, num_devices):
     """
     delta_per, rssi_list: Seedごとに num_devices 個ずつ連続して並んだ1次元配列。
-    各SeedについてRSSIを10dBmビンに分け、ビンごとのΔPER分散を計算し、
+    各SeedについてRSSIを RSSI_BIN_SIZE_DBM 幅のビンに分け、ビンごとのΔPER分散を計算し、
     そのSeed内での最大分散値を「干渉指標」として返す。
 
     戻り値: 各Seedの最大分散値のリスト（長さ = num_seeds）。
@@ -487,7 +517,7 @@ def compute_seed_max_variance(delta_per, rssi_list, num_devices):
 
 def evaluate_interference_detection(interf_values, no_interf_values):
     """
-    interf_values / no_interf_values: 干渉あり／なしシナリオでの、各Seedの
+    interf_values / no_interf_values: 干渉あり/なしシナリオでの、各Seedの
     干渉指標（compute_seed_max_variance の出力）。
     分散のしきい値を振り、F1が最大となるしきい値と、その時の
     TP/FP/FN/TN・Precision/Recall/FPR/F1 を返す。
