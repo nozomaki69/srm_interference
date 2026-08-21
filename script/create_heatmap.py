@@ -13,7 +13,7 @@ PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 INPUT_CSV = os.path.join(PLOT_BASE_DIR, "interference_detection_results.csv")
 OUTPUT_DIR = os.path.join(PLOT_BASE_DIR, "heatmaps")
 
-LOAD_RANGE = list(range(10, 101, 10))
+LOAD_RANGE = list(range(10, 51, 10))
 
 COLUMN_RENAME = {
     "bandwidth": "band_pair",
