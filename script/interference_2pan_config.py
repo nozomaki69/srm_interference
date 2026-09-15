@@ -13,6 +13,9 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 base_freq_mhz = 920  #920MHz
 FRAME_SIZE = 250
+# CBRアプリのパケット到着間隔分布。"Constant"(従来のCBR、一定間隔)または
+# "Poisson"(平均間隔driot-cbr-traffic-bpsから決まる指数分布、ポアソン到着過程)
+TRAFFIC_DISTRIBUTION = "Poisson"
 CHANNELS = [
     #IEEE 802.15.4(2024), pp.719
     #非同期検波と仮定し、カーソンの定理よりチャネルの帯域幅は伝送速度の3倍
@@ -217,6 +220,7 @@ def generate_batch(combos):
                     "jitter": 1.0,
                     "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
                     "is_ack_required": True,
+                    "distribution": TRAFFIC_DISTRIBUTION,
             })
         all_nodes.append(coordinator_node_1)
 
@@ -244,6 +248,7 @@ def generate_batch(combos):
                     "jitter": 1.0,
                     "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
                     "is_ack_required": True,
+                    "distribution": TRAFFIC_DISTRIBUTION,
             })
         all_nodes.append(coordinator_node_2)
 
@@ -263,6 +268,7 @@ def generate_batch(combos):
                     "jitter": 20.0,
                     "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
                     "is_ack_required": True,
+                    "distribution": TRAFFIC_DISTRIBUTION,
                 }],
                 "preamble_power": CHANNELS[bandwidth_pattern[0]]["rx_sensitivity_dbm"],
                 "ed_threshold_dbm": ED_THRESHOLDS[bandwidth_pattern[0]],
@@ -285,6 +291,7 @@ def generate_batch(combos):
                     "jitter": 20.0,
                     "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
                     "is_ack_required": True,
+                    "distribution": TRAFFIC_DISTRIBUTION,
                 }],
                 "preamble_power": CHANNELS[bandwidth_pattern[1]]["rx_sensitivity_dbm"],
                 "ed_threshold_dbm": ED_THRESHOLDS[bandwidth_pattern[1]],

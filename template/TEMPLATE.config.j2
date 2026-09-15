@@ -173,6 +173,7 @@ driot-bit-error-rate-curve-file = ref/driotmodes.ber
                 [{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-enable-ack-request = {{ cbr_app.is_ack_required }}
                 [{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-traffic-defined-by = BitsPerSecond
                 [{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-traffic-bps = {{ cbr_app.bps | int }}
+                [{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-traffic-distribution = {{ cbr_app.distribution | default('Constant') }}
                 [{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-auto-port-mode = true
                 [{{ node.id }};driotcbr_{{ node.id }}_{{ cbr_app.dst }}] driot-cbr-use-virtual-payload = false
             {%   else %}
