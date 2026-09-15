@@ -16,7 +16,7 @@ CMD_DIR = os.path.join(SCRIPT_DIR, "..")
 POS_DIR = CMD_DIR
 OUTPUT_DIR = os.path.join(CMD_DIR, "plots", "position_plots")
 
-NUM_DEVICE = 50  # 1PANあたりのデバイス数 (interference_2pan_config.py の NUM_DEVICE と同じ)
+NUM_DEVICE = 30  # 1PANあたりのデバイス数 (interference_2pan_config.py の NUM_DEVICE と同じ)
 
 # interference_2pan_config.py の MAXIMUM_COMMUNICATION_RANGE と同じ値 (km)
 MAXIMUM_COMMUNICATION_RANGE_KM = {
