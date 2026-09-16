@@ -344,7 +344,7 @@ def generate_batch(combos):
             "nodes": all_nodes,
             "tx_power": 13.010299956639813, # dBm
             "trace_tags": MY_TRACE_TAGS,
-            "cca_mode": "ED_or_CS",
+            "cca_mode": "ED_ONLY",
             "channels": CHANNELS,
 
         }
