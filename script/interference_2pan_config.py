@@ -20,18 +20,20 @@ TRAFFIC_DISTRIBUTION = "Poisson"
 # 送信開始時刻のジッタ[秒]。
 # ポアソン到着では最初の間隔も指数分布なので開始位相は自然にばらけるため不要。
 # むしろジッタを入れると送信窓がその分短くなり、offered load が目減りして
-# airtime 換算がずれる(ジッタ20秒なら送信窓100秒に対し平均90秒になる)。
+# 負荷換算がずれる(ジッタ20秒なら送信窓100秒に対し平均90秒になる)。
 # 一定間隔(CBR)では全ノードの同時送信を避けるためにジッタが必要。
 COORD_START_JITTER_SEC = 0.0 if TRAFFIC_DISTRIBUTION == "Poisson" else 1.0
 DEVICE_START_JITTER_SEC = 0.0 if TRAFFIC_DISTRIBUTION == "Poisson" else 20.0
 CHANNELS = [
     #IEEE 802.15.4(2024), pp.719
-    #非同期検波と仮定し、カーソンの定理よりチャネルの帯域幅は伝送速度の3倍
+    #チャネル幅は伝送速度の2倍 (100kHz@50kbps / 200kHz@100kbps / 400kHz@200kbps)。
+    #この値は TEMPLATE.config.j2 の driot-symbol-rate-map のキーと一致していなければならず、
+    #一致しないと driot_phy.cpp の UpdateParametersRelatedToChannelBandwidth() が abort する。
     #Operating mode #1
     {
         "id": 0,
         "freq_mhz": base_freq_mhz,
-        "width_mhz": 100e3 / 1e6, #0.15
+        "width_mhz": 100e3 / 1e6, #0.1
         "rx_sensitivity_dbm": -97.0,
         "bitrate_kbps": 50,
     },
@@ -39,22 +41,22 @@ CHANNELS = [
     {
         "id": 1,
         "freq_mhz": base_freq_mhz,
-        "width_mhz": 200e3 / 1e6, #0.3
+        "width_mhz": 200e3 / 1e6, #0.2
         "rx_sensitivity_dbm": -93.989700,
         "bitrate_kbps": 100,
-    },  
+    },
     #Operating mode #3
     {
         "id": 2,
         "freq_mhz": base_freq_mhz,
-        "width_mhz": 400e3 / 1e6, #0.6
+        "width_mhz": 400e3 / 1e6, #0.4
         "rx_sensitivity_dbm": -90.979400,
         "bitrate_kbps": 200,
-    }, 
+    },
     {
         "id": 3,
         "freq_mhz": base_freq_mhz +1,
-        "width_mhz": 100e3 / 1e6, #0.15
+        "width_mhz": 100e3 / 1e6, #0.1
         "rx_sensitivity_dbm": -97.0,
         "bitrate_kbps": 50,
     },
@@ -62,18 +64,18 @@ CHANNELS = [
     {
         "id": 4,
         "freq_mhz": base_freq_mhz +1,
-        "width_mhz": 200e3 / 1e6, #0.3
+        "width_mhz": 200e3 / 1e6, #0.2
         "rx_sensitivity_dbm": -93.989700,
         "bitrate_kbps": 100,
-    },  
+    },
     #Operating mode #3
     {
         "id": 5,
         "freq_mhz": base_freq_mhz +1,
-        "width_mhz": 400e3 / 1e6, #0.6
+        "width_mhz": 400e3 / 1e6, #0.4
         "rx_sensitivity_dbm": -90.979400,
         "bitrate_kbps": 200,
-    },  
+    },
 ]
 ED_THRESHOLDS = {
     0: CHANNELS[0]["rx_sensitivity_dbm"] + 10,
@@ -99,35 +101,112 @@ NUM_DEVICE = 30
 DEVICE_ID_1 = list(range(3, NUM_DEVICE + 3))
 DEVICE_ID_2= list(range(NUM_DEVICE + 3, NUM_DEVICE + NUM_DEVICE + 3))
 SIMULATION_SEEDS = 100
+# --- シミュレーションの時間軸 ---
+#   0 .. MEASURE_START_SEC        : 送信前(ウォームアップ)
+#   MEASURE_START_SEC .. MEASURE_END_SEC : アプリがパケットを生成する窓
+#   MEASURE_END_SEC .. SIM_DURATION_SEC  : ドレイン。生成は止まるが、キューに残った
+#                                          フレームのCSMA・再送を最後までやりきらせる
+#
+# ドレインが無いと、送信窓の終端近くで生成されたパケットが Deq されないまま
+# シミュレーション終了で消え、提供負荷も配送率も負荷依存で目減りする。
+# 一方でドレインを長く取りすぎると、その間チャネルは空いていくので高負荷時の
+# PER を過小評価する。送信窓の20%を目安とする。
 MEASURE_START_SEC = 20.0
 MEASURE_DURATION_SEC = 100.0
 MEASURE_END_SEC = MEASURE_START_SEC + MEASURE_DURATION_SEC
-SIM_DURATION_SEC = MEASURE_END_SEC + MEASURE_START_SEC
+DRAIN_DURATION_SEC = 20.0
+SIM_DURATION_SEC = MEASURE_END_SEC + DRAIN_DURATION_SEC
 MY_TRACE_TAGS = ['Mac'] #MY_TRACE_TAGS = ['Application']
 
-# --- airtime換算用の定数 (source/driot のPHY実装から導出) ---
+# --- DrIot MAC/PHY のタイミングパラメータ ---
+# ここが offered_load の換算式と TEMPLATE.config.j2 の両方の唯一の定義元。
+# テンプレートには context 経由で差し込むので、片方だけ変えて式がずれることはない。
+RX_TX_TURNAROUND_SEC = 0.001    # driot-rx-tx-turnaround-time
+AIFS_SEC = 0.001                # driot-aifs-time (データ送信後、ACKが返るまでの間隔)
+CCA_PERIODS = 8                 # driot-cca-periods       [シンボル]
+SIFS_PERIODS = 12               # driot-sifs-periods      [シンボル]
+LIFS_PERIODS = 40               # driot-lifs-periods      [シンボル]
+MAX_SIFS_FRAME_SIZE_BYTES = 18  # driot-max-sifs-frame-size-bytes (これ以下ならSIFS、超ならLIFS)
+MIN_BACKOFF_EXPONENT = 3        # driot-min-backoff-exponent
+MAX_BACKOFF_EXPONENT = 5        # driot-max-backoff-exponent
+MAX_CSMA_BACKOFFS = 4           # driot-max-csma-backoffs
+MAX_FRAME_RETRIES = 3           # driot-max-frame-retries
+FSK_PREAMBLE_REPETITION = 4     # driot-fsk-preamble-repetion-number
+
+# --- フレーム長 (source/driot のPHY/MAC実装から導出) ---
 # SUN2FSKは1シンボル=1ビットなので、シンボルレート = 伝送速度。
-# フレーム送信時間は (SHR + PHR + バイト数*8) * シンボル長 で、絶対秒の項を含まない
-# (driot_phy.cpp の CalculateFrameTransmitDuration)。よってシンボル数が同じなら
-# 送信時間は伝送速度に反比例し、送信レートを伝送速度に比例させればairtimeは一致する。
-SHR_SYMBOLS = 48        # プリアンブル8bit * fsk-preamble-repetion-number(4) + SFD 16bit
+# フレーム送信時間は (SHR + PHR + バイト数*8) * シンボル長
+# (driot_phy.cpp の CalculateFrameTransmitDuration)。FCSは加算されない。
+SHR_SYMBOLS = 8 * FSK_PREAMBLE_REPETITION + 16  # プリアンブル8bit * 繰り返し数 + SFD 16bit
 PHR_SYMBOLS = 16        # SUN2FSKのPHYヘッダ
 ACK_PSDU_BYTES = 3      # ImmAckFrame: FrameControl 2B + SequenceNumber 1B
 APPS_PER_PAN = NUM_DEVICE * 2   # コーディネータの下り30 + デバイスの上り30
 
-# 1回のデータ送信+ACK応答でチャネルを占有するシンボル数
 DATA_FRAME_SYMBOLS = SHR_SYMBOLS + PHR_SYMBOLS + FRAME_SIZE * 8
 ACK_FRAME_SYMBOLS = SHR_SYMBOLS + PHR_SYMBOLS + ACK_PSDU_BYTES * 8
-SYMBOLS_PER_EXCHANGE = DATA_FRAME_SYMBOLS + ACK_FRAME_SYMBOLS
+
+# 平均バックオフ時間をサイクルに含めるか。
+# 含める場合、offered_load は「1フローの衝突なしサービス時間に対する提供レートの比」になる。
+# CSMAでは他ノードのバックオフ中に別ノードが送信できるためPAN全体の集約容量は 1/cycle より
+# 高く、この定義は集約占有率をやや過大評価する。それでも含めているのは、バックオフが
+# 伝送速度にほとんど依存しない固定時間(turnaround 1ms が支配的)であり、これを外すと
+# 伝送速度間の正規化が再び崩れるため。
+INCLUDE_MEAN_BACKOFF = True
 
 
-def airtime_pps(bitrate_kbps, offered_load_percent):
-    """PAN全体のairtime占有率が offered_load_percent % になる、1アプリあたりの送信レート[pps]。
+def _symbol_sec(bitrate_kbps):
+    """1シンボルの長さ[秒]。SUN2FSKは1シンボル=1ビットなのでシンボルレート = 伝送速度。"""
+    return 1.0 / (bitrate_kbps * 1e3)
 
-    占有時間はデータフレームとACKの送信時間のみを数え、バックオフ・IFS・再送は含まない。
+
+def _ceil_to_symbol(seconds, symbol_sec):
+    """driot_phy.cpp の CalculateTimeOffsetToSymbolPeriods 相当 (シンボル境界へ切上げ)。"""
+    return math.ceil(seconds / symbol_sec) * symbol_sec
+
+
+def exchange_cycle_sec(bitrate_kbps):
+    """データ1フレーム + ACK を1回やり取りするのに要する、衝突なしの所要時間[秒]。
+
+    driot_phy.cpp:
+        GetRxTxTurnaroundTime()          = turnaround をシンボル境界へ切上げ
+        GetCcaDuration()                 = CCA_PERIODS * symbol
+        GetAUnitBackoffDuration()        = turnaround + CCA
+        GetLongInterframeSpaceDuration() = max(LIFS_PERIODS * symbol, turnaround)
+    driot_mac.cpp:
+        StartOrContinueIfsOrRandomAccess()  : IFS待ちの後 backoffPeriods*unit + CCA
+        ProcessBackoffTimerEvent()          : CCAがクリアなら turnaround 後に送信開始
+        CompleteCommandOrDataTransmission() : GetAckWaitDuration() = AIFS + ACK送信時間
+
+    turnaround と AIFS は絶対秒(1ms)で指定されており伝送速度に依存しないため、
+    DATA+ACK の送信時間だけで換算すると 200kbps 側だけ相対的に重いオーバヘッドを
+    無視することになり、伝送速度間の比較が不公平になる。
     """
-    bitrate_bps = bitrate_kbps * 1e3
-    return (offered_load_percent * 0.01) * bitrate_bps / (SYMBOLS_PER_EXCHANGE * APPS_PER_PAN)
+    sym = _symbol_sec(bitrate_kbps)
+    turnaround = _ceil_to_symbol(RX_TX_TURNAROUND_SEC, sym)
+    aifs = _ceil_to_symbol(AIFS_SEC, sym)
+    cca = CCA_PERIODS * sym
+
+    # データフレーム(250B)は MAX_SIFS_FRAME_SIZE_BYTES を超えるので LIFS 側
+    assert FRAME_SIZE > MAX_SIFS_FRAME_SIZE_BYTES
+    ifs = max(LIFS_PERIODS * sym, turnaround)
+
+    unit_backoff = turnaround + cca
+    mean_backoff = 0.0
+    if INCLUDE_MEAN_BACKOFF:
+        # 初回の backoffPeriods は U{0, 2^minBE - 1} なので平均 (2^minBE - 1)/2 単位
+        mean_backoff = ((2 ** MIN_BACKOFF_EXPONENT - 1) / 2.0) * unit_backoff
+
+    return (ifs + mean_backoff + cca + turnaround
+            + DATA_FRAME_SYMBOLS * sym + aifs + ACK_FRAME_SYMBOLS * sym)
+
+
+def offered_load_pps(bitrate_kbps, offered_load_percent):
+    """PAN全体の提供負荷が飽和容量の offered_load_percent % になる、1アプリあたりの送信レート[pps]。
+
+    飽和容量 = 1 / exchange_cycle_sec(bitrate) [交換/秒] で、PAN内の APPS_PER_PAN 個の
+    アプリでこれを分け合う。再送は含まない(再送率は結果であって入力ではないため)。
+    """
+    return (offered_load_percent * 0.01) / (exchange_cycle_sec(bitrate_kbps) * APPS_PER_PAN)
 
 
 # --- スクリプト設定 ---
@@ -140,8 +219,10 @@ CONFIG_TEMPLATE = "TEMPLATE.config.j2"
 POS_TEMPLATE = "TEMPLATE.pos.j2"
 STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 
-# offered_load は airtime 占有率[%] そのものを表す (airtime_pps で換算)
-OFFERED_LOAD_PERCENTS = list(range(5, 51, 5))   # 5,10,...,50 [% airtime]
+# offered_load は「衝突なし飽和容量に対する提供負荷の比[%]」を表す (offered_load_pps で換算)
+# 100% は提供レートが飽和容量ちょうどになる点なので、上端では待ち行列が発散し、
+# 送信窓の終端までに送りきれないパケットが残る(これは飽和領域として意図した挙動)。
+OFFERED_LOAD_PERCENTS = list(range(10, 101, 10))   # 10,20,...,100 [% of saturation]
 
 # --- 全パラメータの組み合わせを事前に確定させておく ---
 # 元の入れ子ループと同じ順序 (bandwidth_pattern -> offered_load_pan2 -> offered_load_pan1 -> seed)
@@ -245,7 +326,7 @@ def generate_batch(combos):
         for dev_id in DEVICE_ID_1:
             coordinator_node_1["cbr_applications"].append({
                     "dst": dev_id,  # Coordinator 1宛て
-                    "pps": airtime_pps(CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"], offered_load_pan1),
+                    "pps": offered_load_pps(CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"], offered_load_pan1),
                     "start": MEASURE_START_SEC,
                     "end": MEASURE_END_SEC,
                     "jitter": COORD_START_JITTER_SEC,
@@ -273,7 +354,7 @@ def generate_batch(combos):
         for dev_id in DEVICE_ID_2:
             coordinator_node_2["cbr_applications"].append({
                     "dst": dev_id,  # Coordinator 1宛て
-                    "pps": airtime_pps(CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"], offered_load_pan2),
+                    "pps": offered_load_pps(CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"], offered_load_pan2),
                     "start": MEASURE_START_SEC,
                     "end": MEASURE_END_SEC,
                     "jitter": COORD_START_JITTER_SEC,
@@ -293,7 +374,7 @@ def generate_batch(combos):
                 "associated": True,  # 静的に関連付け済み
                 "cbr_applications": [{
                     "dst": 1,  # Coordinator 1宛て
-                    "pps": airtime_pps(CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"], offered_load_pan1),
+                    "pps": offered_load_pps(CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"], offered_load_pan1),
                     "start": MEASURE_START_SEC,
                     "end": MEASURE_END_SEC,
                     "jitter": DEVICE_START_JITTER_SEC,
@@ -316,7 +397,7 @@ def generate_batch(combos):
                 "associated": True,  # 静的に関連付け済み
                 "cbr_applications": [{
                     "dst": 2,  # Coordinator 1宛て
-                    "pps": airtime_pps(CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"], offered_load_pan2),
+                    "pps": offered_load_pps(CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"], offered_load_pan2),
                     "start": MEASURE_START_SEC,
                     "end": MEASURE_END_SEC,
                     "jitter": DEVICE_START_JITTER_SEC,
@@ -334,11 +415,15 @@ def generate_batch(combos):
             "label": prefix,
             "config_filename_prefix": prefix,
             "seed": seed,
-            "sim_time": MEASURE_END_SEC,
+            # simulation-time はドレインを含めた全体。トラフィック終了(MEASURE_END_SEC)と
+            # 同じにすると、終端付近のパケットが送信されないまま打ち切られる。
+            "sim_time": SIM_DURATION_SEC,
             "mobility_seed": seed,
             "band_name": "DrIotTestBand",
+            # 統計窓は送信開始からシミュレーション終了まで(ドレイン中の送達も数える)。
+            # simulation-time を超える終端を指定すると統計が無意味になるので揃えておく。
             "measure_start": MEASURE_START_SEC,
-            "measure_end": SIM_DURATION_SEC - 10.0,
+            "measure_end": SIM_DURATION_SEC,
             "is_6lowpan_enabled": False,
             "advertising_channel_number": 0,
             "nodes": all_nodes,
@@ -347,6 +432,19 @@ def generate_batch(combos):
             "cca_mode": "ED_ONLY",
             "channels": CHANNELS,
 
+            # MAC/PHYのタイミング。offered_load_pps() の換算式と同じ定数を使う
+            # (テンプレート側に直値を書くと式とずれるため、必ずここから差し込む)
+            "rx_tx_turnaround_sec": RX_TX_TURNAROUND_SEC,
+            "aifs_sec": AIFS_SEC,
+            "cca_periods": CCA_PERIODS,
+            "sifs_periods": SIFS_PERIODS,
+            "lifs_periods": LIFS_PERIODS,
+            "max_sifs_frame_size_bytes": MAX_SIFS_FRAME_SIZE_BYTES,
+            "min_backoff_exponent": MIN_BACKOFF_EXPONENT,
+            "max_backoff_exponent": MAX_BACKOFF_EXPONENT,
+            "max_csma_backoffs": MAX_CSMA_BACKOFFS,
+            "max_frame_retries": MAX_FRAME_RETRIES,
+            "fsk_preamble_repetition": FSK_PREAMBLE_REPETITION,
         }
 
         # --- ファイル生成 ---

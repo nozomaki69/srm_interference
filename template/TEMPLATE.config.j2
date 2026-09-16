@@ -123,11 +123,11 @@ driot-bit-error-rate-curve-file = ref/driotmodes.ber
 
         #Component DrIotMac (Interface): {{ interface_name }}
         [{{ node.id }};{{ interface_name }}] driot-addressing-mode = Short
-        [{{ node.id }};{{ interface_name }}] driot-max-sifs-frame-size-bytes = 18
-        [{{ node.id }};{{ interface_name }}] driot-max-backoff-exponent = 5
-        [{{ node.id }};{{ interface_name }}] driot-min-backoff-exponent = 3
-        [{{ node.id }};{{ interface_name }}] driot-max-csma-backoffs = 4
-        [{{ node.id }};{{ interface_name }}] driot-max-frame-retries = 3
+        [{{ node.id }};{{ interface_name }}] driot-max-sifs-frame-size-bytes = {{ max_sifs_frame_size_bytes }}
+        [{{ node.id }};{{ interface_name }}] driot-max-backoff-exponent = {{ max_backoff_exponent }}
+        [{{ node.id }};{{ interface_name }}] driot-min-backoff-exponent = {{ min_backoff_exponent }}
+        [{{ node.id }};{{ interface_name }}] driot-max-csma-backoffs = {{ max_csma_backoffs }}
+        [{{ node.id }};{{ interface_name }}] driot-max-frame-retries = {{ max_frame_retries }}
         [{{ node.id }};{{ interface_name }}] driot-initial-channel-number = {{ interface.init_ch }}
         [{{ node.id }};{{ interface_name }}] driot-operating-mode = {{ interface.mode }}
         {% if is_enabled_suspended_csma %}
@@ -141,7 +141,7 @@ driot-bit-error-rate-curve-file = ref/driotmodes.ber
         [{{ node.id }};{{ interface_name }}] driot-preamble-detection-power-threshold-dbm = {{ node.preamble_power }}
         [{{ node.id }};{{ interface_name }}] driot-energy-detection-power-threshold-dbm = {{ node.ed_threshold_dbm }}
         [{{ node.id }};{{ interface_name }}] driot-radio-noise-figure-db = 6.000000000
-        [{{ node.id }};{{ interface_name }}] driot-rx-tx-turnaround-time = 0.001
+        [{{ node.id }};{{ interface_name }}] driot-rx-tx-turnaround-time = {{ rx_tx_turnaround_sec }}
         [{{ node.id }};{{ interface_name }}] driot-phy-cca-mode = {{ cca_mode }}
 
         {# チャネルは2種類 #}
@@ -149,12 +149,12 @@ driot-bit-error-rate-curve-file = ref/driotmodes.ber
         [{{ node.id }};{{ interface_name }}] driot-symbol-duration-type = Auto
         [{{ node.id }};{{ interface_name }}] driot-phy-parameter-type = Fixed
         [{{ node.id }};{{ interface_name }}] driot-max-frame-size = 2047
-        [{{ node.id }};{{ interface_name }}] driot-sifs-periods = 12
-        [{{ node.id }};{{ interface_name }}] driot-lifs-periods = 40
-        [{{ node.id }};{{ interface_name }}] driot-cca-periods = 8
+        [{{ node.id }};{{ interface_name }}] driot-sifs-periods = {{ sifs_periods }}
+        [{{ node.id }};{{ interface_name }}] driot-lifs-periods = {{ lifs_periods }}
+        [{{ node.id }};{{ interface_name }}] driot-cca-periods = {{ cca_periods }}
         [{{ node.id }};{{ interface_name }}] driot-phy-modulation-type = SUN2FSK
-        [{{ node.id }};{{ interface_name }}] driot-aifs-time = 0.001
-        [{{ node.id }};{{ interface_name }}] driot-fsk-preamble-repetion-number = 4
+        [{{ node.id }};{{ interface_name }}] driot-aifs-time = {{ aifs_sec }}
+        [{{ node.id }};{{ interface_name }}] driot-fsk-preamble-repetion-number = {{ fsk_preamble_repetition }}
     {% endfor %}{# for interface #}
 
     {% if node.cbr_applications is defined %}

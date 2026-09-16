@@ -1,2 +1,3 @@
 plots/simulation_results.csv
 plots/positions.csv
+__pycache__/
