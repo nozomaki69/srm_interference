@@ -31,9 +31,11 @@ MAXIMUM_COMMUNICATION_RANGE_KM = {
 # interference_2pan_config.py の CHANNELS と同じ値 (帯域ラベル表示・ディレクトリ分け用)
 CHANNEL_KBPS = {0: 50, 1: 100, 2: 200, 3: 50, 4: 100, 5: 200}
 
-# offered_load は座標に影響しないので、個別プロットはこの組み合わせだけに絞る
-REPRESENTATIVE_PAN1_OFFLOAD = 10
-REPRESENTATIVE_PAN2_OFFLOAD = 10
+# offered_load は座標に影響しないので、個別プロットはこの組み合わせだけに絞る。
+# interference_2pan_config.OFFERED_LOAD_PERCENTS に実在する値でないと1件もヒットしない
+# ので、スイープのグリッドを変えたらここも合わせる (現在は 20,40,...,200)。
+REPRESENTATIVE_PAN1_OFFLOAD = 20
+REPRESENTATIVE_PAN2_OFFLOAD = 20
 
 FILENAME_RE = re.compile(
     r"(interf|no_interf)_dist_(\d+)m_channel_(\d+)_vs_(\d+)"

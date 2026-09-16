@@ -1,4 +1,5 @@
 import os
+import sys
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -6,6 +7,14 @@ import matplotlib.pyplot as plt
 
 # ============ Settings ============
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+sys.path.insert(0, SCRIPT_DIR)
+
+# 負荷グリッドはスイープを定義している側 (interference_2pan_config) を唯一の定義元とする。
+# ここに直値を書くと、スイープの範囲を変えたときにヒートマップ側だけ取り残され、
+# 範囲外のセルが黙って捨てられる (以前 LOAD_RANGE / max_load が 10..100 固定のまま
+# 残っており、負荷100%超を追加しても描画されないバグがあった)。
+from interference_2pan_config import OFFERED_LOAD_PERCENTS  # noqa: E402
 # 結果ファイル(interference_detection_results.csv)・出力先(heatmaps/)は
 # いずれも scripts/ の1つ上の plots/ 以下にある(analyze_csv.py の PLOT_BASE_DIR と同じ場所)
 PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
@@ -13,7 +22,8 @@ PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 INPUT_CSV = os.path.join(PLOT_BASE_DIR, "interference_detection_results.csv")
 OUTPUT_DIR = os.path.join(PLOT_BASE_DIR, "heatmaps")
 
-LOAD_RANGE = list(range(10, 101, 10))
+LOAD_RANGE = list(OFFERED_LOAD_PERCENTS)
+MAX_LOAD = max(LOAD_RANGE)
 
 COLUMN_RENAME = {
     "bandwidth": "band_pair",
@@ -39,7 +49,7 @@ def load_data(path: str) -> pd.DataFrame:
     df = df.rename(columns=COLUMN_RENAME)
     return df
 
-def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_dir: str, max_load: int = 100):
+def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_dir: str, max_load: int = MAX_LOAD):
     sub = df[
         (df["band_pair"] == band_pair)
         & (df["distance"] == distance)

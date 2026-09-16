@@ -29,9 +29,12 @@ PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 POSITIONS_CSV = os.path.join(PLOT_BASE_DIR, "positions.csv")
 
 NUM_DEVICE = 30
-PAN1_DEVS = list(range(3, 3 + NUM_DEVICE))          # 3..12
-PAN2_DEVS = list(range(3 + NUM_DEVICE, 3 + 2 * NUM_DEVICE))  # 13..22
-RSSI_START_IDX = 10 + 8 * NUM_DEVICE                # 90
+PAN1_DEVS = list(range(3, 3 + NUM_DEVICE))                   # NUM_DEVICE=30 なら 3..32
+PAN2_DEVS = list(range(3 + NUM_DEVICE, 3 + 2 * NUM_DEVICE))  # NUM_DEVICE=30 なら 33..62
+# RSSI列が始まる位置。CSVの列構成 (create_csv.generate_header) は
+#   メタ6 + PAN別Deq(1+N+N)*2 + PAN別Rx(1+N)*2 + デバイスRx(N*2) + RSSI(N*2)
+# なので、RSSI列の手前までの列数は 10 + 8*NUM_DEVICE (NUM_DEVICE=30 なら 250)。
+RSSI_START_IDX = 10 + 8 * NUM_DEVICE
 
 FONT_SIZE = 45
 
@@ -39,7 +42,7 @@ FONT_SIZE = 45
 CHANNEL_KBPS = {0: 50, 1: 100, 2: 200, 3: 50, 4: 100, 5: 200}
 
 # チャネル番号 -> 中心周波数(MHz)。generate_config.py の CHANNELS と同じ値。
-# 0,1,2 は base_freq_mhz、3,4,5 は base_freq_mhz-1 なので、同じ周波数同士の
+# 0,1,2 は base_freq_mhz、3,4,5 は base_freq_mhz+1 なので、同じ周波数同士の
 # 組み合わせだけが干渉する（generate_config.py の interference_flag 判定と同一基準）。
 CHANNEL_FREQ_MHZ = {0: 920, 1: 920, 2: 920, 3: 921, 4: 921, 5: 921}
 

@@ -38,6 +38,12 @@ DEFAULT_CSV = os.path.join(SCRIPT_DIR, "..", "plots", "simulation_results.csv")
 # 実測/期待比がこの範囲を外れたら警告する
 RATIO_TOLERANCE = 0.02
 
+# この負荷[%]を超える条件は過飽和領域。提供レートが衝突なし飽和容量を超えるので
+# 待ち行列は原理的に発散し、実際に送出できる量は 100% 付近で頭打ちになる。
+# つまり ratio < 1 になるのが正しい挙動なので、許容判定の対象外にして
+# 情報として表示するだけにする(ここを含めると常に失敗して検証にならない)。
+SATURATION_LOAD_PERCENT = 100
+
 
 def device_ids(pan):
     if pan == 1:
@@ -130,11 +136,15 @@ def main():
         # 1アプリあたりの送信パケット数 (統計的な粒度の目安)
         per_device = expected / APPS_PER_PAN
 
-        flag = "" if abs(ratio - 1.0) <= RATIO_TOLERANCE else "  <--"
-        worst = max(worst, abs(ratio - 1.0))
-        worst_ul = max(worst_ul, abs(ul_ratio - 1.0))
-        if dl_ratio < 1.0 - RATIO_TOLERANCE:
-            dl_shortfall = True
+        if load > SATURATION_LOAD_PERCENT:
+            # 過飽和領域。ratio が 1 を下回るのが正しいので判定には使わない。
+            flag = "  (oversub)"
+        else:
+            flag = "" if abs(ratio - 1.0) <= RATIO_TOLERANCE else "  <--"
+            worst = max(worst, abs(ratio - 1.0))
+            worst_ul = max(worst_ul, abs(ul_ratio - 1.0))
+            if dl_ratio < 1.0 - RATIO_TOLERANCE:
+                dl_shortfall = True
 
         print(f"{ch:>3} {bitrate:>5} {load:>6} {runs:>5} "
               f"{expected:>9.1f} {mean_obs:>9.1f} {ratio:>6.3f} "
@@ -144,6 +154,9 @@ def main():
     print()
     print(f"worst deviation (total): {worst * 100:.2f}%  "
           f"(UL only: {worst_ul * 100:.2f}%, tolerance {RATIO_TOLERANCE * 100:.0f}%)")
+    print(f"判定対象は load <= {SATURATION_LOAD_PERCENT}% の行のみ。"
+          f"(oversub) の行は過飽和領域なので ratio < 1 が正常。")
+    print("過飽和側は occup% 列を見る: 100 付近で頭打ちになっていれば飽和に到達している。")
 
     if worst > RATIO_TOLERANCE:
         print()

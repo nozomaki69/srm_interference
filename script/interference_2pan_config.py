@@ -111,10 +111,16 @@ SIMULATION_SEEDS = 100
 # シミュレーション終了で消え、提供負荷も配送率も負荷依存で目減りする。
 # 一方でドレインを長く取りすぎると、その間チャネルは空いていくので高負荷時の
 # PER を過小評価する。送信窓の20%を目安とする。
+#
+# 送信窓を200sとしているのは、検知指標(ΔPERのRSSIビン内分散)が
+# 「1デバイスあたり何発送ったか」に強く依存するため。n発から推定したPERの
+# 分散は二項ノイズの下限 1/(4n) に支配されるので、nが小さいと指標が
+# 干渉ではなく推定誤差を測ってしまう。窓100sだと50kbps・低負荷側で
+# n=3発程度しか出ず、F1が「全部陽性」の縮退解(0.667)に張り付いていた。
 MEASURE_START_SEC = 20.0
-MEASURE_DURATION_SEC = 100.0
+MEASURE_DURATION_SEC = 200.0
 MEASURE_END_SEC = MEASURE_START_SEC + MEASURE_DURATION_SEC
-DRAIN_DURATION_SEC = 20.0
+DRAIN_DURATION_SEC = 40.0
 SIM_DURATION_SEC = MEASURE_END_SEC + DRAIN_DURATION_SEC
 MY_TRACE_TAGS = ['Mac'] #MY_TRACE_TAGS = ['Application']
 
@@ -220,9 +226,15 @@ POS_TEMPLATE = "TEMPLATE.pos.j2"
 STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 
 # offered_load は「衝突なし飽和容量に対する提供負荷の比[%]」を表す (offered_load_pps で換算)
-# 100% は提供レートが飽和容量ちょうどになる点なので、上端では待ち行列が発散し、
-# 送信窓の終端までに送りきれないパケットが残る(これは飽和領域として意図した挙動)。
-OFFERED_LOAD_PERCENTS = list(range(10, 101, 10))   # 10,20,...,100 [% of saturation]
+# 100% は提供レートが飽和容量ちょうどになる点。120%以上は過飽和領域で、
+# 提供レートが飽和容量を超えるため待ち行列は原理的に発散し、送信窓の終端までに
+# 送りきれないパケットが残る(意図した挙動)。過飽和側では「実際に出た負荷」は
+# 100%付近で頭打ちになるので、verify_offered_load.py の ratio 判定は
+# load <= 100 の行だけに適用している。
+#
+# 注意: このグリッドを変えたら create_heatmap.py の LOAD_RANGE / max_load も
+# 追随する必要がある。二重管理を避けるため、あちらはこの定数を import している。
+OFFERED_LOAD_PERCENTS = list(range(20, 201, 20))   # 20,40,...,200 [% of saturation]
 
 # --- 全パラメータの組み合わせを事前に確定させておく ---
 # 元の入れ子ループと同じ順序 (bandwidth_pattern -> offered_load_pan2 -> offered_load_pan1 -> seed)
