@@ -14,8 +14,16 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 base_freq_mhz = 920  #920MHz
 FRAME_SIZE = 250
 # CBRアプリのパケット到着間隔分布。"Constant"(従来のCBR、一定間隔)または
-# "Poisson"(平均間隔driot-cbr-traffic-bpsから決まる指数分布、ポアソン到着過程)
+# "Poisson"(平均間隔driot-cbr-traffic-ppsから決まる指数分布、ポアソン到着過程)
 TRAFFIC_DISTRIBUTION = "Poisson"
+
+# 送信開始時刻のジッタ[秒]。
+# ポアソン到着では最初の間隔も指数分布なので開始位相は自然にばらけるため不要。
+# むしろジッタを入れると送信窓がその分短くなり、offered load が目減りして
+# airtime 換算がずれる(ジッタ20秒なら送信窓100秒に対し平均90秒になる)。
+# 一定間隔(CBR)では全ノードの同時送信を避けるためにジッタが必要。
+COORD_START_JITTER_SEC = 0.0 if TRAFFIC_DISTRIBUTION == "Poisson" else 1.0
+DEVICE_START_JITTER_SEC = 0.0 if TRAFFIC_DISTRIBUTION == "Poisson" else 20.0
 CHANNELS = [
     #IEEE 802.15.4(2024), pp.719
     #非同期検波と仮定し、カーソンの定理よりチャネルの帯域幅は伝送速度の3倍
@@ -97,6 +105,31 @@ MEASURE_END_SEC = MEASURE_START_SEC + MEASURE_DURATION_SEC
 SIM_DURATION_SEC = MEASURE_END_SEC + MEASURE_START_SEC
 MY_TRACE_TAGS = ['Mac'] #MY_TRACE_TAGS = ['Application']
 
+# --- airtime換算用の定数 (source/driot のPHY実装から導出) ---
+# SUN2FSKは1シンボル=1ビットなので、シンボルレート = 伝送速度。
+# フレーム送信時間は (SHR + PHR + バイト数*8) * シンボル長 で、絶対秒の項を含まない
+# (driot_phy.cpp の CalculateFrameTransmitDuration)。よってシンボル数が同じなら
+# 送信時間は伝送速度に反比例し、送信レートを伝送速度に比例させればairtimeは一致する。
+SHR_SYMBOLS = 48        # プリアンブル8bit * fsk-preamble-repetion-number(4) + SFD 16bit
+PHR_SYMBOLS = 16        # SUN2FSKのPHYヘッダ
+ACK_PSDU_BYTES = 3      # ImmAckFrame: FrameControl 2B + SequenceNumber 1B
+APPS_PER_PAN = NUM_DEVICE * 2   # コーディネータの下り30 + デバイスの上り30
+
+# 1回のデータ送信+ACK応答でチャネルを占有するシンボル数
+DATA_FRAME_SYMBOLS = SHR_SYMBOLS + PHR_SYMBOLS + FRAME_SIZE * 8
+ACK_FRAME_SYMBOLS = SHR_SYMBOLS + PHR_SYMBOLS + ACK_PSDU_BYTES * 8
+SYMBOLS_PER_EXCHANGE = DATA_FRAME_SYMBOLS + ACK_FRAME_SYMBOLS
+
+
+def airtime_pps(bitrate_kbps, offered_load_percent):
+    """PAN全体のairtime占有率が offered_load_percent % になる、1アプリあたりの送信レート[pps]。
+
+    占有時間はデータフレームとACKの送信時間のみを数え、バックオフ・IFS・再送は含まない。
+    """
+    bitrate_bps = bitrate_kbps * 1e3
+    return (offered_load_percent * 0.01) * bitrate_bps / (SYMBOLS_PER_EXCHANGE * APPS_PER_PAN)
+
+
 # --- スクリプト設定 ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TEMPLATE_DIR = os.path.join(SCRIPT_DIR, "../template/")  # commandline/template/
@@ -107,18 +140,16 @@ CONFIG_TEMPLATE = "TEMPLATE.config.j2"
 POS_TEMPLATE = "TEMPLATE.pos.j2"
 STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 
-pan1_offload_min = 10
-pan1_offload_max = 110
-pan2_offload_min = 10
-pan2_offload_max = 110
+# offered_load は airtime 占有率[%] そのものを表す (airtime_pps で換算)
+OFFERED_LOAD_PERCENTS = list(range(5, 51, 5))   # 5,10,...,50 [% airtime]
 
 # --- 全パラメータの組み合わせを事前に確定させておく ---
 # 元の入れ子ループと同じ順序 (bandwidth_pattern -> offered_load_pan2 -> offered_load_pan1 -> seed)
 # で並べることで、"全体の何番目から何個" というバッチ指定が可能になる。
 ALL_COMBOS = list(itertools.product(
     TARGET_BANDWIDTH_PATTERNS,
-    range(pan2_offload_min, pan2_offload_max, 10),
-    range(pan1_offload_min, pan1_offload_max, 10),
+    OFFERED_LOAD_PERCENTS,
+    OFFERED_LOAD_PERCENTS,
     range(SIMULATION_SEEDS),
 ))
 
@@ -214,10 +245,10 @@ def generate_batch(combos):
         for dev_id in DEVICE_ID_1:
             coordinator_node_1["cbr_applications"].append({
                     "dst": dev_id,  # Coordinator 1宛て
-                    "bps": ((CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * offered_load_pan1 * 0.01),
+                    "pps": airtime_pps(CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"], offered_load_pan1),
                     "start": MEASURE_START_SEC,
                     "end": MEASURE_END_SEC,
-                    "jitter": 1.0,
+                    "jitter": COORD_START_JITTER_SEC,
                     "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
                     "is_ack_required": True,
                     "distribution": TRAFFIC_DISTRIBUTION,
@@ -242,10 +273,10 @@ def generate_batch(combos):
         for dev_id in DEVICE_ID_2:
             coordinator_node_2["cbr_applications"].append({
                     "dst": dev_id,  # Coordinator 1宛て
-                    "bps": ((CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * offered_load_pan2 * 0.01),
+                    "pps": airtime_pps(CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"], offered_load_pan2),
                     "start": MEASURE_START_SEC,
                     "end": MEASURE_END_SEC,
-                    "jitter": 1.0,
+                    "jitter": COORD_START_JITTER_SEC,
                     "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
                     "is_ack_required": True,
                     "distribution": TRAFFIC_DISTRIBUTION,
@@ -262,10 +293,10 @@ def generate_batch(combos):
                 "associated": True,  # 静的に関連付け済み
                 "cbr_applications": [{
                     "dst": 1,  # Coordinator 1宛て
-                    "bps": ((CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * offered_load_pan1 * 0.01),
+                    "pps": airtime_pps(CHANNELS[bandwidth_pattern[0]]["bitrate_kbps"], offered_load_pan1),
                     "start": MEASURE_START_SEC,
                     "end": MEASURE_END_SEC,
-                    "jitter": 20.0,
+                    "jitter": DEVICE_START_JITTER_SEC,
                     "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
                     "is_ack_required": True,
                     "distribution": TRAFFIC_DISTRIBUTION,
@@ -285,10 +316,10 @@ def generate_batch(combos):
                 "associated": True,  # 静的に関連付け済み
                 "cbr_applications": [{
                     "dst": 2,  # Coordinator 1宛て
-                    "bps": ((CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"]*1e3/(NUM_DEVICE +1)) * offered_load_pan2 * 0.01),
+                    "pps": airtime_pps(CHANNELS[bandwidth_pattern[1]]["bitrate_kbps"], offered_load_pan2),
                     "start": MEASURE_START_SEC,
                     "end": MEASURE_END_SEC,
-                    "jitter": 20.0,
+                    "jitter": DEVICE_START_JITTER_SEC,
                     "payload_size": FRAME_SIZE - 15,  # MACヘッダを引いたサイズ
                     "is_ack_required": True,
                     "distribution": TRAFFIC_DISTRIBUTION,
