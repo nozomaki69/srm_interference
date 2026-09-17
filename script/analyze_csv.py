@@ -80,6 +80,42 @@ def make_rssi_bins(upper, lower, bin_size):
     return np.arange(upper, lower - bin_size / 2, -bin_size)
 
 
+def select_bins(upper, lower, bin_size, rssi_values, min_count=2):
+    """
+    make_rssi_bins() の等間隔格子から、実際に解析に使うビンの (upper, lower) の
+    リストを返す。ΔPER分散の箱ひげ図・分散分布の箱ひげ図・干渉検知の統計量が
+    すべてこの関数を経由することで、「どのビンを使うか」の定義が1箇所に集まる。
+
+    ★このブランチ(test1)の方針 = 代替統計量A:
+      min_count 個以上のデータが入っているビン(=有効ビン)のうち、
+      最も弱い1ビンを落とす。
+
+    干渉なし時の「RSSIビン内ΔPER分散の最大値」は、ほぼ常にセル端の最弱ビンが
+    決めている。セル端は PER が 0.5 付近になるため二項ノイズ p(1-p)/n が最大で、
+    干渉が無くても端末間のばらつきが大きく出るためである。一方で干渉の信号は
+    最弱ビンではなく1つ内側のビンに現れる(セル端の端末は干渉が無くても既に
+    失敗しており、干渉による増分が乗らない)。そのまま max を取ると
+    「信号の最良ビン vs 誤検知の最悪ビン」を比べることになり不利なので、
+    最弱ビンを解析対象から外す。
+
+    RSSI_VAR_LOWER_DBM を固定値(例 -90dBm)に切り上げる方式は採らない。
+    帯域ごとに受信感度(-97 / -94 / -91 dBm)もセル半径も違うため、
+    「セル端のビンを落とす」意図は動的に判定しないと帯域間で揃わない。
+    """
+    edges = make_rssi_bins(upper, lower, bin_size)
+    r = np.asarray(rssi_values, dtype=float).flatten()
+    r = r[r != 0]
+
+    occupied = []
+    for i in range(len(edges) - 1):
+        hi, lo = edges[i], edges[i + 1]
+        if np.count_nonzero((r > lo) & (r <= hi)) >= min_count:
+            occupied.append((hi, lo))
+
+    # edges は強い側から並んでいるので occupied の末尾が最弱ビン。それを落とす。
+    return occupied[:-1]
+
+
 def get_interf_label(pan1_ch, pan2_ch):
     """
     (PAN1_CH, PAN2_CH) から 'interf' / 'no_interf' を判定する。
@@ -319,13 +355,14 @@ def plot_delta_per_analysis(delta_per, rssi_list, filename, plot_dir):
     delta_per_filtered = delta_per[valid_mask]
     rssi_filtered = rssi_list[valid_mask]
 
-    bins = make_rssi_bins(RSSI_BOX_UPPER_DBM, RSSI_BOX_LOWER_DBM, RSSI_BIN_SIZE_DBM)
+    # 統計量(compute_seed_max_variance)と同じビン定義を使う。こちらは
+    # 全シードをプールしたデータで最弱ビンを判定する。
+    bins = select_bins(RSSI_BOX_UPPER_DBM, RSSI_BOX_LOWER_DBM, RSSI_BIN_SIZE_DBM,
+                       rssi_filtered, min_count=1)
     bin_data_list = []
     labels = []
 
-    for i in range(len(bins) - 1):
-        upper = bins[i]
-        lower = bins[i + 1]
+    for upper, lower in bins:
         in_bin_mask = (rssi_filtered > lower) & (rssi_filtered <= upper)
         bin_data = delta_per_filtered[in_bin_mask]
         labels.append(f"[{upper}, {lower})")
@@ -354,10 +391,13 @@ def plot_variance_distribution_boxplot(delta_per, rssi_list, filename, plot_dir)
     delta_per = np.array(delta_per, dtype=float).flatten()
 
     num_seeds = len(rssi_list) // NUM_DEVICE
-    bins = make_rssi_bins(RSSI_VAR_UPPER_DBM, RSSI_VAR_LOWER_DBM, RSSI_BIN_SIZE_DBM)
+    # 統計量(compute_seed_max_variance)と同じビン定義。こちらは全シードを
+    # プールしたデータで最弱ビンを判定する。
+    bins = select_bins(RSSI_VAR_UPPER_DBM, RSSI_VAR_LOWER_DBM, RSSI_BIN_SIZE_DBM,
+                       rssi_list)
 
-    variances_per_bin = [[] for _ in range(len(bins) - 1)]
-    bin_labels = [f"[{bins[i]}, {bins[i + 1]})" for i in range(len(bins) - 1)]
+    variances_per_bin = [[] for _ in range(len(bins))]
+    bin_labels = [f"[{hi}, {lo})" for hi, lo in bins]
 
     for s in range(num_seeds):
         start_idx = s * NUM_DEVICE
@@ -370,9 +410,7 @@ def plot_variance_distribution_boxplot(delta_per, rssi_list, filename, plot_dir)
         r_v = rssi_seed[valid]
         d_v = delta_seed[valid]
 
-        for b in range(len(bins) - 1):
-            upper = bins[b]
-            lower = bins[b + 1]
+        for b, (upper, lower) in enumerate(bins):
             mask = (r_v > lower) & (r_v <= upper)
             bin_values = d_v[mask]
             if len(bin_values) > 1:
@@ -471,8 +509,10 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
 # ============================================================
 # 干渉検知（帯域幅ペアごとに interf/no_interf を比較）
 # ============================================================
-# ΔPER(DL-UL)の分散を見る際のRSSIビン境界（plot_variance_distribution_boxplotと同じ）
-VARIANCE_RSSI_BINS = make_rssi_bins(RSSI_VAR_UPPER_DBM, RSSI_VAR_LOWER_DBM, RSSI_BIN_SIZE_DBM)
+# 干渉検知に使うRSSIビンは select_bins() が返す
+# （plot_variance_distribution_boxplot と同じ定義）。
+# 以前はここで固定のビン境界配列 VARIANCE_RSSI_BINS を作っていたが、
+# 「どのビンを使うか」がデータ依存になったため select_bins() に一本化した。
 
 # 分散のしきい値の探索範囲。ΔPERは[-1, 1]なので分散の理論上限は1だが、
 # 実データではもっと小さい値になるはず。0〜1を0.001刻みで細かく探索する。
@@ -482,8 +522,9 @@ VARIANCE_THRESHOLDS = np.round(np.arange(0.0, 1.001, 0.001), 4)
 def compute_seed_max_variance(delta_per, rssi_list, num_devices):
     """
     delta_per, rssi_list: Seedごとに num_devices 個ずつ連続して並んだ1次元配列。
-    各SeedについてRSSIを RSSI_BIN_SIZE_DBM 幅のビンに分け、ビンごとのΔPER分散を計算し、
-    そのSeed内での最大分散値を「干渉指標」として返す。
+    各SeedについてRSSIを select_bins() が返すビンに分け、ビンごとのΔPER分散を
+    計算し、そのSeed内での最大分散値を「干渉指標」として返す。
+    どのビンを使うかは select_bins() が決める(このブランチでは最弱ビンを除外)。
 
     戻り値: 各Seedの最大分散値のリスト（長さ = num_seeds）。
     有効なビン（データ点2個以上）が1つも無いSeedは 0.0 とする。
@@ -504,8 +545,10 @@ def compute_seed_max_variance(delta_per, rssi_list, num_devices):
         d_v = delta_seed[valid]
 
         max_var = 0.0
-        for b in range(len(VARIANCE_RSSI_BINS) - 1):
-            upper, lower = VARIANCE_RSSI_BINS[b], VARIANCE_RSSI_BINS[b + 1]
+        # ビンの取捨はSeedごとに判定する(Seedごとに端末配置が違うため、
+        # 最弱の有効ビンもSeedごとに変わる)。
+        for upper, lower in select_bins(RSSI_VAR_UPPER_DBM, RSSI_VAR_LOWER_DBM,
+                                        RSSI_BIN_SIZE_DBM, r_v):
             mask = (r_v > lower) & (r_v <= upper)
             bin_values = d_v[mask]
             if len(bin_values) > 1:
