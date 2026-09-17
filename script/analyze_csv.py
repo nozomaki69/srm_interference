@@ -52,43 +52,36 @@ CHANNEL_FREQ_MHZ = {0: 920, 1: 920, 2: 920, 3: 921, 4: 921, 5: 921}
 #   - plot_delta_per_analysis              (ΔPERの箱ひげ図)
 #   - plot_variance_distribution_boxplot   (ΔPER分散の箱ひげ図)
 #   - select_bins                          (干渉検知に使うRSSIビン)
-# 例: 10 -> 5 に変更すると、10dBm刻みだったビンがすべて5dBm刻みになる。
+#
+# ビンの「境界」は固定値ではなく、実測したRSSIを起点にSeedごとに決まる
+# (どこを起点にするかは select_bins() のdocstringを参照)。
+# 以前は 0dBm 起点の固定格子(RSSI_VAR_UPPER_DBM=0 .. RSSI_VAR_LOWER_DBM=-120、
+# ΔPER箱ひげ図だけ -50 .. -110)を使っていたが、負荷や帯域でRSSI分布が少しずれる
+# だけでビン境界と端末の切れ方が変わり、「同じリングの端末どうしを比べる」という
+# 指標の前提がぶれるため廃止した。固定格子を作っていた make_rssi_bins() と
+# RSSI_VAR_* / RSSI_BOX_* も同時に削除している。
+#
+# 副作用: ΔPER箱ひげ図は以前 -50dBm より強い端末が図から落ちていたが、
+# データ起点になったのでクリップが無くなり全端末が載る。
 RSSI_BIN_SIZE_DBM = 10
-
-# plot_delta_per_analysis で使うRSSI範囲(dBm)。上限・下限のレンジ自体は
-# 固定のまま、RSSI_BIN_SIZE_DBM に応じてビンの本数だけが自動で変わる。
-RSSI_BOX_UPPER_DBM = -50
-RSSI_BOX_LOWER_DBM = -110
-
-# plot_variance_distribution_boxplot / 干渉検知(select_bins)で使うRSSI範囲(dBm)。
-RSSI_VAR_UPPER_DBM = 0
-RSSI_VAR_LOWER_DBM = -120
 
 
 # ============================================================
 # ユーティリティ
 # ============================================================
-def make_rssi_bins(upper, lower, bin_size):
+def select_bins(rssi_values, bin_size=RSSI_BIN_SIZE_DBM, min_count=2):
     """
-    upper(dBm) から lower(dBm) まで bin_size(dBm) 刻みのビン境界配列を作る共通ヘルパー。
-    RSSI_BIN_SIZE_DBM を変更するだけで、これを呼んでいる箇所すべてのビン幅が
-    一括で変わるようにするためにこの関数を経由させている。
-    upper > lower を想定（例: upper=-50, lower=-110, bin_size=10）。
-    """
-    # stop は「lower を確実に含み、その1つ下の境界は含まない」ように
-    # bin_size の半分だけ余分に伸ばしておく（丸め誤差対策）。
-    return np.arange(upper, lower - bin_size / 2, -bin_size)
+    実際に受信したRSSIから、そのSeedで使うビンの (upper, lower) のリストを
+    強い側から順に返す。ビンの内外判定は呼び出し側と揃えて lower < r <= upper。
+    ΔPER分散の箱ひげ図・分散分布の箱ひげ図・干渉検知の統計量がすべてこの関数を
+    経由することで、「どのビンを使うか」の定義が1箇所に集まる。
+    端末が min_count 個未満しか入らないビンは返さない(間が空くこともある)。
 
+    ★このブランチの方針 = 代替統計量A:
+      そのSeedの**最大RSSIを上端**にして bin_size 刻みで下方向にビンを作り、
+      最小RSSIを含むビンまで進む。そのうえで最弱の有効ビンを1つ落とす。
 
-def select_bins(upper, lower, bin_size, rssi_values, min_count=2):
-    """
-    make_rssi_bins() の等間隔格子から、実際に解析に使うビンの (upper, lower) の
-    リストを返す。ΔPER分散の箱ひげ図・分散分布の箱ひげ図・干渉検知の統計量が
-    すべてこの関数を経由することで、「どのビンを使うか」の定義が1箇所に集まる。
-
-    ★このブランチ(test1)の方針 = 代替統計量A:
-      min_count 個以上のデータが入っているビン(=有効ビン)のうち、
-      最も弱い1ビンを落とす。
+      例) 最大が -55 dBm なら (-65, -55], (-75, -65], (-85, -75], ...
 
     干渉なし時の「RSSIビン内ΔPER分散の最大値」は、ほぼ常にセル端の最弱ビンが
     決めている。セル端は PER が 0.5 付近になるため二項ノイズ p(1-p)/n が最大で、
@@ -97,22 +90,30 @@ def select_bins(upper, lower, bin_size, rssi_values, min_count=2):
     失敗しており、干渉による増分が乗らない)。そのまま max を取ると
     「信号の最良ビン vs 誤検知の最悪ビン」を比べることになり不利なので、
     最弱ビンを解析対象から外す。
-
-    RSSI_VAR_LOWER_DBM を固定値(例 -90dBm)に切り上げる方式は採らない。
-    帯域ごとに受信感度(-97 / -94 / -91 dBm)もセル半径も違うため、
-    「セル端のビンを落とす」意図は動的に判定しないと帯域間で揃わない。
     """
-    edges = make_rssi_bins(upper, lower, bin_size)
     r = np.asarray(rssi_values, dtype=float).flatten()
     r = r[r != 0]
+    if r.size == 0:
+        return []
+
+    top = float(r.max())
+    bottom = float(r.min())
 
     occupied = []
-    for i in range(len(edges) - 1):
-        hi, lo = edges[i], edges[i + 1]
+    hi = top
+    while True:
+        lo = hi - bin_size
         if np.count_nonzero((r > lo) & (r <= hi)) >= min_count:
             occupied.append((hi, lo))
+        hi = lo
+        # 未カバーの端末(r <= hi)が無くなったら終了。境界は「lower < r <= upper」なので、
+        # hi == bottom のときはまだ最小RSSIの端末が入るビンを作れていない
+        # (最小RSSIが境界にちょうど乗るケース)。そのため break は hi < bottom で行う。
+        # 判定をビン生成の後に置いているので、全端末のRSSIが同一でもビンは1本作られる。
+        if hi < bottom:
+            break
 
-    # edges は強い側から並んでいるので occupied の末尾が最弱ビン。それを落とす。
+    # occupied は強い側から並んでいるので末尾が最弱ビン。それを落とす。
     return occupied[:-1]
 
 
@@ -351,33 +352,36 @@ def _calc_distance(positions, dev_id, ref_id):
 def plot_delta_per_analysis(delta_per, rssi_list, filename, plot_dir):
     rssi_list = np.array(rssi_list, dtype=float).flatten()
     delta_per = np.array(delta_per, dtype=float).flatten()
-    valid_mask = rssi_list != 0
-    delta_per_filtered = delta_per[valid_mask]
-    rssi_filtered = rssi_list[valid_mask]
 
-    # 統計量(compute_seed_max_variance)と同じビン定義を使う。こちらは
-    # 全シードをプールしたデータで最弱ビンを判定する。
-    bins = select_bins(RSSI_BOX_UPPER_DBM, RSSI_BOX_LOWER_DBM, RSSI_BIN_SIZE_DBM,
-                       rssi_filtered, min_count=1)
-    bin_data_list = []
-    labels = []
+    # ビン境界はSeedごとに実測RSSIから決まるので、Seedをまたぐと絶対値(dBm)では
+    # 揃わない。強い側から数えたインデックス(1 = 最強ビン)で束ねる。
+    num_seeds = len(rssi_list) // NUM_DEVICE
+    per_index = defaultdict(list)
 
-    for upper, lower in bins:
-        in_bin_mask = (rssi_filtered > lower) & (rssi_filtered <= upper)
-        bin_data = delta_per_filtered[in_bin_mask]
-        labels.append(f"[{upper}, {lower})")
-        bin_data_list.append(bin_data if len(bin_data) > 0 else [])
+    for s in range(num_seeds):
+        rssi_seed = rssi_list[s * NUM_DEVICE:(s + 1) * NUM_DEVICE]
+        delta_seed = delta_per[s * NUM_DEVICE:(s + 1) * NUM_DEVICE]
+
+        valid = rssi_seed != 0
+        r_v = rssi_seed[valid]
+        d_v = delta_seed[valid]
+
+        for b, (upper, lower) in enumerate(select_bins(r_v, min_count=1)):
+            mask = (r_v > lower) & (r_v <= upper)
+            if np.count_nonzero(mask) > 0:
+                per_index[b].extend(d_v[mask].tolist())
+
+    indices = sorted(per_index)
+    bin_data_list = [per_index[b] for b in indices]
+    labels = [str(b + 1) for b in indices]
 
     fig, ax = plt.subplots(figsize=(10, 10))
-    plot_indices = [i for i, d in enumerate(bin_data_list) if len(d) > 0]
     ax.tick_params(axis="both", labelsize=FONT_SIZE - 20, width=3.0, which="major", length=20)
-    ax.xaxis.set_major_formatter(mtick.StrMethodFormatter('{x:,.0f}'))
-    ax.xaxis.set_major_locator(mtick.MultipleLocator(1000))
 
-    if plot_indices:
-        ax.boxplot([bin_data_list[i] for i in plot_indices])
-        ax.set_xticks(range(1, len(plot_indices) + 1))
-        ax.set_xticklabels([labels[i] for i in plot_indices])
+    if bin_data_list:
+        ax.boxplot(bin_data_list)
+        ax.set_xticks(range(1, len(labels) + 1))
+        ax.set_xticklabels(labels)
     plt.ylim(-1.0, 1.0)
     plt.grid(True, axis='y', linestyle='--', alpha=0.7)
 
@@ -390,14 +394,10 @@ def plot_variance_distribution_boxplot(delta_per, rssi_list, filename, plot_dir)
     rssi_list = np.array(rssi_list, dtype=float).flatten()
     delta_per = np.array(delta_per, dtype=float).flatten()
 
+    # 統計量(compute_seed_max_variance)と同じビン定義。境界はSeedごとに動くので、
+    # 強い側から数えたインデックス(1 = 最強ビン)で束ねる。
     num_seeds = len(rssi_list) // NUM_DEVICE
-    # 統計量(compute_seed_max_variance)と同じビン定義。こちらは全シードを
-    # プールしたデータで最弱ビンを判定する。
-    bins = select_bins(RSSI_VAR_UPPER_DBM, RSSI_VAR_LOWER_DBM, RSSI_BIN_SIZE_DBM,
-                       rssi_list)
-
-    variances_per_bin = [[] for _ in range(len(bins))]
-    bin_labels = [f"[{hi}, {lo})" for hi, lo in bins]
+    variances_per_index = defaultdict(list)
 
     for s in range(num_seeds):
         start_idx = s * NUM_DEVICE
@@ -410,21 +410,18 @@ def plot_variance_distribution_boxplot(delta_per, rssi_list, filename, plot_dir)
         r_v = rssi_seed[valid]
         d_v = delta_seed[valid]
 
-        for b, (upper, lower) in enumerate(bins):
+        for b, (upper, lower) in enumerate(select_bins(r_v)):
             mask = (r_v > lower) & (r_v <= upper)
             bin_values = d_v[mask]
             if len(bin_values) > 1:
-                variances_per_bin[b].append(np.var(bin_values))
+                variances_per_index[b].append(np.var(bin_values))
 
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.tick_params(axis="both", labelsize=FONT_SIZE - 20, width=3.0, which="major", length=20)
 
-    plot_data = []
-    plot_labels = []
-    for d, label in zip(variances_per_bin, bin_labels):
-        if len(d) > 0:
-            plot_data.append(d)
-            plot_labels.append(label)
+    indices = sorted(variances_per_index)
+    plot_data = [variances_per_index[b] for b in indices]
+    plot_labels = [str(b + 1) for b in indices]
 
     if plot_data:
         ax.boxplot(plot_data)
@@ -547,8 +544,7 @@ def compute_seed_max_variance(delta_per, rssi_list, num_devices):
         max_var = 0.0
         # ビンの取捨はSeedごとに判定する(Seedごとに端末配置が違うため、
         # 最弱の有効ビンもSeedごとに変わる)。
-        for upper, lower in select_bins(RSSI_VAR_UPPER_DBM, RSSI_VAR_LOWER_DBM,
-                                        RSSI_BIN_SIZE_DBM, r_v):
+        for upper, lower in select_bins(r_v):
             mask = (r_v > lower) & (r_v <= upper)
             bin_values = d_v[mask]
             if len(bin_values) > 1:
