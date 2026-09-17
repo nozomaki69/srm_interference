@@ -86,9 +86,16 @@ def select_bins(upper, lower, bin_size, rssi_values, min_count=2):
     リストを返す。ΔPER分散の箱ひげ図・分散分布の箱ひげ図・干渉検知の統計量が
     すべてこの関数を経由することで、「どのビンを使うか」の定義が1箇所に集まる。
 
-    ★このブランチ(test1)の方針 = 代替統計量A:
-      min_count 個以上のデータが入っているビン(=有効ビン)のうち、
-      最も弱い1ビンを落とす。
+    ★このブランチ(test2)の方針 = 代替統計量A':
+      ビン幅は RSSI_BIN_SIZE_DBM (10dBm) のまま。有効ビンのうち最も弱い1ビン
+      [U, U-10) だけを [U, U-5) と [U-5, U-10) に割り、弱い側の [U-5, U-10) を
+      捨てて強い側の [U, U-5) はビンとして残す。他のビンは一切変えない。
+
+      最弱ビンを丸ごと捨てるA(test1)に対して、捨てるのは最弱端の5dBm分だけに
+      なるので、セル端寄りのデータを半分残せる。ただし残した [U, U-5) は幅が
+      半分なので入る端末数も半分(30台中で数台)になり、「データ2点以上」を
+      満たさないSeedが増えて、そのビンの分散推定は荒くなる。AとA'のどちらが
+      効くかは、この利得と損失のどちらが勝つかで決まる。
 
     干渉なし時の「RSSIビン内ΔPER分散の最大値」は、ほぼ常にセル端の最弱ビンが
     決めている。セル端は PER が 0.5 付近になるため二項ノイズ p(1-p)/n が最大で、
@@ -112,8 +119,17 @@ def select_bins(upper, lower, bin_size, rssi_values, min_count=2):
         if np.count_nonzero((r > lo) & (r <= hi)) >= min_count:
             occupied.append((hi, lo))
 
-    # edges は強い側から並んでいるので occupied の末尾が最弱ビン。それを落とす。
-    return occupied[:-1]
+    if not occupied:
+        return []
+
+    # edges は強い側から並んでいるので occupied の末尾が最弱ビン。
+    # そのビンだけを半分に割り、強い側の半分だけを残す。
+    weakest_hi, weakest_lo = occupied[-1]
+    mid = weakest_hi - bin_size / 2.0
+    kept = occupied[:-1]
+    if np.count_nonzero((r > mid) & (r <= weakest_hi)) >= min_count:
+        kept.append((weakest_hi, mid))
+    return kept
 
 
 def get_interf_label(pan1_ch, pan2_ch):
