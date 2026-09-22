@@ -9,6 +9,9 @@ def parse_trace_file(filepath, num_device):
     pan1_devices = list(range(3, 3 + num_device))
     pan2_devices = list(range(3 + num_device, 3 + 2 * num_device))
     all_devices = pan1_devices + pan2_devices
+    # 所属PANの判定を毎行 list で線形探索しないように set にしておく
+    pan1_device_set = set(pan1_devices)
+    pan2_device_set = set(pan2_devices)
 
     # 集計用変数の初期化
     c_deq_pkt_num = {1: 0, 2: 0} # PC1, PC2がdequeueした合計数
@@ -35,52 +38,53 @@ def parse_trace_file(filepath, num_device):
     seed = int(match.group(6))
 
     # トレースファイルの解析
+    #
+    # DrIotMac のモデル名とイベント名は driot 側で固定文字列なので、部分一致ではなく
+    # 完全一致で分岐する。行数の大半を占める ABackoffStart / ACcaStart などは
+    # parts[5] と parts[9] の2回の比較だけで抜けられる。
     with open(filepath, 'r') as f:
         for line in f:
             parts = line.split()
-            if not parts: continue
+            if len(parts) < 10 or parts[5] != "DrIotMac":
+                continue
 
-            # --- Coordinator (ID: 1 or 2) ---
-            if "DrIotMac" in parts[5] and parts[3] in ["1", "2"]:
-                pc_id = int(parts[3])
+            node_id = int(parts[3])
+            ev = parts[9]
 
-                # PCがdequeueした数（全体 ＆ 各デバイス宛て）
-                if "DataFrameDequeued" in parts[9]:
-                    c_deq_pkt_num[pc_id] += 1
+            if ev == "DataFrameDequeued":
+                if node_id in c_deq_pkt_num:
+                    # --- Coordinator (ID: 1 or 2) がdequeueした数 (全体 & 各デバイス宛て) ---
+                    c_deq_pkt_num[node_id] += 1
                     try:
                         # parts[15] に宛先デバイスIDが入っていることを利用
                         dest_dev = int(parts[15])
-                        if dest_dev in c_deq_pkt_num_to_dev:
-                            c_deq_pkt_num_to_dev[dest_dev] += 1
                     except (IndexError, ValueError):
-                        pass
+                        continue
+                    if dest_dev in c_deq_pkt_num_to_dev:
+                        c_deq_pkt_num_to_dev[dest_dev] += 1
+                elif node_id in d_deq_pkt_num:
+                    # --- Device (ID: 3 ~) がdequeueした数 ---
+                    d_deq_pkt_num[node_id] += 1
 
-                # PCが受信したフレーム数とRSSI
-                if "RxFrame" in parts[9] and "Data" in parts[15]:
-                    pkt_id = parts[11]
+            elif ev == "RxFrame":
+                if len(parts) < 16 or parts[15] != "Data":
+                    continue
+                if node_id in c_deq_pkt_num:
+                    # PCが受信したデータフレーム数とRSSI
                     try:
-                        src_dev = int(pkt_id.split('_')[0])
-                        if src_dev in c_rx_pkt_num:
-                            c_rx_pkt_num[src_dev] += 1
-                            c_rssi_sum[src_dev] += float(parts[19])
-                            if src_dev in pan1_devices:
-                                c_rx_pkt_num_total[1] += 1
-                            elif src_dev in pan2_devices:
-                                c_rx_pkt_num_total[2] += 1
+                        src_dev = int(parts[11].split('_')[0])
                     except ValueError:
-                        pass
-
-            # --- Device (ID: 3 ~) ---
-            if "DrIotMac" in parts[5] and parts[3] not in ["1", "2"]:
-                dev_id = int(parts[3])
-
-                # Deviceがdequeueした数
-                if "DataFrameDequeued" in parts[9]:
-                    d_deq_pkt_num[dev_id] += 1
-
-                # Deviceが受信したフレーム数
-                if "RxFrame" in parts[9] and "Data" in parts[15]:
-                    d_rx_pkt_num[dev_id] += 1
+                        continue
+                    if src_dev in c_rx_pkt_num:
+                        c_rx_pkt_num[src_dev] += 1
+                        c_rssi_sum[src_dev] += float(parts[19])
+                        if src_dev in pan1_device_set:
+                            c_rx_pkt_num_total[1] += 1
+                        elif src_dev in pan2_device_set:
+                            c_rx_pkt_num_total[2] += 1
+                elif node_id in d_rx_pkt_num:
+                    # DeviceがPCから受信したデータフレーム数
+                    d_rx_pkt_num[node_id] += 1
 
     # 各デバイスからのRSSI平均を計算
     c_rssi_avg = {}
