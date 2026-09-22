@@ -31,11 +31,6 @@ POSITIONS_CSV = os.path.join(PLOT_BASE_DIR, "positions.csv")
 NUM_DEVICE = 30
 PAN1_DEVS = list(range(3, 3 + NUM_DEVICE))                   # NUM_DEVICE=30 なら 3..32
 PAN2_DEVS = list(range(3 + NUM_DEVICE, 3 + 2 * NUM_DEVICE))  # NUM_DEVICE=30 なら 33..62
-# RSSI列が始まる位置。CSVの列構成 (create_csv.generate_header) は
-#   メタ6 + PAN別Deq(1+N+N)*2 + PAN別Rx(1+N)*2 + デバイスRx(N*2) + RSSI(N*2)
-# なので、RSSI列の手前までの列数は 10 + 8*NUM_DEVICE (NUM_DEVICE=30 なら 250)。
-RSSI_START_IDX = 10 + 8 * NUM_DEVICE
-
 FONT_SIZE = 45
 
 # チャネル番号 -> 帯域(kbps)
@@ -237,11 +232,22 @@ def load_and_aggregate(csv_file, stats_dir):
         reader = csv.reader(f)
         header = next(reader)
         idx = {name: i for i, name in enumerate(header)}
+        # float として読むのはRSSI列だけ。以前は位置 (10 + 8*NUM_DEVICE) で
+        # 決め打ちしていたが、create_csv.generate_header() に列を1つ足すだけで
+        # 静かに壊れるので、列名で判定する。
+        is_float_col = ["RSSI" in name for name in header]
 
         for row in reader:
-            int_parts = [int(float(x)) for x in row[:RSSI_START_IDX]]
-            float_parts = [float(x) for x in row[RSSI_START_IDX:]]
-            r = int_parts + float_parts
+            # 長さチェックは必須。sbatch_jobs.sh は部分CSVの「行数」しか検証して
+            # いないので、途中で切れた行が混ざると zip が黙って切り詰めて列がずれる。
+            if len(row) != len(header):
+                raise ValueError(
+                    f"{csv_file}: 列数が一致しません "
+                    f"(header {len(header)} 列 / row {len(row)} 列)。"
+                    " 途中で落ちた解析ジョブの部分CSVが混ざっていないか確認すること。"
+                )
+            r = [float(x) if is_float else int(float(x))
+                 for x, is_float in zip(row, is_float_col)]
 
             pan1_ch = r[idx["PAN1_CH"]]
             pan2_ch = r[idx["PAN2_CH"]]
