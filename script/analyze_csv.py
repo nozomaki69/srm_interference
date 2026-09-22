@@ -298,13 +298,17 @@ def load_and_aggregate(csv_file, stats_dir):
 
             # --- PAN1（座標基準ノードは id=2） ---
             for dev in PAN1_DEVS:
+                # PER は「dequeueしたフレームのうち、最後までACKが返らなかった
+                # フレームの割合」。受信側の受信数ベース (1 - 受信数/dequeue数) では、
+                # ACKだけが失われて再送されたフレームを受信側が重複受信して
+                # 「成功」と二重に数えてしまい、ACK損失が損失として現れない。
                 dev_deq = r[idx[f"PAN1_Dev{dev}_Deq"]]
-                pc_rx = r[idx[f"PAN1_PC_Rx_from_Dev{dev}"]]
-                ul_per = 1.0 - (pc_rx / dev_deq) if dev_deq > 0 else 0.0
+                dev_noack = r[idx[f"PAN1_Dev{dev}_NoAck"]]
+                ul_per = (dev_noack / dev_deq) if dev_deq > 0 else 0.0
 
                 pc_deq = r[idx[f"PAN1_PC_Deq_to_Dev{dev}"]]
-                dev_rx = r[idx[f"PAN1_Dev{dev}_Rx_from_PC"]]
-                dl_per = 1.0 - (dev_rx / pc_deq) if pc_deq > 0 else 0.0
+                pc_noack = r[idx[f"PAN1_PC_NoAck_to_Dev{dev}"]]
+                dl_per = (pc_noack / pc_deq) if pc_deq > 0 else 0.0
 
                 rssi = r[idx[f"PAN1_PC_RSSI_Avg_from_Dev{dev}"]]
 
@@ -315,13 +319,17 @@ def load_and_aggregate(csv_file, stats_dir):
 
             # --- PAN2（座標基準ノードは id=1） ---
             for dev in PAN2_DEVS:
+                # PER は「dequeueしたフレームのうち、最後までACKが返らなかった
+                # フレームの割合」。受信側の受信数ベース (1 - 受信数/dequeue数) では、
+                # ACKだけが失われて再送されたフレームを受信側が重複受信して
+                # 「成功」と二重に数えてしまい、ACK損失が損失として現れない。
                 dev_deq = r[idx[f"PAN2_Dev{dev}_Deq"]]
-                pc_rx = r[idx[f"PAN2_PC_Rx_from_Dev{dev}"]]
-                ul_per = 1.0 - (pc_rx / dev_deq) if dev_deq > 0 else 0.0
+                dev_noack = r[idx[f"PAN2_Dev{dev}_NoAck"]]
+                ul_per = (dev_noack / dev_deq) if dev_deq > 0 else 0.0
 
                 pc_deq = r[idx[f"PAN2_PC_Deq_to_Dev{dev}"]]
-                dev_rx = r[idx[f"PAN2_Dev{dev}_Rx_from_PC"]]
-                dl_per = 1.0 - (dev_rx / pc_deq) if pc_deq > 0 else 0.0
+                pc_noack = r[idx[f"PAN2_PC_NoAck_to_Dev{dev}"]]
+                dl_per = (pc_noack / pc_deq) if pc_deq > 0 else 0.0
 
                 rssi = r[idx[f"PAN2_PC_RSSI_Avg_from_Dev{dev}"]]
 
