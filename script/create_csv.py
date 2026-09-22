@@ -24,6 +24,39 @@ def parse_trace_file(filepath, num_device):
 
     d_rx_pkt_num = {dev: 0 for dev in all_devices} # デバイスがPCから受信した数
 
+    # ★NEW: dequeueしたが最後までACKが返らなかったフレーム数 (新PERの分子)
+    c_noack_to_dev = {dev: 0 for dev in all_devices} # PC -> 各デバイス (下りリンク)
+    d_noack = {dev: 0 for dev in all_devices}        # 各デバイス -> PC (上りリンク)
+
+    # pending[node] = (seq, kind, dev)  kind は "ul" / "dl"
+    #
+    # DrIotMac は outputBuffer を1つしか持たない stop-and-wait なので、1ノードに
+    # つきACK待ちのデータフレームは常に高々1つ。したがって次の DataFrameDequeued
+    # が来た時点で、直前のフレームの成否が確定する (ACKを受けていなければ、MACが
+    # 再送上限またはCSMAバックオフ上限まで粘った末に諦めたということ)。
+    #
+    # driot 側は Ev= Drop / Ev= AckTimeout のASCII出力をコメントアウトしている
+    # (driot_mac.cpp:2622, 2665) ため、失敗そのものは trace に出ない。ACKの受信
+    # だけが残るので、それを手がかりに送達の成否を復元する。
+    pending = {}
+    unresolved = {"pan1_ul": 0, "pan1_dl": 0, "pan2_ul": 0, "pan2_dl": 0}
+    ack_seq_mismatch = 0
+
+    def resolve_as_failure(entry, at_eof=False):
+        """ACKが返らないまま確定したフレームを数える。
+
+        at_eof=True はシミュレーション終了時点でまだACK待ちだったフレームで、
+        成否が確定していないので no-ACK の分子には入れず診断値として数える。
+        """
+        _seq, kind, dev = entry
+        if at_eof:
+            pan = "pan1" if dev in pan1_device_set else "pan2"
+            unresolved[pan + "_" + kind] += 1
+        elif kind == "ul":
+            d_noack[dev] += 1
+        else:
+            c_noack_to_dev[dev] += 1
+
     # ファイル名からメタデータを抽出
     filename = os.path.basename(filepath)
     match = re.search(r'dist_(\d+)m_channel_(\d+)_vs_(\d+)_pan1_(\d+)_pan2_(\d+)_seed(\d+)', filename)
@@ -52,6 +85,16 @@ def parse_trace_file(filepath, num_device):
             ev = parts[9]
 
             if ev == "DataFrameDequeued":
+                # 直前のフレームがまだ pending なら、ACKが返らないまま諦められた
+                prev = pending.pop(node_id, None)
+                if prev is not None:
+                    resolve_as_failure(prev)
+
+                try:
+                    seq_num = int(parts[17])
+                except (IndexError, ValueError):
+                    seq_num = None
+
                 if node_id in c_deq_pkt_num:
                     # --- Coordinator (ID: 1 or 2) がdequeueした数 (全体 & 各デバイス宛て) ---
                     c_deq_pkt_num[node_id] += 1
@@ -62,12 +105,44 @@ def parse_trace_file(filepath, num_device):
                         continue
                     if dest_dev in c_deq_pkt_num_to_dev:
                         c_deq_pkt_num_to_dev[dest_dev] += 1
+                        # 分子の行き先は分母と同じ条件で確定させる。こうしておくと
+                        # 構造的に no-ACK 数 <= dequeue 数 が保証され、PERが1を超えない。
+                        if seq_num is not None:
+                            pending[node_id] = (seq_num, "dl", dest_dev)
                 elif node_id in d_deq_pkt_num:
                     # --- Device (ID: 3 ~) がdequeueした数 ---
                     d_deq_pkt_num[node_id] += 1
+                    if seq_num is not None:
+                        pending[node_id] = (seq_num, "ul", node_id)
 
             elif ev == "RxFrame":
-                if len(parts) < 16 or parts[15] != "Data":
+                if len(parts) < 16:
+                    continue
+                frame_type = parts[15]
+
+                if frame_type == "ACK":
+                    # driot_mac.cpp:1245-1247 より、ACKの RxFrame 行は MAC が
+                    # 自分の outputBuffer のフレームに対するACKとして受理した
+                    # ときにしか出力されない (一致しないACKは何も出力せずに捨てる)。
+                    # したがって seq が一致すればそのフレームは送達成功。
+                    #
+                    # 一致しない場合は、データフレームを諦めた直後に送った
+                    # コマンドフレーム宛てのACKなどなので、pending は消さずに
+                    # 診断カウンタだけ進める。ここで消すと本物の失敗が成功に化ける。
+                    entry = pending.get(node_id)
+                    if entry is None:
+                        continue
+                    try:
+                        acked_seq = int(parts[17])
+                    except (IndexError, ValueError):
+                        continue
+                    if acked_seq == entry[0]:
+                        del pending[node_id]
+                    else:
+                        ack_seq_mismatch += 1
+                    continue
+
+                if frame_type != "Data":
                     continue
                 if node_id in c_deq_pkt_num:
                     # PCが受信したデータフレーム数とRSSI
@@ -85,6 +160,11 @@ def parse_trace_file(filepath, num_device):
                 elif node_id in d_rx_pkt_num:
                     # DeviceがPCから受信したデータフレーム数
                     d_rx_pkt_num[node_id] += 1
+
+    # シミュレーション終了時点でまだACK待ちだったフレーム (ノードあたり高々1通)。
+    # 成否が確定していないので分子には入れず、診断値としてだけ残す。
+    for entry in pending.values():
+        resolve_as_failure(entry, at_eof=True)
 
     # 各デバイスからのRSSI平均を計算
     c_rssi_avg = {}
@@ -123,6 +203,19 @@ def parse_trace_file(filepath, num_device):
     row.extend([round(c_rssi_avg[dev], 4) for dev in pan1_devices])
     row.extend([round(c_rssi_avg[dev], 4) for dev in pan2_devices])
 
+    # ★NEW: No-ACK Stats (新PERの分子)。列は既存のRSSIブロックの後ろに足す。
+    row.extend([c_noack_to_dev[dev] for dev in pan1_devices])
+    row.extend([d_noack[dev] for dev in pan1_devices])
+    row.extend([c_noack_to_dev[dev] for dev in pan2_devices])
+    row.extend([d_noack[dev] for dev in pan2_devices])
+
+    # ★NEW: 健全性チェック用の診断値 (いずれも通常は0になるはず)
+    row.append(unresolved["pan1_ul"])
+    row.append(unresolved["pan1_dl"])
+    row.append(unresolved["pan2_ul"])
+    row.append(unresolved["pan2_dl"])
+    row.append(ack_seq_mismatch)
+
     return row
 
 def generate_header(num_device):
@@ -158,6 +251,19 @@ def generate_header(num_device):
     # RSSI
     header.extend([f"PAN1_PC_RSSI_Avg_from_Dev{dev}" for dev in pan1_devs])
     header.extend([f"PAN2_PC_RSSI_Avg_from_Dev{dev}" for dev in pan2_devs])
+
+    # ★NEW: No-ACK (新PERの分子)
+    header.extend([f"PAN1_PC_NoAck_to_Dev{dev}" for dev in pan1_devs])
+    header.extend([f"PAN1_Dev{dev}_NoAck" for dev in pan1_devs])
+    header.extend([f"PAN2_PC_NoAck_to_Dev{dev}" for dev in pan2_devs])
+    header.extend([f"PAN2_Dev{dev}_NoAck" for dev in pan2_devs])
+
+    # ★NEW: 診断値
+    header.extend([
+        "PAN1_UL_Unresolved", "PAN1_DL_Unresolved",
+        "PAN2_UL_Unresolved", "PAN2_DL_Unresolved",
+        "AckSeqMismatch",
+    ])
 
     return header
 
