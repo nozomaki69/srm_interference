@@ -207,6 +207,29 @@ def make_empty_condition_data():
     }
 
 
+# 新PERの定義。dequeueしたデータフレームをMACの再送カウンタ相当の4変数に分類し、
+# そのうち「再送上限に達してもACKが返ってこなかった」フレームの割合をPERとする。
+#
+#   PER = macTxFailCount / (macTxSuccessCount + macRetryCount
+#                           + macMultipleRetryCount + macTxFailCount)
+#
+# 分母がdequeue数ではなく4変数の和なので、CSMAでチャネルを取れずに落ちたフレーム
+# (macCsmaFailCount) と、シミュレーション終了時点でまだACK待ちだったフレーム
+# (PANn_*_Unresolved) は分母からも分子からも自動的に外れ、PER <= 1 が構造的に
+# 保証される。
+#
+# 受信側の受信数ベース (1 - 受信数/dequeue数) を使わないのは、ACKだけが失われて
+# 再送されたフレームを受信側が重複受信して「成功」と二重に数えてしまい、ACK損失が
+# 損失として現れないため。
+def _mac_per(r, idx, prefix):
+    n_fail = r[idx[prefix + "macTxFailCount"]]
+    total = (r[idx[prefix + "macTxSuccessCount"]]
+             + r[idx[prefix + "macRetryCount"]]
+             + r[idx[prefix + "macMultipleRetryCount"]]
+             + n_fail)
+    return (n_fail / total) if total > 0 else 0.0
+
+
 def load_and_aggregate(csv_file, stats_dir):
     """
     CSV を読み込み、(PAN1_CH, PAN2_CH, Distance, PAN1_Offload, PAN2_Offload) を
@@ -298,17 +321,10 @@ def load_and_aggregate(csv_file, stats_dir):
 
             # --- PAN1（座標基準ノードは id=2） ---
             for dev in PAN1_DEVS:
-                # PER は「dequeueしたフレームのうち、最後までACKが返らなかった
-                # フレームの割合」。受信側の受信数ベース (1 - 受信数/dequeue数) では、
-                # ACKだけが失われて再送されたフレームを受信側が重複受信して
-                # 「成功」と二重に数えてしまい、ACK損失が損失として現れない。
-                dev_deq = r[idx[f"PAN1_Dev{dev}_Deq"]]
-                dev_noack = r[idx[f"PAN1_Dev{dev}_NoAck"]]
-                ul_per = (dev_noack / dev_deq) if dev_deq > 0 else 0.0
-
-                pc_deq = r[idx[f"PAN1_PC_Deq_to_Dev{dev}"]]
-                pc_noack = r[idx[f"PAN1_PC_NoAck_to_Dev{dev}"]]
-                dl_per = (pc_noack / pc_deq) if pc_deq > 0 else 0.0
+                # 上り (デバイス -> PC) と下り (PC -> デバイス) で、それぞれ
+                # MAC再送カウンタ4変数からPERを出す。定義は _mac_per() を参照。
+                ul_per = _mac_per(r, idx, f"PAN1_Dev{dev}_to_Co_")
+                dl_per = _mac_per(r, idx, f"PAN1_Co_to_Dev{dev}_")
 
                 rssi = r[idx[f"PAN1_PC_RSSI_Avg_from_Dev{dev}"]]
 
@@ -319,17 +335,10 @@ def load_and_aggregate(csv_file, stats_dir):
 
             # --- PAN2（座標基準ノードは id=1） ---
             for dev in PAN2_DEVS:
-                # PER は「dequeueしたフレームのうち、最後までACKが返らなかった
-                # フレームの割合」。受信側の受信数ベース (1 - 受信数/dequeue数) では、
-                # ACKだけが失われて再送されたフレームを受信側が重複受信して
-                # 「成功」と二重に数えてしまい、ACK損失が損失として現れない。
-                dev_deq = r[idx[f"PAN2_Dev{dev}_Deq"]]
-                dev_noack = r[idx[f"PAN2_Dev{dev}_NoAck"]]
-                ul_per = (dev_noack / dev_deq) if dev_deq > 0 else 0.0
-
-                pc_deq = r[idx[f"PAN2_PC_Deq_to_Dev{dev}"]]
-                pc_noack = r[idx[f"PAN2_PC_NoAck_to_Dev{dev}"]]
-                dl_per = (pc_noack / pc_deq) if pc_deq > 0 else 0.0
+                # 上り (デバイス -> PC) と下り (PC -> デバイス) で、それぞれ
+                # MAC再送カウンタ4変数からPERを出す。定義は _mac_per() を参照。
+                ul_per = _mac_per(r, idx, f"PAN2_Dev{dev}_to_Co_")
+                dl_per = _mac_per(r, idx, f"PAN2_Co_to_Dev{dev}_")
 
                 rssi = r[idx[f"PAN2_PC_RSSI_Avg_from_Dev{dev}"]]
 
