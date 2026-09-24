@@ -4,6 +4,18 @@ import glob
 import re
 import csv
 
+# driot-max-frame-retries と同じ値でなければならない。
+# 唯一の定義元は script/interference_2pan_config.py の MAX_FRAME_RETRIES で、そこから
+# TEMPLATE.config.j2 に差し込まれる。ここはトレースを読み返す側の写しなので、
+# 生成側を変えたらここも合わせること。
+#
+# MAC は ACKタイムアウトのたびに retryTxCount を1つ進め (driot_mac.cpp:1196)、
+# retryTxCount > maxFrameRetries になった時点で諦める (driot_mac.cpp:1198)。
+# つまり Ev= Tx-DATA の Retry= は 0..MAX_FRAME_RETRIES を取り、最大
+# MAX_FRAME_RETRIES+1 回送信される。Retry= MAX_FRAME_RETRIES の送信が失敗した
+# フレームだけが「再送上限に達して落ちたフレーム」である。
+MAX_FRAME_RETRIES = 3
+
 def parse_trace_file(filepath, num_device):
     # デバイスIDの割り当て定義
     pan1_devices = list(range(3, 3 + num_device))
@@ -24,11 +36,32 @@ def parse_trace_file(filepath, num_device):
 
     d_rx_pkt_num = {dev: 0 for dev in all_devices} # デバイスがPCから受信した数
 
-    # ★NEW: dequeueしたが最後までACKが返らなかったフレーム数 (新PERの分子)
+    # dequeueしたが最後までACKが返らなかったフレーム数 (旧PERの分子)
     c_noack_to_dev = {dev: 0 for dev in all_devices} # PC -> 各デバイス (下りリンク)
     d_noack = {dev: 0 for dev in all_devices}        # 各デバイス -> PC (上りリンク)
 
-    # pending[node] = (seq, kind, dev)  kind は "ul" / "dl"
+    # ★NEW: MACの再送カウンタ相当の内訳。キーは常に「対向デバイスのID」で、
+    # 方向 (dl = PC->デバイス / ul = デバイス->PC) ごとに別の dict に入れる。
+    #   macTxSuccessCount      : 再送なし (1回目の送信) でACKが返った
+    #   macRetryCount          : 1回の再送でACKが返った
+    #   macMultipleRetryCount  : 2回以上の再送でACKが返った
+    #   macTxFailCount         : 再送上限に達してもACKが返らなかった
+    #   macCsmaFailCount       : 再送上限に達する前に落ちた
+    #
+    # macCsmaFailCount を4変数から分けているのは、CSMAバックオフ上限超過による破棄
+    # (driot_mac.cpp:841-862 の ProcessCcaFailure) が retryTxCount を進めないまま
+    # (インクリメントは :844 でコメントアウトされている) 即座にフレームを捨てるため。
+    # これは「再送上限に達してACKが返ってこなかった」には当たらないので、PERの分母
+    # (4変数の和) からも外す。
+    counters = {
+        kind + "_" + name: {dev: 0 for dev in all_devices}
+        for kind in ("dl", "ul")
+        for name in ("tx_success", "retry", "multi_retry", "tx_fail", "csma_fail")
+    }
+
+    # pending[node] = [seq, kind, dev, max_retry]  kind は "ul" / "dl"
+    # max_retry はそのフレームについて観測した Ev= Tx-DATA の Retry= の最大値。
+    # None はまだ一度も電波に出ていないことを意味する。
     #
     # DrIotMac は outputBuffer を1つしか持たない stop-and-wait なので、1ノードに
     # つきACK待ちのデータフレームは常に高々1つ。したがって次の DataFrameDequeued
@@ -36,26 +69,57 @@ def parse_trace_file(filepath, num_device):
     # 再送上限またはCSMAバックオフ上限まで粘った末に諦めたということ)。
     #
     # driot 側は Ev= Drop / Ev= AckTimeout のASCII出力をコメントアウトしている
-    # (driot_mac.cpp:2622, 2665) ため、失敗そのものは trace に出ない。ACKの受信
-    # だけが残るので、それを手がかりに送達の成否を復元する。
+    # (driot_mac.cpp:2622, 2665) ため、失敗そのものは trace に出ない。一方で
+    # Ev= Tx-DATA (driot_mac.cpp:2492-2499) は送信試行ごとに出ていて Retry= を
+    # 持っているので、「何回目の送信で決着したか」はそこから復元できる。
+    # 再送では DataFrameDequeued は出し直されない (driot_mac.cpp:1633 のガードで
+    # 早期 return する) ので、1フレーム = 1回の DataFrameDequeued + N回の Tx-DATA。
     pending = {}
     unresolved = {"pan1_ul": 0, "pan1_dl": 0, "pan2_ul": 0, "pan2_dl": 0}
     ack_seq_mismatch = 0
+    tx_data_seq_mismatch = 0
+    ack_without_tx_data = 0
 
     def resolve_as_failure(entry, at_eof=False):
         """ACKが返らないまま確定したフレームを数える。
 
         at_eof=True はシミュレーション終了時点でまだACK待ちだったフレームで、
-        成否が確定していないので no-ACK の分子には入れず診断値として数える。
+        成否が確定していないので no-ACK の分子にも4変数にも入れず診断値として数える。
         """
-        _seq, kind, dev = entry
+        _seq, kind, dev, max_retry = entry
         if at_eof:
             pan = "pan1" if dev in pan1_device_set else "pan2"
             unresolved[pan + "_" + kind] += 1
-        elif kind == "ul":
+            return
+
+        if kind == "ul":
             d_noack[dev] += 1
         else:
             c_noack_to_dev[dev] += 1
+
+        # 最後の送信が Retry= MAX_FRAME_RETRIES なら再送上限まで粘って落ちたフレーム。
+        # それ以外 (Tx-DATA が1行も無い場合を含む) はCSMAでチャネルを取れずに落ちた。
+        if max_retry is not None and max_retry >= MAX_FRAME_RETRIES:
+            counters[kind + "_tx_fail"][dev] += 1
+        else:
+            counters[kind + "_csma_fail"][dev] += 1
+
+    def resolve_as_success(entry):
+        """ACKが返って送達が確定したフレームを、再送回数で3種に振り分ける。"""
+        nonlocal ack_without_tx_data
+        _seq, kind, dev, max_retry = entry
+        if max_retry is None:
+            # Tx-DATA を1行も見ていないのにACKが返るのは原理的に起きない。
+            # 落としてしまうと分母がずれるので再送なし扱いにし、診断値を進める。
+            ack_without_tx_data += 1
+            max_retry = 0
+
+        if max_retry == 0:
+            counters[kind + "_tx_success"][dev] += 1
+        elif max_retry == 1:
+            counters[kind + "_retry"][dev] += 1
+        else:
+            counters[kind + "_multi_retry"][dev] += 1
 
     # ファイル名からメタデータを抽出
     filename = os.path.basename(filepath)
@@ -108,12 +172,33 @@ def parse_trace_file(filepath, num_device):
                         # 分子の行き先は分母と同じ条件で確定させる。こうしておくと
                         # 構造的に no-ACK 数 <= dequeue 数 が保証され、PERが1を超えない。
                         if seq_num is not None:
-                            pending[node_id] = (seq_num, "dl", dest_dev)
+                            pending[node_id] = [seq_num, "dl", dest_dev, None]
                 elif node_id in d_deq_pkt_num:
                     # --- Device (ID: 3 ~) がdequeueした数 ---
                     d_deq_pkt_num[node_id] += 1
                     if seq_num is not None:
-                        pending[node_id] = (seq_num, "ul", node_id)
+                        pending[node_id] = [seq_num, "ul", node_id, None]
+
+            elif ev == "Tx-DATA":
+                # driot_mac.cpp:2492-2499:
+                #   PktId= <id> Retry= <n> Seq= <seq> DestN= <id>
+                # 送信試行ごとに1行出る。Retry= は outputBuffer.retryTxCount そのもので、
+                # 初回送信が0、ACKタイムアウトのたびに1つ増える。
+                entry = pending.get(node_id)
+                if entry is None:
+                    continue
+                try:
+                    retry = int(parts[13])
+                    tx_seq = int(parts[15])
+                except (IndexError, ValueError):
+                    continue
+                if tx_seq != entry[0]:
+                    # pending と違うフレームの送信。データを取り違えないよう
+                    # pending には触れず、診断カウンタだけ進める。
+                    tx_data_seq_mismatch += 1
+                    continue
+                if entry[3] is None or retry > entry[3]:
+                    entry[3] = retry
 
             elif ev == "RxFrame":
                 if len(parts) < 16:
@@ -138,6 +223,7 @@ def parse_trace_file(filepath, num_device):
                         continue
                     if acked_seq == entry[0]:
                         del pending[node_id]
+                        resolve_as_success(entry)
                     else:
                         ack_seq_mismatch += 1
                     continue
@@ -203,20 +289,42 @@ def parse_trace_file(filepath, num_device):
     row.extend([round(c_rssi_avg[dev], 4) for dev in pan1_devices])
     row.extend([round(c_rssi_avg[dev], 4) for dev in pan2_devices])
 
-    # ★NEW: No-ACK Stats (新PERの分子)。列は既存のRSSIブロックの後ろに足す。
+    # No-ACK Stats (旧PERの分子)。列は既存のRSSIブロックの後ろに足す。
     row.extend([c_noack_to_dev[dev] for dev in pan1_devices])
     row.extend([d_noack[dev] for dev in pan1_devices])
     row.extend([c_noack_to_dev[dev] for dev in pan2_devices])
     row.extend([d_noack[dev] for dev in pan2_devices])
 
-    # ★NEW: 健全性チェック用の診断値 (いずれも通常は0になるはず)
+    # 健全性チェック用の診断値 (いずれも通常は0になるはず)
     row.append(unresolved["pan1_ul"])
     row.append(unresolved["pan1_dl"])
     row.append(unresolved["pan2_ul"])
     row.append(unresolved["pan2_dl"])
     row.append(ack_seq_mismatch)
 
+    # ★NEW: MAC再送カウンタの内訳。既存列の添字を動かさないよう末尾に足す。
+    # 並び順は generate_header() の MAC_COUNTER_NAMES / 二重ループと厳密に一致させること。
+    for devs in (pan1_devices, pan2_devices):
+        for kind in ("dl", "ul"):
+            for name in MAC_COUNTER_NAMES:
+                row.extend([counters[kind + "_" + name][dev] for dev in devs])
+
+    # ★NEW: 再送カウンタ側の診断値
+    row.append(tx_data_seq_mismatch)
+    row.append(ack_without_tx_data)
+
     return row
+
+# ★NEW: MAC再送カウンタの内部名 -> CSVの列名に使う変数名。
+# row 構築と generate_header() でこの並びを共有する。
+MAC_COUNTER_NAMES = ["tx_success", "retry", "multi_retry", "tx_fail", "csma_fail"]
+MAC_COUNTER_LABELS = {
+    "tx_success": "macTxSuccessCount",
+    "retry": "macRetryCount",
+    "multi_retry": "macMultipleRetryCount",
+    "tx_fail": "macTxFailCount",
+    "csma_fail": "macCsmaFailCount",
+}
 
 def generate_header(num_device):
     pan1_devs = list(range(3, 3 + num_device))
@@ -252,18 +360,33 @@ def generate_header(num_device):
     header.extend([f"PAN1_PC_RSSI_Avg_from_Dev{dev}" for dev in pan1_devs])
     header.extend([f"PAN2_PC_RSSI_Avg_from_Dev{dev}" for dev in pan2_devs])
 
-    # ★NEW: No-ACK (新PERの分子)
+    # No-ACK (旧PERの分子)
     header.extend([f"PAN1_PC_NoAck_to_Dev{dev}" for dev in pan1_devs])
     header.extend([f"PAN1_Dev{dev}_NoAck" for dev in pan1_devs])
     header.extend([f"PAN2_PC_NoAck_to_Dev{dev}" for dev in pan2_devs])
     header.extend([f"PAN2_Dev{dev}_NoAck" for dev in pan2_devs])
 
-    # ★NEW: 診断値
+    # 診断値
     header.extend([
         "PAN1_UL_Unresolved", "PAN1_DL_Unresolved",
         "PAN2_UL_Unresolved", "PAN2_DL_Unresolved",
         "AckSeqMismatch",
     ])
+
+    # ★NEW: MAC再送カウンタの内訳 (新PERの材料)。
+    # 下りリンク (PC -> デバイス) は PANn_Co_to_Dev<id>_<変数名>、
+    # 上りリンク (デバイス -> PC) は PANn_Dev<id>_to_Co_<変数名>。
+    for pan, devs in (("PAN1", pan1_devs), ("PAN2", pan2_devs)):
+        for kind in ("dl", "ul"):
+            for name in MAC_COUNTER_NAMES:
+                label = MAC_COUNTER_LABELS[name]
+                if kind == "dl":
+                    header.extend([f"{pan}_Co_to_Dev{dev}_{label}" for dev in devs])
+                else:
+                    header.extend([f"{pan}_Dev{dev}_to_Co_{label}" for dev in devs])
+
+    # ★NEW: 再送カウンタ側の診断値
+    header.extend(["TxDataSeqMismatch", "AckWithoutTxData"])
 
     return header
 
