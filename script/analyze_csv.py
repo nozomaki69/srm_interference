@@ -331,7 +331,10 @@ def load_and_aggregate(csv_file, stats_dir):
                 entry["pan1_ul"].append(ul_per)
                 entry["pan1_dl"].append(dl_per)
                 entry["pan1_rssi"].append(rssi)
-                entry["pan1_dist"].append(_calc_distance(positions, dev, 2))
+                # 距離の基準は PAN1 自身のコーディネータ (id=1)。
+                # 以前は id=2 (相手PANのコーディネータ) を基準にしており、
+                # 距離 vs PER の図が「相手PANからの距離」になっていた。
+                entry["pan1_dist"].append(_calc_distance(positions, dev, 1))
 
             # --- PAN2（座標基準ノードは id=1） ---
             for dev in PAN2_DEVS:
@@ -345,7 +348,8 @@ def load_and_aggregate(csv_file, stats_dir):
                 entry["pan2_ul"].append(ul_per)
                 entry["pan2_dl"].append(dl_per)
                 entry["pan2_rssi"].append(rssi)
-                entry["pan2_dist"].append(_calc_distance(positions, dev, 1))
+                # 距離の基準は PAN2 自身のコーディネータ (id=2)。上と同じ理由。
+                entry["pan2_dist"].append(_calc_distance(positions, dev, 2))
 
     print(
         f"--- positions: newly saved & .pos deleted: {deleted_pos_count}, "
