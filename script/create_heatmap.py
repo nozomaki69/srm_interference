@@ -49,6 +49,22 @@ def load_data(path: str) -> pd.DataFrame:
     df = df.rename(columns=COLUMN_RENAME)
     return df
 
+def f1_floor(n_pos, n_neg):
+    """F1 の構造的な下限。
+
+    しきい値を 0 まで下げると全 seed が陽性になるので、precision = n_pos/(n_pos+n_neg)、
+    recall = 1 となり、F1 = 2*n_pos / (2*n_pos + n_neg) になる。
+    n_pos = n_neg = 100 なら 0.667。これは「検知できた」のではなく
+    **全部を干渉ありと答えた縮退解**なので、この値のセルは検知失敗として扱う。
+
+    以前はカラーバーの下限を 0.5 にしていたため、この 0.667 が色付きの中間値として
+    描かれ、性能を過大に見せていた。
+    """
+    if n_pos <= 0 or n_neg <= 0:
+        return 0.0
+    return 2.0 * n_pos / (2.0 * n_pos + n_neg)
+
+
 def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_dir: str, max_load: int = MAX_LOAD):
     sub = df[
         (df["band_pair"] == band_pair)
@@ -75,7 +91,21 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
     fig_h = 0.9 * len(rows)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
-    im = ax.imshow(f1_pivot.values, cmap="YlGnBu", vmin=0.5, vmax=1, aspect="auto")
+    # カラーバーの下限は F1 の構造的な下限に合わせる。データから決めるので、
+    # seed 数を変えても追随する。
+    floor = f1_floor(sub["n_pos"].max(), sub["n_neg"].max())
+
+    # 下限に張り付いたセル (= 検知失敗) は色を付けず灰色で潰す。
+    # 数値としては 0.667 でも中身は「全部陽性」なので、色の濃淡で他と比べさせない。
+    #
+    # 比較は「丸めた下限」に対して行う。analyze_csv.py が F1 を小数3桁に丸めて
+    # 出力している (0.6667 -> 0.667) ため、生の下限と比べると 0.0003 だけ上回って
+    # 判定から漏れる。
+    values = np.ma.masked_less_equal(f1_pivot.values.astype(float), round(floor, 3))
+    cmap = plt.get_cmap("YlGnBu").copy()
+    cmap.set_bad(color="0.75")
+
+    im = ax.imshow(values, cmap=cmap, vmin=floor, vmax=1, aspect="auto")
 
     ax.set_xticks(range(len(cols)))
     ax.set_xticklabels(cols)
@@ -91,7 +121,9 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
             th_val = th_pivot.iloc[i, j]
             if pd.isna(f1_val):
                 continue
-            text_color = "white" if f1_val > 0.6 else "black"
+            # カラーバーが floor..1 になったので、文字色の判定も相対位置で決める。
+            # 灰色で潰したセル (下限張り付き) は黒文字にする。
+            text_color = "white" if f1_val > floor + 0.6 * (1.0 - floor) else "black"
             # Removed Japanese, changed to "Th=" to save space, increased font size
             ax.text(
                 j, i, f"Tau: {th_val:.2f}\nF1: {f1_val:.2f}",
