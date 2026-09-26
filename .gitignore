@@ -1,3 +1,6 @@
 plots/simulation_results.csv
 plots/positions.csv
+# detect_cfar.py extract の出力。実データ (120,000ラン) で 100MB 程度になり、
+# GitHub の 100MB 制限に当たる。生データ同様 git ではなく scp で運ぶこと。
+plots/bin_statistics.csv
 __pycache__/
