@@ -76,8 +76,17 @@ from analyze_csv import (  # noqa: E402
 PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 RAW_CSV = os.path.join(PLOT_BASE_DIR, "simulation_results.csv")
 BIN_CSV = os.path.join(PLOT_BASE_DIR, "bin_statistics.csv")
-CALIB_JSON = os.path.join(PLOT_BASE_DIR, "cfar_calibration.json")
-RESULT_CSV = os.path.join(PLOT_BASE_DIR, "cfar_results.csv")
+
+
+# 出力パスは scope ごとに分ける。以前は scope に依らず同じ既定値だったため、
+# `run --scope global` の直後に `run --scope own_config` を走らせると
+# 前者の結果が黙って上書きされていた。
+def result_csv_path(scope):
+    return os.path.join(PLOT_BASE_DIR, f"cfar_results_{scope}.csv")
+
+
+def calib_json_path(scope):
+    return os.path.join(PLOT_BASE_DIR, f"cfar_calibration_{scope}.json")
 
 # PER の分母を構成する4カウンタ。analyze_csv._mac_per() と同じ定義。
 # macCsmaFailCount は「再送上限に達してACKが返らなかった」に当たらないので入れない。
@@ -324,6 +333,45 @@ def t_norm(bin_recs, sigma2_het):
     return best
 
 
+def detection_power(bin_recs, sigma2_het, tau, delta):
+    """この観測で、分散を delta だけ押し上げる干渉を検知できる確率。
+
+    有効領域 (validity region) の判定に使う。**自PANの観測量と設計仕様だけ**で
+    計算でき、実際の干渉源の情報は要らない:
+      - vbar_b はその窓の MAC カウンタから計算した二項ノイズ
+      - sigma2_het は自PANの H0 データから較正した定数
+      - delta は「これ以上の干渉なら検知したい」という運用者が決める感度仕様
+      - tau は目標 alpha から決まる閾値
+
+    H0 では  s2_b ~ (vbar_b + sigma2_het) * chi2_{m-1}/(m-1)
+    H1 では  s2_b ~ (vbar_b + sigma2_het + delta) * chi2_{m-1}/(m-1)
+    なので、Z_b = s2_b/(vbar_b + sigma2_het) が tau を超えない確率は
+        F_chi2( (m-1) * tau * gamma_b ),   gamma_b = S0_b / (S0_b + delta)
+    判定は max_b Z_b >= tau なので、ビン間の独立を仮定して
+        検出力 = 1 - Π_b F_chi2(...)
+    となる。ビン数が多いほど検知の機会は増えるが、tau 側は既に全ビンを通した
+    alpha を満たすよう較正されているので、二重取りにはならない。
+    """
+    if not bin_recs or delta <= 0:
+        return float("nan")
+
+    log_miss = 0.0
+    for rec in bin_recs:
+        m = rec["m"]
+        if m < 2:
+            continue
+        s0 = rec["vbar"] + sigma2_het
+        if s0 <= 0:
+            continue
+        gamma = s0 / (s0 + delta)
+        dof = m - 1
+        cdf = float(stats.chi2.cdf(dof * tau * gamma, dof))
+        # 0 になり得るので、積ではなく log 和で計算して桁落ちを避ける
+        log_miss += np.log(max(cdf, 1e-300))
+
+    return float(1.0 - np.exp(log_miss))
+
+
 def t_raw(bin_recs):
     """現行 analyze_csv.compute_seed_max_variance() と同じ生統計量 (ddof=0 の最大分散)。"""
     best = None
@@ -545,14 +593,14 @@ def wilson_interval(k, n, z=1.96):
 RESULT_FIELDS = [
     "scope", "alpha", "bandwidth", "distance", "pan",
     "own_kbps", "own_offload", "other_offload",
-    "sigma2_het", "tau",
+    "sigma2_het", "tau", "delta", "power", "in_region",
     "n_h0_test", "n_h1", "fp", "tp",
     "fpr", "fpr_lo", "fpr_hi", "tpr", "tpr_lo", "tpr_hi",
     "n_undecidable_h0", "n_undecidable_h1",
 ]
 
 
-def evaluate(bins, calib, alpha_list, train_seeds):
+def evaluate(bins, calib, alpha_list, train_seeds, delta, target_power):
     scope = calib["scope"]
     groups = group_by_seed(bins)
 
@@ -598,6 +646,14 @@ def evaluate(bins, calib, alpha_list, train_seeds):
 
         for a in alpha_list:
             tau = c["tau"][f"{a:.3f}"]
+
+            # 有効領域の判定。H0 側の観測 (= 自組織が干渉なしで見る姿) から
+            # 帰無スケールを取り、感度仕様 delta に対する検出力を求める。
+            powers = [detection_power(g, sigma2, tau, delta) for g in entry["h0"]]
+            powers = [p for p in powers if np.isfinite(p)]
+            power = float(np.median(powers)) if powers else float("nan")
+            in_region = bool(np.isfinite(power) and power >= target_power)
+
             fp = sum(1 for v in h0 if v >= tau)
             tp = sum(1 for v in h1 if v >= tau)
             fpr_lo, fpr_hi = wilson_interval(fp, len(h0))
@@ -609,6 +665,9 @@ def evaluate(bins, calib, alpha_list, train_seeds):
                 "own_offload": meta["own_offload"],
                 "other_offload": meta["other_offload"],
                 "sigma2_het": round(sigma2, 8), "tau": round(tau, 5),
+                "delta": delta,
+                "power": round(power, 4) if np.isfinite(power) else "",
+                "in_region": int(in_region),
                 "n_h0_test": len(h0), "n_h1": len(h1), "fp": fp, "tp": tp,
                 "fpr": round(fp / len(h0), 4),
                 "fpr_lo": round(fpr_lo, 4), "fpr_hi": round(fpr_hi, 4),
@@ -629,9 +688,9 @@ def save_results(rows, path):
             writer.writerow(r)
 
 
-def print_summary(rows, alpha_list):
+def _summary_block(rows, alpha_list, title):
     print()
-    print("=== 設計 alpha に対する実現 FPR (全条件をまとめた要約) ===")
+    print(f"=== {title} ===")
     print(f"{'alpha':>7} {'条件数':>6} {'FPR中央':>9} {'FPR平均':>9} "
           f"{'FPR 5-95%':>16} {'TPR中央':>9}")
     for a in alpha_list:
@@ -643,9 +702,48 @@ def print_summary(rows, alpha_list):
         print(f"{a:7.3f} {len(sub):6d} {np.median(fpr):9.4f} {fpr.mean():9.4f} "
               f"{np.percentile(fpr, 5):7.4f}-{np.percentile(fpr, 95):<8.4f} "
               f"{np.median(tpr):9.4f}")
+
+
+def print_summary(rows, alpha_list, delta, target_power):
+    _summary_block(rows, alpha_list, "全条件 (有効領域の外も含む)")
+
+    region = [r for r in rows if r["in_region"] == 1]
+    _summary_block(region, alpha_list,
+                   f"有効領域内のみ (delta={delta}, 目標検出力={target_power})")
+
+    print()
+    for a in alpha_list:
+        sub = [r for r in rows if abs(r["alpha"] - a) < 1e-12]
+        if not sub:
+            continue
+        cov = sum(1 for r in sub if r["in_region"] == 1) / len(sub)
+        print(f"  alpha={a:.3f}: 有効領域のカバー率 {cov*100:5.1f}% "
+              f"({sum(1 for r in sub if r['in_region'] == 1)}/{len(sub)} 条件)")
+
+    print()
+    print("=== 有効領域: 自PAN速度 x 自PAN負荷 (alpha が最小の設定で表示) ===")
+    a0 = min(alpha_list)
+    sub = [r for r in rows if abs(r["alpha"] - a0) < 1e-12]
+    rates = sorted({r["own_kbps"] for r in sub})
+    loads = sorted({r["own_offload"] for r in sub})
+    print("  kbps \\ load  " + "".join(f"{l:>6}" for l in loads))
+    for rate in rates:
+        cells = []
+        for load in loads:
+            cell = [r for r in sub if r["own_kbps"] == rate and r["own_offload"] == load]
+            if not cell:
+                cells.append(f"{'-':>6}")
+            else:
+                frac = sum(1 for r in cell if r["in_region"] == 1) / len(cell)
+                cells.append(f"{'o' if frac >= 0.5 else '.':>6}")
+        print(f"  {rate:>6}      " + "".join(cells))
+    print("  o = 有効領域内 (検出力 >= 目標), . = 領域外 (判定を保留すべき動作点)")
+
     print()
     print("実現 FPR が設計 alpha の近傍に乗っていれば、"
           "「H0 のみから決めた tau が条件横断で機能する」ことの直接の証拠になる。")
+    print("有効領域内の TPR が目標検出力以上なら、"
+          "「判定できる領域では確実に判定できる」ことの裏付けになる。")
 
 
 # ============================================================
@@ -671,8 +769,16 @@ def main():
 
     p_run = sub.add_parser("run", help="calibrate + evaluate をまとめて実行")
     p_run.add_argument("--bin-csv", default=BIN_CSV)
-    p_run.add_argument("--out-csv", default=RESULT_CSV)
-    p_run.add_argument("--calib-json", default=CALIB_JSON)
+    # 既定値は scope から作る (result_csv_path / calib_json_path)。
+    # scope に依らない固定値にすると、scope を変えて連続実行したときに
+    # 前の結果を黙って上書きしてしまう。
+    p_run.add_argument("--out-csv", default=None)
+    p_run.add_argument("--calib-json", default=None)
+    p_run.add_argument("--delta", type=float, default=0.02,
+                       help="最小検知対象干渉強度。リング内 ΔPER 分散をこれ以上"
+                            "押し上げる干渉を検知対象とする (感度仕様)")
+    p_run.add_argument("--target-power", type=float, default=0.8,
+                       help="有効領域とみなす検出力の下限")
     p_run.add_argument("--scope", choices=("global", "own_config"), default="global")
     p_run.add_argument("--train-seeds", type=int, default=DEFAULT_TRAIN_SEEDS,
                        help="較正に使う seed 数 (seed < この値 の no_interf のみ)")
@@ -687,24 +793,30 @@ def main():
         extract(args.raw_csv, args.bin_csv, args.bin_size, args.n_min)
         return
 
+    out_csv = args.out_csv or result_csv_path(args.scope)
+    calib_path = args.calib_json or calib_json_path(args.scope)
+
     bins = load_bins(args.bin_csv)
     print(f"--- {args.bin_csv} から {len(bins)} ビンを読み込み ---")
 
     calib = calibrate(bins, args.alphas, args.scope, args.train_seeds, args.alpha_ref)
-    os.makedirs(os.path.dirname(args.calib_json), exist_ok=True)
-    with open(args.calib_json, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(calib_path), exist_ok=True)
+    with open(calib_path, "w", encoding="utf-8") as f:
         json.dump(calib, f, indent=2, ensure_ascii=False)
     print(f"--- 較正完了 (scope={args.scope}, 層数={len(calib['by_scope'])}) "
-          f"-> {args.calib_json} ---")
-    for key, c in sorted(calib["by_scope"].items()):
+          f"-> {calib_path} ---")
+    for key, c in sorted(calib["by_scope"].items())[:12]:
         taus = " ".join(f"a={a}:{t:.3f}" for a, t in sorted(c["tau"].items()))
         print(f"    {key}: sigma2_het={c['sigma2_het']:.6f} "
               f"n_obs={c['n_train_obs']} {taus}")
+    if len(calib["by_scope"]) > 12:
+        print(f"    ... 他 {len(calib['by_scope']) - 12} 層 (全量は {calib_path})")
 
-    rows = evaluate(bins, calib, args.alphas, args.train_seeds)
-    save_results(rows, args.out_csv)
-    print(f"--- 評価完了: {len(rows)} 行 -> {args.out_csv} ---")
-    print_summary(rows, args.alphas)
+    rows = evaluate(bins, calib, args.alphas, args.train_seeds,
+                    args.delta, args.target_power)
+    save_results(rows, out_csv)
+    print(f"--- 評価完了: {len(rows)} 行 -> {out_csv} ---")
+    print_summary(rows, args.alphas, args.delta, args.target_power)
 
 
 if __name__ == "__main__":
