@@ -207,27 +207,64 @@ def make_empty_condition_data():
     }
 
 
-# 新PERの定義。dequeueしたデータフレームをMACの再送カウンタ相当の4変数に分類し、
-# そのうち「再送上限に達してもACKが返ってこなかった」フレームの割合をPERとする。
+# ============================================================
+# PER の定義（このブランチ = one_side_correct_measure）
+# ============================================================
+# 分母は correct_mesure と同じ「MAC再送カウンタ4種の和」のまま、
+# **分子だけを受信側が実際に受信したデータフレーム数に置き換える**。
 #
-#   PER = macTxFailCount / (macTxSuccessCount + macRetryCount
-#                           + macMultipleRetryCount + macTxFailCount)
+#   PER = 1 - (受信側が受信したデータフレーム数) / (macTxSuccessCount + macRetryCount
+#                                                 + macMultipleRetryCount + macTxFailCount)
 #
-# 分母がdequeue数ではなく4変数の和なので、CSMAでチャネルを取れずに落ちたフレーム
+# correct_mesure は送信側から見た指標だった:
+#
+#   PER = macTxFailCount / (4カウンタの和)
+#
+# こちらは「再送上限まで粘ってもACKが返らなかったフレームの割合」で、送信側のACK
+# 受信状況だけで決まる。対してこのブランチは受信側の受信数を直接使うので、
+# 送達を受信側から片側 (one side) で測ることになる。
+#
+# 分母は「決着のついたフレーム数」なので、CSMAでチャネルを取れずに落ちたフレーム
 # (macCsmaFailCount) と、シミュレーション終了時点でまだACK待ちだったフレーム
-# (PANn_*_Unresolved) は分母からも分子からも自動的に外れ、PER <= 1 が構造的に
-# 保証される。
+# (PANn_*_Unresolved) は correct_mesure と同様に外れたままになる。
 #
-# 受信側の受信数ベース (1 - 受信数/dequeue数) を使わないのは、ACKだけが失われて
-# 再送されたフレームを受信側が重複受信して「成功」と二重に数えてしまい、ACK損失が
-# 損失として現れないため。
-def _mac_per(r, idx, prefix):
-    n_fail = r[idx[prefix + "macTxFailCount"]]
+# ★注意: この定義は構造的に PER >= 0 を保証しない★
+# 分母は「フレーム数」だが、分子の受信数は create_csv.py が Ev= RxFrame を
+# 1行ごとに数えたもので、**再送されたフレームの重複受信もそのまま加算される**
+# (ACKだけが失われた場合、受信側は同じフレームを2回以上受け取る)。
+# したがって 受信数 > 分母 となり得て、1 - 受信数/分母 が負になる。
+# ここでは [0, 1] にクリップし、クリップが起きた回数を診断値として数える。
+# correct_mesure のコメントが受信数ベースを採らない理由として挙げていたのが
+# まさにこの重複受信の問題なので、クリップ頻度は必ず確認すること。
+CLIP_STATS = {"negative": 0, "total": 0}
+
+
+def _one_side_per(r, idx, pan, dev, direction):
+    """受信側の受信数を分子にした PER を返す。
+
+    direction は "ul" (デバイス -> コーディネータ) または "dl" (コーディネータ -> デバイス)。
+    分母に使う再送カウンタの接頭辞と、分子に使う受信数の列名が方向で変わる。
+    """
+    if direction == "ul":
+        prefix = f"{pan}_Dev{dev}_to_Co_"
+        n_rx = r[idx[f"{pan}_PC_Rx_from_Dev{dev}"]]
+    else:
+        prefix = f"{pan}_Co_to_Dev{dev}_"
+        n_rx = r[idx[f"{pan}_Dev{dev}_Rx_from_PC"]]
+
     total = (r[idx[prefix + "macTxSuccessCount"]]
              + r[idx[prefix + "macRetryCount"]]
              + r[idx[prefix + "macMultipleRetryCount"]]
-             + n_fail)
-    return (n_fail / total) if total > 0 else 0.0
+             + r[idx[prefix + "macTxFailCount"]])
+    if total <= 0:
+        return 0.0
+
+    per = 1.0 - (n_rx / total)
+    CLIP_STATS["total"] += 1
+    if per < 0.0:
+        CLIP_STATS["negative"] += 1
+        return 0.0
+    return per if per <= 1.0 else 1.0
 
 
 def load_and_aggregate(csv_file, stats_dir):
@@ -322,9 +359,9 @@ def load_and_aggregate(csv_file, stats_dir):
             # --- PAN1（座標基準ノードは id=2） ---
             for dev in PAN1_DEVS:
                 # 上り (デバイス -> PC) と下り (PC -> デバイス) で、それぞれ
-                # MAC再送カウンタ4変数からPERを出す。定義は _mac_per() を参照。
-                ul_per = _mac_per(r, idx, f"PAN1_Dev{dev}_to_Co_")
-                dl_per = _mac_per(r, idx, f"PAN1_Co_to_Dev{dev}_")
+                # 受信側の受信数を分子にしたPERを出す。定義は _one_side_per() を参照。
+                ul_per = _one_side_per(r, idx, "PAN1", dev, "ul")
+                dl_per = _one_side_per(r, idx, "PAN1", dev, "dl")
 
                 rssi = r[idx[f"PAN1_PC_RSSI_Avg_from_Dev{dev}"]]
 
@@ -336,9 +373,9 @@ def load_and_aggregate(csv_file, stats_dir):
             # --- PAN2（座標基準ノードは id=1） ---
             for dev in PAN2_DEVS:
                 # 上り (デバイス -> PC) と下り (PC -> デバイス) で、それぞれ
-                # MAC再送カウンタ4変数からPERを出す。定義は _mac_per() を参照。
-                ul_per = _mac_per(r, idx, f"PAN2_Dev{dev}_to_Co_")
-                dl_per = _mac_per(r, idx, f"PAN2_Co_to_Dev{dev}_")
+                # 受信側の受信数を分子にしたPERを出す。定義は _one_side_per() を参照。
+                ul_per = _one_side_per(r, idx, "PAN2", dev, "ul")
+                dl_per = _one_side_per(r, idx, "PAN2", dev, "dl")
 
                 rssi = r[idx[f"PAN2_PC_RSSI_Avg_from_Dev{dev}"]]
 
@@ -351,6 +388,22 @@ def load_and_aggregate(csv_file, stats_dir):
         f"--- positions: newly saved & .pos deleted: {deleted_pos_count}, "
         f"reused from positions.csv: {reused_from_csv_count}, missing: {missing_pos_count} ---"
     )
+
+    # 受信数ベースのPERは重複受信で負になり得る。どれだけ起きたかを必ず出す。
+    # 割合が大きいなら、この定義は「ACK損失が損失として現れない」という
+    # correct_mesure のコメントが指摘していた問題に実際にぶつかっている。
+    n_total = CLIP_STATS["total"]
+    n_neg = CLIP_STATS["negative"]
+    if n_total > 0:
+        print(
+            f"--- PER clip: 受信数 > 分母 となり 0 にクリップした件数 "
+            f"{n_neg} / {n_total} ({100.0 * n_neg / n_total:.2f}%) ---"
+        )
+        if n_neg > 0:
+            print(
+                "    (再送フレームの重複受信によるもの。割合が大きい場合、"
+                "この PER 定義は ACK 損失を損失として捉えられていない)"
+            )
     return data
 
 
