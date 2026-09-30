@@ -3,6 +3,7 @@
 
 import os
 import re
+import sys
 import csv
 import json
 from collections import defaultdict
@@ -41,49 +42,138 @@ CHANNEL_KBPS = {0: 50, 1: 100, 2: 200, 3: 50, 4: 100, 5: 200}
 # 組み合わせだけが干渉する（generate_config.py の interference_flag 判定と同一基準）。
 CHANNEL_FREQ_MHZ = {0: 920, 1: 920, 2: 920, 3: 921, 4: 921, 5: 921}
 
+# チャネル番号 -> 受信感度(dBm)。RSSIビンの起点に使う。
+# CHANNEL_KBPS / CHANNEL_FREQ_MHZ はローカルに複製しているが、こちらは生成側から
+# import して唯一の定義元に揃える。create_heatmap.py が OFFERED_LOAD_PERCENTS で
+# 同じことをしており、そこのコメントどおり直値を書くと生成側を変えたときに
+# 片方だけ取り残されて静かに壊れる。
+sys.path.insert(0, SCRIPT_DIR)
+from interference_2pan_config import CHANNELS as _CHANNELS  # noqa: E402
+
+RX_SENSITIVITY_DBM = {c["id"]: c["rx_sensitivity_dbm"] for c in _CHANNELS}
+
 # --- RSSIビン設定 -----------------------------------------------------
 # RSSIビンの幅(dBm)。★ここを変更するだけで、以下の解析すべてのビン幅が
 # 一括で変わる★:
 #   - plot_delta_per_analysis              (ΔPERの箱ひげ図)
 #   - plot_variance_distribution_boxplot   (ΔPER分散の箱ひげ図)
 #   - select_bins                          (干渉検知に使うRSSIビン)
-#
-# ビンの「境界」は固定値ではなく、実測したRSSIを起点にSeedごとに決まる
-# (どこを起点にするかは select_bins() のdocstringを参照)。
-# 以前は 0dBm 起点の固定格子(RSSI_VAR_UPPER_DBM=0 .. RSSI_VAR_LOWER_DBM=-120、
-# ΔPER箱ひげ図だけ -50 .. -110)を使っていたが、負荷や帯域でRSSI分布が少しずれる
-# だけでビン境界と端末の切れ方が変わり、「同じリングの端末どうしを比べる」という
-# 指標の前提がぶれるため廃止した。固定格子を作っていた make_rssi_bins() と
-# RSSI_VAR_* / RSSI_BOX_* も同時に削除している。
-#
-# 副作用: ΔPER箱ひげ図は以前 -50dBm より強い端末が図から落ちていたが、
-# データ起点になったのでクリップが無くなり全端末が載る。
 RSSI_BIN_SIZE_DBM = 10
+
+# ビンの起点を受信感度から何dBm上に置くか。
+#
+# ★このブランチの方針: 起点をチャネル固有の固定値にする★
+#   起点 = RX_SENSITIVITY_DBM[ch] + RSSI_BIN_ANCHOR_OFFSET_DBM
+#
+# 以前はそのSeedの実測RSSIの最小値 + 5dBm を起点にしていた(統計量A')。
+# 捨てる幅 5dBm の意図はそのまま残っているが、基準が「実測最小値」という
+# データ依存の量だったため、負荷や帯域でRSSI分布が少しずれるだけでビン境界と
+# 端末の切れ方が変わり、「同じリングの端末どうしを比べる」という指標の前提が
+# ぶれていた。受信感度はチャネルごとの固定値なので、起点をここに置けば
+# ビン境界がSeedにも負荷にも依存しなくなる。
+#
+# 5dBm を捨てる理由自体はA'と同じで、セル端は PER が 0.5 付近になり
+# 二項ノイズ p(1-p)/n が最大になるため、干渉が無くても端末間のばらつきが
+# 大きく出て誤検知の床を決めてしまうからである。
+#
+# 起点の候補としてEDしきい値(= 受信感度 + 10dB)も検討したが、同じ伝搬モデルでの
+# 概算では除外される端末が約20台/30台、最大ビンの端末数が約7となり、
+# 受信感度+5 の場合(除外 約12台、最大ビン 約12台)より検出力が落ちるため採らない。
+#
+# この値はビン幅とあわせて感度解析で振る対象なので、直値をコードに埋めないこと。
+RSSI_BIN_ANCHOR_OFFSET_DBM = 5.0
+
+
+def bin_anchor_dbm(channel):
+    """チャネル番号 -> RSSIビンの起点(dBm)。この値以下の端末はビンに入らない。"""
+    return RX_SENSITIVITY_DBM[channel] + RSSI_BIN_ANCHOR_OFFSET_DBM
+
+
+# --- ビン構成の診断 ---------------------------------------------------
+# 起点を固定値に変えた影響(端末が何台残るか)は伝搬モデルからの概算しかできて
+# いないので、実行のたびに実測値を出して1回で決着させる。
+# キーは (PAN名, チャネル番号)。
+ANCHOR_STATS = defaultdict(lambda: {"observations": 0, "devices": 0, "above": 0})
+BIN_OCCUPANCY = defaultdict(list)     # -> 有効ビンに入った端末数のリスト
+DEGENERATE_SEEDS = defaultdict(int)   # -> 有効ビンが1つも無かったSeed数
+
+
+def _update_anchor_stats(pan, channel, rssi_values):
+    """1観測(1 Seed の 1 PAN)分の「起点を超えた端末数」を数える。"""
+    anchor = bin_anchor_dbm(channel)
+    st = ANCHOR_STATS[(pan, channel)]
+    st["observations"] += 1
+    for v in rssi_values:
+        if v == 0:
+            continue
+        st["devices"] += 1
+        if v > anchor:
+            st["above"] += 1
+
+
+def print_bin_diagnostics():
+    """ビン構成の実測値を出す。
+
+    起点を固定値に変えると「何台が起点より上に残るか」で検出力が決まるが、
+    その見積もりは伝搬モデルからの概算しかできていない。実行のたびにここで
+    実測値を出し、概算(30台中18台が残り、最大ビンの端末数が約12)と突き合わせる。
+    """
+    if not ANCHOR_STATS:
+        return
+    print()
+    print("=== RSSIビンの構成 (起点 = 受信感度 + "
+          f"{RSSI_BIN_ANCHOR_OFFSET_DBM:.1f} dBm, ビン幅 {RSSI_BIN_SIZE_DBM} dBm) ===")
+    print(f"{'PAN':>5}{'ch':>4}{'kbps':>6}{'起点':>9}{'観測数':>8}"
+          f"{'受信端末/観測':>14}{'起点超え/観測':>14}{'割合':>8}")
+    for (pan, ch) in sorted(ANCHOR_STATS):
+        st = ANCHOR_STATS[(pan, ch)]
+        n_obs = max(st["observations"], 1)
+        ratio = st["above"] / st["devices"] if st["devices"] else float("nan")
+        print(f"{pan:>5}{ch:>4}{CHANNEL_KBPS[ch]:>6}{bin_anchor_dbm(ch):>9.2f}"
+              f"{st['observations']:>8}{st['devices'] / n_obs:>14.1f}"
+              f"{st['above'] / n_obs:>14.1f}{ratio * 100:>7.1f}%")
+
+    if BIN_OCCUPANCY:
+        print()
+        print(f"{'PAN':>5}{'ch':>4}{'有効ビン/Seed':>14}{'ビン内端末数(中央)':>20}"
+              f"{'最大':>6}{'有効ビン0のSeed':>16}")
+        for key in sorted(BIN_OCCUPANCY):
+            pan, ch = key
+            occ = np.asarray(BIN_OCCUPANCY[key], dtype=float)
+            n_seed = ANCHOR_STATS[key]["observations"]
+            per_seed = len(occ) / n_seed if n_seed else float("nan")
+            print(f"{pan:>5}{ch:>4}{per_seed:>14.2f}{np.median(occ):>20.1f}"
+                  f"{occ.max():>6.0f}{DEGENERATE_SEEDS.get(key, 0):>16}")
+
+    total_degen = sum(DEGENERATE_SEEDS.values())
+    if total_degen > 0:
+        print()
+        print(f"警告: 有効ビンが1つも作れなかった観測が {total_degen} 件あります。"
+              " これらの干渉指標は 0.0 に縮退しており、検知に寄与しません。")
+        print("      起点が高すぎる可能性があります"
+              " (RSSI_BIN_ANCHOR_OFFSET_DBM を下げるか、ビン幅を広げてください)。")
 
 
 # ============================================================
 # ユーティリティ
 # ============================================================
-def select_bins(rssi_values, bin_size=RSSI_BIN_SIZE_DBM, min_count=2):
+def select_bins(rssi_values, anchor_dbm, bin_size=RSSI_BIN_SIZE_DBM, min_count=2):
     """
-    実際に受信したRSSIから、そのSeedで使うビンの (upper, lower) のリストを
-    強い側から順に返す。ビンの内外判定は呼び出し側と揃えて lower < r <= upper。
+    anchor_dbm を下端として bin_size 刻みで上方向にビンを作り、
+    (upper, lower) のリストを強い側から順に返す。
+    ビンの内外判定は呼び出し側と揃えて lower < r <= upper。
+
+      例) anchor が -92 dBm なら (-92, -82], (-82, -72], ... と最大RSSIを覆うまで。
+          -92 dBm 以下の端末はどのビンにも入らない。
+
+    anchor_dbm は bin_anchor_dbm(ch) が返すチャネル固有の固定値なので、
+    ビン境界はSeedにも負荷にも依存しない。これが以前のデータ依存の起点
+    (実測RSSIの最小値 + 5dBm) との唯一の違いで、捨てる幅 5dBm の意図
+    (セル端は二項ノイズが最大で誤検知の床を決める) はそのまま残っている。
+
     ΔPER分散の箱ひげ図・分散分布の箱ひげ図・干渉検知の統計量がすべてこの関数を
     経由することで、「どのビンを使うか」の定義が1箇所に集まる。
     端末が min_count 個未満しか入らないビンは返さない(間が空くこともある)。
-
-    ★このブランチの方針 = 代替統計量A':
-      そのSeedの**最小RSSIから bin_size/2 (=5dBm) 分は使わない**。そこを下端に
-      して bin_size 刻みで上方向にビンを作り、最大RSSIを覆うまで進む。
-      「最弱端の5dBmだけを捨てる」こと自体がA' なので、最弱ビンの追加除外はしない。
-
-      例) 最小が -93 dBm なら -88 dBm から上へ (-88, -78], (-78, -68], ...
-          -88 dBm 以下の端末はどのビンにも入らない。
-
-    Aが最弱ビンを丸ごと(10dBm分)捨てるのに対し、捨てるのは最弱端の5dBm分だけなので
-    セル端寄りのデータを半分残せる。最弱ビンを落とす理由そのものはAと同じで、
-    セル端は PER が 0.5 付近になり二項ノイズ p(1-p)/n が最大になるため、干渉が
-    無くても端末間のばらつきが大きく出て誤検知の床を決めてしまうからである。
     """
     r = np.asarray(rssi_values, dtype=float).flatten()
     r = r[r != 0]
@@ -91,10 +181,9 @@ def select_bins(rssi_values, bin_size=RSSI_BIN_SIZE_DBM, min_count=2):
         return []
 
     top = float(r.max())
-    start = float(r.min()) + bin_size / 2.0
 
     bins = []
-    lo = start
+    lo = float(anchor_dbm)
     while lo < top:
         hi = lo + bin_size
         if np.count_nonzero((r > lo) & (r <= hi)) >= min_count:
@@ -370,6 +459,9 @@ def load_and_aggregate(csv_file, stats_dir):
                 entry["pan1_rssi"].append(rssi)
                 entry["pan1_dist"].append(_calc_distance(positions, dev, 2))
 
+            # この観測(1 Seed 分)のRSSIから、起点を超えた端末数を数える
+            _update_anchor_stats("PAN1", pan1_ch, entry["pan1_rssi"][-NUM_DEVICE:])
+
             # --- PAN2（座標基準ノードは id=1） ---
             for dev in PAN2_DEVS:
                 # 上り (デバイス -> PC) と下り (PC -> デバイス) で、それぞれ
@@ -383,6 +475,9 @@ def load_and_aggregate(csv_file, stats_dir):
                 entry["pan2_dl"].append(dl_per)
                 entry["pan2_rssi"].append(rssi)
                 entry["pan2_dist"].append(_calc_distance(positions, dev, 1))
+
+            # この観測(1 Seed 分)のRSSIから、起点を超えた端末数を数える
+            _update_anchor_stats("PAN2", pan2_ch, entry["pan2_rssi"][-NUM_DEVICE:])
 
     print(
         f"--- positions: newly saved & .pos deleted: {deleted_pos_count}, "
@@ -419,12 +514,13 @@ def _calc_distance(positions, dev_id, ref_id):
 # ============================================================
 # プロット関数（旧コードから移植）
 # ============================================================
-def plot_delta_per_analysis(delta_per, rssi_list, filename, plot_dir):
+def plot_delta_per_analysis(delta_per, rssi_list, anchor_dbm, filename, plot_dir):
     rssi_list = np.array(rssi_list, dtype=float).flatten()
     delta_per = np.array(delta_per, dtype=float).flatten()
 
-    # ビン境界はSeedごとに実測RSSIから決まるので、Seedをまたぐと絶対値(dBm)では
-    # 揃わない。強い側から数えたインデックス(1 = 最強ビン)で束ねる。
+    # ビン境界は起点が固定になったのでSeedをまたいでも同じだが、Seedごとに
+    # 最大RSSIが違うためビンの本数は変わる。従来どおり強い側から数えた
+    # インデックス(1 = 最強ビン)で束ねる。
     num_seeds = len(rssi_list) // NUM_DEVICE
     per_index = defaultdict(list)
 
@@ -436,7 +532,7 @@ def plot_delta_per_analysis(delta_per, rssi_list, filename, plot_dir):
         r_v = rssi_seed[valid]
         d_v = delta_seed[valid]
 
-        for b, (upper, lower) in enumerate(select_bins(r_v, min_count=1)):
+        for b, (upper, lower) in enumerate(select_bins(r_v, anchor_dbm, min_count=1)):
             mask = (r_v > lower) & (r_v <= upper)
             if np.count_nonzero(mask) > 0:
                 per_index[b].extend(d_v[mask].tolist())
@@ -460,12 +556,12 @@ def plot_delta_per_analysis(delta_per, rssi_list, filename, plot_dir):
     plt.close()
 
 
-def plot_variance_distribution_boxplot(delta_per, rssi_list, filename, plot_dir):
+def plot_variance_distribution_boxplot(delta_per, rssi_list, anchor_dbm, filename, plot_dir):
     rssi_list = np.array(rssi_list, dtype=float).flatten()
     delta_per = np.array(delta_per, dtype=float).flatten()
 
-    # 統計量(compute_seed_max_variance)と同じビン定義。境界はSeedごとに動くので、
-    # 強い側から数えたインデックス(1 = 最強ビン)で束ねる。
+    # 統計量(compute_seed_max_variance)と同じビン定義。境界は固定だが本数は
+    # Seedごとに変わるので、強い側から数えたインデックス(1 = 最強ビン)で束ねる。
     num_seeds = len(rssi_list) // NUM_DEVICE
     variances_per_index = defaultdict(list)
 
@@ -480,7 +576,7 @@ def plot_variance_distribution_boxplot(delta_per, rssi_list, filename, plot_dir)
         r_v = rssi_seed[valid]
         d_v = delta_seed[valid]
 
-        for b, (upper, lower) in enumerate(select_bins(r_v)):
+        for b, (upper, lower) in enumerate(select_bins(r_v, anchor_dbm)):
             mask = (r_v > lower) & (r_v <= upper)
             bin_values = d_v[mask]
             if len(bin_values) > 1:
@@ -577,30 +673,34 @@ def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename
 # 干渉検知（帯域幅ペアごとに interf/no_interf を比較）
 # ============================================================
 # 干渉検知に使うRSSIビンは select_bins() が返す
-# （plot_variance_distribution_boxplot と同じ定義）。
-# 以前はここで固定のビン境界配列 VARIANCE_RSSI_BINS を作っていたが、
-# 「どのビンを使うか」がデータ依存になったため select_bins() に一本化した。
+# （plot_variance_distribution_boxplot と同じ定義）。起点は
+# bin_anchor_dbm(ch) が返すチャネル固有の固定値なので、ビン境界は
+# Seed にも負荷にも依存しない。
 
 # 分散のしきい値の探索範囲。ΔPERは[-1, 1]なので分散の理論上限は1だが、
 # 実データではもっと小さい値になるはず。0〜1を0.001刻みで細かく探索する。
 VARIANCE_THRESHOLDS = np.round(np.arange(0.0, 1.001, 0.001), 4)
 
 
-def compute_seed_max_variance(delta_per, rssi_list, num_devices):
+def compute_seed_max_variance(delta_per, rssi_list, num_devices, anchor_dbm,
+                              stats_key=None):
     """
     delta_per, rssi_list: Seedごとに num_devices 個ずつ連続して並んだ1次元配列。
     各SeedについてRSSIを select_bins() が返すビンに分け、ビンごとのΔPER分散を
     計算し、そのSeed内での最大分散値を「干渉指標」として返す。
-    どのビンを使うかは select_bins() が決める(このブランチでは最弱ビンを除外)。
+    どのビンを使うかは select_bins() が決める(起点 anchor_dbm 以下の端末は入らない)。
 
-    戻り値: 各Seedの最大分散値のリスト（長さ = num_seeds）。
-    有効なビン（データ点2個以上）が1つも無いSeedは 0.0 とする。
+    stats_key を渡すと、ビン内端末数と「有効ビン0のSeed数」を診断用に集計する。
+
+    戻り値: (各Seedの最大分散値のリスト, 有効ビンが1つも無かったSeed数)。
+    有効なビン（データ点2個以上）が1つも無いSeedの指標は 0.0 とする。
     """
     rssi_list = np.asarray(rssi_list, dtype=float)
     delta_per = np.asarray(delta_per, dtype=float)
     num_seeds = len(rssi_list) // num_devices
 
     seed_max_variances = []
+    n_degenerate = 0
     for s in range(num_seeds):
         start = s * num_devices
         end = (s + 1) * num_devices
@@ -612,19 +712,28 @@ def compute_seed_max_variance(delta_per, rssi_list, num_devices):
         d_v = delta_seed[valid]
 
         max_var = 0.0
-        # ビンの取捨はSeedごとに判定する(Seedごとに端末配置が違うため、
-        # 最弱の有効ビンもSeedごとに変わる)。
-        for upper, lower in select_bins(r_v):
+        n_used = 0
+        # 起点は固定だが、上端(最大RSSI)と端末の入り方はSeedごとに違うので
+        # ビンの本数と中身はSeedごとに変わる。
+        for upper, lower in select_bins(r_v, anchor_dbm):
             mask = (r_v > lower) & (r_v <= upper)
             bin_values = d_v[mask]
             if len(bin_values) > 1:
+                n_used += 1
+                if stats_key is not None:
+                    BIN_OCCUPANCY[stats_key].append(len(bin_values))
                 var_val = np.var(bin_values)
                 if var_val > max_var:
                     max_var = var_val
 
+        if n_used == 0:
+            n_degenerate += 1
+            if stats_key is not None:
+                DEGENERATE_SEEDS[stats_key] += 1
+
         seed_max_variances.append(max_var)
 
-    return seed_max_variances
+    return seed_max_variances, n_degenerate
 
 
 def evaluate_interference_detection(interf_values, no_interf_values):
@@ -684,15 +793,34 @@ def run_interference_detection(data):
         interf_entry = data[pair["interf"]]
         no_interf_entry = data[pair["no_interf"]]
 
+        # ビンの起点はチャネルの受信感度から決まる。同一帯域ペアの interf 側と
+        # no_interf 側 (例 ch0 と ch3) は周波数だけが違って受信感度は同じなので、
+        # 対にして比較する際にビン定義がずれることはない。念のため検査する。
+        interf_ch = {"PAN1": pair["interf"][0], "PAN2": pair["interf"][1]}
+        no_interf_ch = {"PAN1": pair["no_interf"][0], "PAN2": pair["no_interf"][1]}
+
         for pan_name, dl_key, ul_key, rssi_key in [
             ("PAN1", "pan1_dl", "pan1_ul", "pan1_rssi"),
             ("PAN2", "pan2_dl", "pan2_ul", "pan2_rssi"),
         ]:
+            anchor = bin_anchor_dbm(interf_ch[pan_name])
+            anchor_no_interf = bin_anchor_dbm(no_interf_ch[pan_name])
+            if anchor != anchor_no_interf:
+                raise ValueError(
+                    f"{bw_label} {pan_name}: interf 側 (ch{interf_ch[pan_name]}) と "
+                    f"no_interf 側 (ch{no_interf_ch[pan_name]}) でビンの起点が違います "
+                    f"({anchor} vs {anchor_no_interf})。対比較が成立しません。"
+                )
+
             interf_delta = np.array(interf_entry[dl_key]) - np.array(interf_entry[ul_key])
             no_interf_delta = np.array(no_interf_entry[dl_key]) - np.array(no_interf_entry[ul_key])
 
-            interf_values = compute_seed_max_variance(interf_delta, interf_entry[rssi_key], NUM_DEVICE)
-            no_interf_values = compute_seed_max_variance(no_interf_delta, no_interf_entry[rssi_key], NUM_DEVICE)
+            interf_values, interf_degen = compute_seed_max_variance(
+                interf_delta, interf_entry[rssi_key], NUM_DEVICE, anchor,
+                (pan_name, interf_ch[pan_name]))
+            no_interf_values, no_interf_degen = compute_seed_max_variance(
+                no_interf_delta, no_interf_entry[rssi_key], NUM_DEVICE, anchor,
+                (pan_name, no_interf_ch[pan_name]))
 
             if len(interf_values) == 0 or len(no_interf_values) == 0:
                 print(f"Warning: no seed data for {bw_label} {distance}m pan1_{pan1_offload}_pan2_{pan2_offload} ({pan_name}) - skipping")
@@ -717,6 +845,11 @@ def run_interference_detection(data):
                 "f1": round(result["f1"], 3),
                 "n_interf_seeds": result["n_interf_seeds"],
                 "n_no_interf_seeds": result["n_no_interf_seeds"],
+                # 有効ビンが1つも作れず干渉指標が 0.0 に縮退したSeed数。
+                # 0 でない場合、その条件の検知性能はビンの起点が高すぎることに
+                # 引きずられている。
+                "n_degenerate_interf": interf_degen,
+                "n_degenerate_no_interf": no_interf_degen,
             })
 
     return rows
@@ -728,6 +861,7 @@ def save_interference_detection_csv(rows, output_path):
         "best_threshold", "TP", "FP", "FN", "TN",
         "precision", "recall", "fpr", "f1",
         "n_interf_seeds", "n_no_interf_seeds",
+        "n_degenerate_interf", "n_degenerate_no_interf",
     ]
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", newline="", encoding="utf-8") as f:
@@ -755,6 +889,9 @@ def main():
     save_interference_detection_csv(interference_rows, interference_csv_path)
     print(f"--- Saved {len(interference_rows)} rows to {interference_csv_path} ---")
 
+    # ビンの起点を固定値に変えた影響(端末が何台残るか)をここで実測値として出す。
+    print_bin_diagnostics()
+
     for condition_key, entry in data.items():
         pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload = condition_key
 
@@ -768,8 +905,10 @@ def main():
 
         # --- PAN1 ---
         pan1_diff = np.array(entry["pan1_dl"]) - np.array(entry["pan1_ul"])
-        plot_delta_per_analysis(pan1_diff, entry["pan1_rssi"], f"pan1_box_{suffix}.pdf", plot_dir)
-        plot_variance_distribution_boxplot(pan1_diff, entry["pan1_rssi"], f"pan1_s_{suffix}.pdf", plot_dir)
+        plot_delta_per_analysis(pan1_diff, entry["pan1_rssi"], bin_anchor_dbm(pan1_ch),
+                                f"pan1_box_{suffix}.pdf", plot_dir)
+        plot_variance_distribution_boxplot(pan1_diff, entry["pan1_rssi"], bin_anchor_dbm(pan1_ch),
+                                           f"pan1_s_{suffix}.pdf", plot_dir)
         plot_distance_vs_per_errorbar(
             entry["pan1_dist"], entry["pan1_ul"],
             entry["pan1_dist"], entry["pan1_dl"],
@@ -778,8 +917,10 @@ def main():
 
         # --- PAN2 ---
         pan2_diff = np.array(entry["pan2_dl"]) - np.array(entry["pan2_ul"])
-        plot_delta_per_analysis(pan2_diff, entry["pan2_rssi"], f"pan2_box_{suffix}.pdf", plot_dir)
-        plot_variance_distribution_boxplot(pan2_diff, entry["pan2_rssi"], f"pan2_s_{suffix}.pdf", plot_dir)
+        plot_delta_per_analysis(pan2_diff, entry["pan2_rssi"], bin_anchor_dbm(pan2_ch),
+                                f"pan2_box_{suffix}.pdf", plot_dir)
+        plot_variance_distribution_boxplot(pan2_diff, entry["pan2_rssi"], bin_anchor_dbm(pan2_ch),
+                                           f"pan2_s_{suffix}.pdf", plot_dir)
         plot_distance_vs_per_errorbar(
             entry["pan2_dist"], entry["pan2_ul"],
             entry["pan2_dist"], entry["pan2_dl"],
