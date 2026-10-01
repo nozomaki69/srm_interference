@@ -1,5 +1,6 @@
 import os
 import sys
+import argparse
 import pandas as pd
 import numpy as np
 import matplotlib
@@ -19,8 +20,15 @@ from interference_2pan_config import OFFERED_LOAD_PERCENTS  # noqa: E402
 # いずれも scripts/ の1つ上の plots/ 以下にある(analyze_csv.py の PLOT_BASE_DIR と同じ場所)
 PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 
-INPUT_CSV = os.path.join(PLOT_BASE_DIR, "interference_detection_results.csv")
-OUTPUT_DIR = os.path.join(PLOT_BASE_DIR, "heatmaps")
+# 測定モードごとに入出力を分ける。analyze_csv.py の --mode と同じ規約:
+#   td   : 各メトリックを自分の200s窓で測る時間分割測定 (接尾辞なし)
+#   conv : 全メトリックを W0 の200sで同時に測る従来方式 (接尾辞 _conv)
+def input_csv_path(suffix):
+    return os.path.join(PLOT_BASE_DIR, f"interference_detection_results{suffix}.csv")
+
+
+def output_dir_path(suffix):
+    return os.path.join(PLOT_BASE_DIR, f"heatmaps{suffix}")
 
 LOAD_RANGE = list(OFFERED_LOAD_PERCENTS)
 MAX_LOAD = max(LOAD_RANGE)
@@ -43,7 +51,8 @@ def load_data(path: str) -> pd.DataFrame:
     if not os.path.isfile(path):
         raise FileNotFoundError(
             f"Input CSV not found: {path}\n"
-            f"Please place interference_detection_results.csv in {PLOT_BASE_DIR}"
+            f"先に analyze_csv.py を同じモードで実行してください "
+            f"(例: python3 script/analyze_csv.py --mode conv)"
         )
     df = pd.read_csv(path)
     df = df.rename(columns=COLUMN_RENAME)
@@ -115,7 +124,19 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
     return fpath
 
 def main():
-    df = load_data(INPUT_CSV)
+    parser = argparse.ArgumentParser(
+        description="干渉検知結果のヒートマップ。測定モードで入出力を切り替える。")
+    parser.add_argument(
+        "--mode", choices=("td", "conv"), default="td",
+        help="td: 時間分割測定の結果(既定) / conv: 従来方式(W0で同時測定)の結果")
+    args = parser.parse_args()
+    suffix = "" if args.mode == "td" else "_conv"
+
+    input_csv = input_csv_path(suffix)
+    out_dir = output_dir_path(suffix)
+    print(f"--- 測定モード: {args.mode}  入力: {input_csv} ---")
+
+    df = load_data(input_csv)
 
     combos = df[["band_pair", "distance"]].drop_duplicates()
     subjects = sorted(df["subject"].unique())
@@ -123,7 +144,7 @@ def main():
     saved = []
     for _, row in combos.iterrows():
         for subject in subjects:
-            path = make_heatmap(df, row["band_pair"], row["distance"], subject, OUTPUT_DIR)
+            path = make_heatmap(df, row["band_pair"], row["distance"], subject, out_dir)
             if path:
                 saved.append(path)
 
