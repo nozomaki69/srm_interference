@@ -16,6 +16,26 @@ import csv
 # フレームだけが「再送上限に達して落ちたフレーム」である。
 MAX_FRAME_RETRIES = 3
 
+# --- メトリックの時間分割測定 ---
+# 窓の定義は生成側 (interference_2pan_config) を唯一の定義元にする。ここに直値を
+# 書くと時間軸を変えたときに片方だけ取り残される (create_heatmap.py と同じ方針)。
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from interference_2pan_config import (  # noqa: E402
+    METRIC_WINDOW_ORDER,
+    metric_window,
+    conventional_window,
+)
+
+# メトリック名 -> その窓 [start, end)
+TD_WINDOWS = {m: metric_window(m) for m in METRIC_WINDOW_ORDER}
+# 従来版(全メトリックを同時測定)の対照窓
+CONV_WINDOW = conventional_window()
+
+
+def _in_window(t, window):
+    """時刻 t が窓 [start, end) に入っているか。終端は含まない。"""
+    return window[0] <= t < window[1]
+
 def parse_trace_file(filepath, num_device):
     # デバイスIDの割り当て定義
     pan1_devices = list(range(3, 3 + num_device))
@@ -36,6 +56,12 @@ def parse_trace_file(filepath, num_device):
 
     d_rx_pkt_num = {dev: 0 for dev in all_devices} # デバイスがPCから受信した数
 
+    # 従来版(W0 同時測定)の受信側カウンタ。RSSI は受信イベントに付随する値なので、
+    # 時間分割版は rx_success の窓(W4)、従来版は W0 の受信から平均する。
+    c_rx_pkt_num_conv = {dev: 0 for dev in all_devices}
+    c_rssi_sum_conv = {dev: 0.0 for dev in all_devices}
+    d_rx_pkt_num_conv = {dev: 0 for dev in all_devices}
+
     # dequeueしたが最後までACKが返らなかったフレーム数 (旧PERの分子)
     c_noack_to_dev = {dev: 0 for dev in all_devices} # PC -> 各デバイス (下りリンク)
     d_noack = {dev: 0 for dev in all_devices}        # 各デバイス -> PC (上りリンク)
@@ -53,13 +79,27 @@ def parse_trace_file(filepath, num_device):
     # (インクリメントは :844 でコメントアウトされている) 即座にフレームを捨てるため。
     # これは「再送上限に達してACKが返ってこなかった」には当たらないので、PERの分母
     # (4変数の和) からも外す。
-    counters = {
-        kind + "_" + name: {dev: 0 for dev in all_devices}
-        for kind in ("dl", "ul")
-        for name in ("tx_success", "retry", "multi_retry", "tx_fail", "csma_fail")
-    }
+    # 時間分割版 (counters) と従来版 (counters_conv) の2系統を同時に集計する。
+    # トレースには全区間のイベントが残っているので、同じ1ランから両方出せる。
+    def _new_counters():
+        return {
+            kind + "_" + name: {dev: 0 for dev in all_devices}
+            for kind in ("dl", "ul")
+            for name in ("tx_success", "retry", "multi_retry", "tx_fail", "csma_fail")
+        }
 
-    # pending[node] = [seq, kind, dev, max_retry]  kind は "ul" / "dl"
+    counters = _new_counters()        # 各メトリックを自分の窓で測る (主)
+    counters_conv = _new_counters()   # 全メトリックを W0 で同時に測る (対照)
+
+    # 窓ごとの dequeue 数。5つの窓でほぼ揃っていればトラフィックが定常である
+    # (= 時間分割の前提が成立している) ことの確認になる。
+    window_deq = {m: 0 for m in METRIC_WINDOW_ORDER}
+
+    # pending[node] = [seq, kind, dev, max_retry, deq_time]  kind は "ul" / "dl"
+    # deq_time はそのフレームの DataFrameDequeued の時刻[秒]。これが窓への帰属に使う
+    # 唯一の時刻である。失敗の確定時刻は trace に出ない (driot が Ev= Drop /
+    # AckTimeout の出力をコメントアウトしている) ため、dequeue 時刻を使う。
+    # こうすると4カウンタが「その窓で開始したフレーム」の綺麗な分割になる。
     # max_retry はそのフレームについて観測した Ev= Tx-DATA の Retry= の最大値。
     # None はまだ一度も電波に出ていないことを意味する。
     #
@@ -80,18 +120,36 @@ def parse_trace_file(filepath, num_device):
     tx_data_seq_mismatch = 0
     ack_without_tx_data = 0
 
+    def _count(name, kind, dev, deq_time):
+        """カテゴリ name のフレームを、時間分割版と従来版それぞれに計上する。
+
+        時間分割版は「そのカテゴリに割り当てられた窓に dequeue 時刻が入っている」
+        ときだけ数える。これが実機で「その窓ではそのカウンタしか数えていない」
+        状態と等価になる。従来版は窓 W0 で全カテゴリを数える。
+
+        macCsmaFailCount はこの構成では測定しない (5窓1000s) ので、
+        時間分割版には窓を持たない。従来版は制約が無いので数える。
+        """
+        if deq_time is not None:
+            if name in TD_WINDOWS and _in_window(deq_time, TD_WINDOWS[name]):
+                counters[kind + "_" + name][dev] += 1
+            if _in_window(deq_time, CONV_WINDOW):
+                counters_conv[kind + "_" + name][dev] += 1
+
     def resolve_as_failure(entry, at_eof=False):
         """ACKが返らないまま確定したフレームを数える。
 
         at_eof=True はシミュレーション終了時点でまだACK待ちだったフレームで、
         成否が確定していないので no-ACK の分子にも4変数にも入れず診断値として数える。
         """
-        _seq, kind, dev, max_retry = entry
+        _seq, kind, dev, max_retry, deq_time = entry
         if at_eof:
             pan = "pan1" if dev in pan1_device_set else "pan2"
             unresolved[pan + "_" + kind] += 1
             return
 
+        # no-ACK カウンタは旧PER(受信数ベースに置き換え済み)の分子で、現在の解析では
+        # 使っていない。時間分割の対象外として全区間で数えたままにしてある。
         if kind == "ul":
             d_noack[dev] += 1
         else:
@@ -100,14 +158,14 @@ def parse_trace_file(filepath, num_device):
         # 最後の送信が Retry= MAX_FRAME_RETRIES なら再送上限まで粘って落ちたフレーム。
         # それ以外 (Tx-DATA が1行も無い場合を含む) はCSMAでチャネルを取れずに落ちた。
         if max_retry is not None and max_retry >= MAX_FRAME_RETRIES:
-            counters[kind + "_tx_fail"][dev] += 1
+            _count("tx_fail", kind, dev, deq_time)
         else:
-            counters[kind + "_csma_fail"][dev] += 1
+            _count("csma_fail", kind, dev, deq_time)
 
     def resolve_as_success(entry):
         """ACKが返って送達が確定したフレームを、再送回数で3種に振り分ける。"""
         nonlocal ack_without_tx_data
-        _seq, kind, dev, max_retry = entry
+        _seq, kind, dev, max_retry, deq_time = entry
         if max_retry is None:
             # Tx-DATA を1行も見ていないのにACKが返るのは原理的に起きない。
             # 落としてしまうと分母がずれるので再送なし扱いにし、診断値を進める。
@@ -115,11 +173,11 @@ def parse_trace_file(filepath, num_device):
             max_retry = 0
 
         if max_retry == 0:
-            counters[kind + "_tx_success"][dev] += 1
+            _count("tx_success", kind, dev, deq_time)
         elif max_retry == 1:
-            counters[kind + "_retry"][dev] += 1
+            _count("retry", kind, dev, deq_time)
         else:
-            counters[kind + "_multi_retry"][dev] += 1
+            _count("multi_retry", kind, dev, deq_time)
 
     # ファイル名からメタデータを抽出
     filename = os.path.basename(filepath)
@@ -147,6 +205,10 @@ def parse_trace_file(filepath, num_device):
 
             node_id = int(parts[3])
             ev = parts[9]
+            try:
+                t_sec = float(parts[1])
+            except ValueError:
+                continue
 
             if ev == "DataFrameDequeued":
                 # 直前のフレームがまだ pending なら、ACKが返らないまま諦められた
@@ -158,6 +220,12 @@ def parse_trace_file(filepath, num_device):
                     seq_num = int(parts[17])
                 except (IndexError, ValueError):
                     seq_num = None
+
+                # 窓ごとの dequeue 数 (定常性の確認用)。1フレームは高々1つの窓に入る。
+                for _m, _w in TD_WINDOWS.items():
+                    if _in_window(t_sec, _w):
+                        window_deq[_m] += 1
+                        break
 
                 if node_id in c_deq_pkt_num:
                     # --- Coordinator (ID: 1 or 2) がdequeueした数 (全体 & 各デバイス宛て) ---
@@ -172,12 +240,12 @@ def parse_trace_file(filepath, num_device):
                         # 分子の行き先は分母と同じ条件で確定させる。こうしておくと
                         # 構造的に no-ACK 数 <= dequeue 数 が保証され、PERが1を超えない。
                         if seq_num is not None:
-                            pending[node_id] = [seq_num, "dl", dest_dev, None]
+                            pending[node_id] = [seq_num, "dl", dest_dev, None, t_sec]
                 elif node_id in d_deq_pkt_num:
                     # --- Device (ID: 3 ~) がdequeueした数 ---
                     d_deq_pkt_num[node_id] += 1
                     if seq_num is not None:
-                        pending[node_id] = [seq_num, "ul", node_id, None]
+                        pending[node_id] = [seq_num, "ul", node_id, None, t_sec]
 
             elif ev == "Tx-DATA":
                 # driot_mac.cpp:2492-2499:
@@ -230,6 +298,11 @@ def parse_trace_file(filepath, num_device):
 
                 if frame_type != "Data":
                     continue
+                # 受信側のカウンタ (macRxSuccessCount 相当) と RSSI は、受信イベントの
+                # 時刻で窓に帰属させる。受信側に dequeue の概念が無いため。
+                in_td_rx = _in_window(t_sec, TD_WINDOWS["rx_success"])
+                in_conv = _in_window(t_sec, CONV_WINDOW)
+
                 if node_id in c_deq_pkt_num:
                     # PCが受信したデータフレーム数とRSSI
                     try:
@@ -237,15 +310,23 @@ def parse_trace_file(filepath, num_device):
                     except ValueError:
                         continue
                     if src_dev in c_rx_pkt_num:
-                        c_rx_pkt_num[src_dev] += 1
-                        c_rssi_sum[src_dev] += float(parts[19])
-                        if src_dev in pan1_device_set:
-                            c_rx_pkt_num_total[1] += 1
-                        elif src_dev in pan2_device_set:
-                            c_rx_pkt_num_total[2] += 1
+                        rssi = float(parts[19])
+                        if in_td_rx:
+                            c_rx_pkt_num[src_dev] += 1
+                            c_rssi_sum[src_dev] += rssi
+                            if src_dev in pan1_device_set:
+                                c_rx_pkt_num_total[1] += 1
+                            elif src_dev in pan2_device_set:
+                                c_rx_pkt_num_total[2] += 1
+                        if in_conv:
+                            c_rx_pkt_num_conv[src_dev] += 1
+                            c_rssi_sum_conv[src_dev] += rssi
                 elif node_id in d_rx_pkt_num:
                     # DeviceがPCから受信したデータフレーム数
-                    d_rx_pkt_num[node_id] += 1
+                    if in_td_rx:
+                        d_rx_pkt_num[node_id] += 1
+                    if in_conv:
+                        d_rx_pkt_num_conv[node_id] += 1
 
     # シミュレーション終了時点でまだACK待ちだったフレーム (ノードあたり高々1通)。
     # 成否が確定していないので分子には入れず、診断値としてだけ残す。
@@ -254,11 +335,16 @@ def parse_trace_file(filepath, num_device):
 
     # 各デバイスからのRSSI平均を計算
     c_rssi_avg = {}
+    c_rssi_avg_conv = {}
     for dev in all_devices:
         if c_rx_pkt_num[dev] > 0:
             c_rssi_avg[dev] = c_rssi_sum[dev] / c_rx_pkt_num[dev]
         else:
             c_rssi_avg[dev] = 0.0 # 受信0の場合は0とする
+        if c_rx_pkt_num_conv[dev] > 0:
+            c_rssi_avg_conv[dev] = c_rssi_sum_conv[dev] / c_rx_pkt_num_conv[dev]
+        else:
+            c_rssi_avg_conv[dev] = 0.0
 
     # --- CSVの行データを構築 ---
     row = [pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload, seed]
@@ -312,6 +398,22 @@ def parse_trace_file(filepath, num_device):
     # ★NEW: 再送カウンタ側の診断値
     row.append(tx_data_seq_mismatch)
     row.append(ack_without_tx_data)
+
+    # --- 従来版 (W0 で全メトリックを同時測定) の列。既存の列位置を動かさないよう末尾に足す。
+    # 並び順は generate_header() の対応するブロックと厳密に一致させること。
+    for devs in (pan1_devices, pan2_devices):
+        for kind in ("dl", "ul"):
+            for name in MAC_COUNTER_NAMES:
+                row.extend([counters_conv[kind + "_" + name][dev] for dev in devs])
+    row.extend([c_rx_pkt_num_conv[dev] for dev in pan1_devices])
+    row.extend([c_rx_pkt_num_conv[dev] for dev in pan2_devices])
+    row.extend([d_rx_pkt_num_conv[dev] for dev in pan1_devices])
+    row.extend([d_rx_pkt_num_conv[dev] for dev in pan2_devices])
+    row.extend([round(c_rssi_avg_conv[dev], 4) for dev in pan1_devices])
+    row.extend([round(c_rssi_avg_conv[dev], 4) for dev in pan2_devices])
+
+    # --- 窓ごとの dequeue 数 (定常性の確認用)
+    row.extend([window_deq[m] for m in METRIC_WINDOW_ORDER])
 
     return row
 
@@ -387,6 +489,27 @@ def generate_header(num_device):
 
     # ★NEW: 再送カウンタ側の診断値
     header.extend(["TxDataSeqMismatch", "AckWithoutTxData"])
+
+    # --- 従来版 (W0 で全メトリックを同時測定) の列。接尾辞 _conv で区別する。
+    # 時間分割版が既存の列名をそのまま使うので、analyze_csv.py は接尾辞を
+    # 切り替えるだけで両方を解析できる。
+    for pan, devs in (("PAN1", pan1_devs), ("PAN2", pan2_devs)):
+        for kind in ("dl", "ul"):
+            for name in MAC_COUNTER_NAMES:
+                label = MAC_COUNTER_LABELS[name]
+                if kind == "dl":
+                    header.extend([f"{pan}_Co_to_Dev{dev}_{label}_conv" for dev in devs])
+                else:
+                    header.extend([f"{pan}_Dev{dev}_to_Co_{label}_conv" for dev in devs])
+    header.extend([f"PAN1_PC_Rx_from_Dev{dev}_conv" for dev in pan1_devs])
+    header.extend([f"PAN2_PC_Rx_from_Dev{dev}_conv" for dev in pan2_devs])
+    header.extend([f"PAN1_Dev{dev}_Rx_from_PC_conv" for dev in pan1_devs])
+    header.extend([f"PAN2_Dev{dev}_Rx_from_PC_conv" for dev in pan2_devs])
+    header.extend([f"PAN1_PC_RSSI_Avg_from_Dev{dev}_conv" for dev in pan1_devs])
+    header.extend([f"PAN2_PC_RSSI_Avg_from_Dev{dev}_conv" for dev in pan2_devs])
+
+    # --- 窓ごとの dequeue 数 (定常性の確認用)
+    header.extend([f"WindowDeq_{m}" for m in METRIC_WINDOW_ORDER])
 
     return header
 

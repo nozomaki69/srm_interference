@@ -6,6 +6,7 @@ import re
 import sys
 import csv
 import json
+import argparse
 from collections import defaultdict
 
 import numpy as np
@@ -87,6 +88,23 @@ RSSI_BIN_SIZE_DBM = 10
 #
 # この値はビン幅とあわせて感度解析で振る対象なので、直値をコードに埋めないこと。
 RSSI_BIN_ANCHOR_OFFSET_DBM = 3.0
+
+# --- 測定モード -------------------------------------------------------
+# create_csv.py は1つのトレースから2通りの測定結果を出している:
+#   td   : 各メトリックを自分の 200s 窓で測る (標準に忠実な時間分割測定)。既存の列名
+#   conv : 全メトリックを W0 の 200s で同時に測る (従来方式の対照)。列名 + "_conv"
+# どちらを解析するかで参照する列の接尾辞と出力ファイル名が変わる。
+MEASUREMENT_MODE = "td"
+COLUMN_SUFFIX = ""
+
+
+def set_measurement_mode(mode):
+    """"td" か "conv" を指定して、参照する列と出力名を切り替える。"""
+    global MEASUREMENT_MODE, COLUMN_SUFFIX
+    if mode not in ("td", "conv"):
+        raise ValueError(f"unknown measurement mode: {mode}")
+    MEASUREMENT_MODE = mode
+    COLUMN_SUFFIX = "" if mode == "td" else "_conv"
 
 
 def bin_anchor_dbm(channel):
@@ -339,17 +357,18 @@ def _one_side_per(r, idx, pan, dev, direction):
     direction は "ul" (デバイス -> コーディネータ) または "dl" (コーディネータ -> デバイス)。
     分母に使う再送カウンタの接頭辞と、分子に使う受信数の列名が方向で変わる。
     """
+    sfx = COLUMN_SUFFIX
     if direction == "ul":
         prefix = f"{pan}_Dev{dev}_to_Co_"
-        n_rx = r[idx[f"{pan}_PC_Rx_from_Dev{dev}"]]
+        n_rx = r[idx[f"{pan}_PC_Rx_from_Dev{dev}{sfx}"]]
     else:
         prefix = f"{pan}_Co_to_Dev{dev}_"
-        n_rx = r[idx[f"{pan}_Dev{dev}_Rx_from_PC"]]
+        n_rx = r[idx[f"{pan}_Dev{dev}_Rx_from_PC{sfx}"]]
 
-    total = (r[idx[prefix + "macTxSuccessCount"]]
-             + r[idx[prefix + "macRetryCount"]]
-             + r[idx[prefix + "macMultipleRetryCount"]]
-             + r[idx[prefix + "macTxFailCount"]])
+    total = (r[idx[prefix + "macTxSuccessCount" + sfx]]
+             + r[idx[prefix + "macRetryCount" + sfx]]
+             + r[idx[prefix + "macMultipleRetryCount" + sfx]]
+             + r[idx[prefix + "macTxFailCount" + sfx]])
     if total <= 0:
         return 0.0
 
@@ -457,7 +476,7 @@ def load_and_aggregate(csv_file, stats_dir):
                 ul_per = _one_side_per(r, idx, "PAN1", dev, "ul")
                 dl_per = _one_side_per(r, idx, "PAN1", dev, "dl")
 
-                rssi = r[idx[f"PAN1_PC_RSSI_Avg_from_Dev{dev}"]]
+                rssi = r[idx[f"PAN1_PC_RSSI_Avg_from_Dev{dev}{COLUMN_SUFFIX}"]]
 
                 entry["pan1_ul"].append(ul_per)
                 entry["pan1_dl"].append(dl_per)
@@ -474,7 +493,7 @@ def load_and_aggregate(csv_file, stats_dir):
                 ul_per = _one_side_per(r, idx, "PAN2", dev, "ul")
                 dl_per = _one_side_per(r, idx, "PAN2", dev, "dl")
 
-                rssi = r[idx[f"PAN2_PC_RSSI_Avg_from_Dev{dev}"]]
+                rssi = r[idx[f"PAN2_PC_RSSI_Avg_from_Dev{dev}{COLUMN_SUFFIX}"]]
 
                 entry["pan2_ul"].append(ul_per)
                 entry["pan2_dl"].append(dl_per)
@@ -880,6 +899,16 @@ def save_interference_detection_csv(rows, output_path):
 # メイン処理
 # ============================================================
 def main():
+    parser = argparse.ArgumentParser(
+        description="干渉検知の解析。測定モード(時間分割 / 従来)を切り替えられる。")
+    parser.add_argument(
+        "--mode", choices=("td", "conv"), default="td",
+        help="td: 各メトリックを自分の200s窓で測る時間分割測定(既定) / "
+             "conv: 全メトリックを W0 の200sで同時に測る従来方式")
+    args = parser.parse_args()
+    set_measurement_mode(args.mode)
+    print(f"--- 測定モード: {MEASUREMENT_MODE} (列の接尾辞 '{COLUMN_SUFFIX}') ---")
+
     if not os.path.isfile(CSV_FILE):
         raise FileNotFoundError(f"CSV file not found: {CSV_FILE}")
 
@@ -890,7 +919,8 @@ def main():
     # --- 干渉検知（帯域幅ペアごとに interf/no_interf を比較, プロットはしない） ---
     print("--- Running interference detection analysis ---")
     interference_rows = run_interference_detection(data)
-    interference_csv_path = os.path.join(PLOT_BASE_DIR, "interference_detection_results.csv")
+    interference_csv_path = os.path.join(
+        PLOT_BASE_DIR, f"interference_detection_results{COLUMN_SUFFIX}.csv")
     save_interference_detection_csv(interference_rows, interference_csv_path)
     print(f"--- Saved {len(interference_rows)} rows to {interference_csv_path} ---")
 
@@ -903,7 +933,9 @@ def main():
         interf_label = get_interf_label(pan1_ch, pan2_ch)
         bw_label = get_bandwidth_label(pan1_ch, pan2_ch)
 
-        plot_dir = os.path.join(PLOT_BASE_DIR, bw_label, f"{distance}m", interf_label)
+        # td と conv で図が上書きし合わないようディレクトリを分ける
+        plot_dir = os.path.join(PLOT_BASE_DIR, bw_label, f"{distance}m",
+                                interf_label + COLUMN_SUFFIX)
         suffix = f"pan1_{pan1_offload}_pan2_{pan2_offload}"
 
         print(f"Plotting: {plot_dir} / {suffix}")

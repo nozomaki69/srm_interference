@@ -117,11 +117,56 @@ SIMULATION_SEEDS = 100
 # 分散は二項ノイズの下限 1/(4n) に支配されるので、nが小さいと指標が
 # 干渉ではなく推定誤差を測ってしまう。窓100sだと50kbps・低負荷側で
 # n=3発程度しか出ず、F1が「全部陽性」の縮退解(0.667)に張り付いていた。
+#
+# --- メトリックの時間分割測定 (このブランチの方針) ---
+# IEEE 802.15.4 の標準化文書では macTxSuccessCount / macRetryCount /
+# macMultipleRetryCount / macTxFailCount / macRxSuccessCount を同時に測定できない。
+# そこで 1 メトリックあたり WINDOW_DURATION_SEC の窓を順に割り当て、
+# 測定区間全体を 5 窓 = 1000s とする。
+#
+#     0 –   20       ウォームアップ
+#    20 –  220   W0  macTxSuccessCount
+#   220 –  420   W1  macRetryCount
+#   420 –  620   W2  macMultipleRetryCount
+#   620 –  820   W3  macTxFailCount
+#   820 – 1020   W4  macRxSuccessCount
+#  1020 – 1060       ドレイン
+#
+# 窓のゲーティングは create_csv.py が trace のタイムスタンプ (parts[1]) を見て行う。
+# シミュレータ側 (driot / base_simulator) は一切変更しない。フレーム自体は窓に
+# 関係なく流れており、変わるのは「数えるかどうか」だけなので、後処理での
+# ゲーティングは実機の挙動と等価になる。
+#
+# macCsmaFailCount はこの構成では測定しない (PER に使っていないため)。
 MEASURE_START_SEC = 20.0
-MEASURE_DURATION_SEC = 200.0
+WINDOW_DURATION_SEC = 200.0
+METRIC_WINDOW_ORDER = ["tx_success", "retry", "multi_retry", "tx_fail", "rx_success"]
+
+MEASURE_DURATION_SEC = WINDOW_DURATION_SEC * len(METRIC_WINDOW_ORDER)
 MEASURE_END_SEC = MEASURE_START_SEC + MEASURE_DURATION_SEC
+# ドレインは従来どおり 40s。役割は「終端付近のフレームを捌き切る」ことで、
+# 必要な長さは窓の長さではなくフレームの滞留時間で決まるため、窓を5倍にしても
+# 比例させる必要はない。
 DRAIN_DURATION_SEC = 40.0
 SIM_DURATION_SEC = MEASURE_END_SEC + DRAIN_DURATION_SEC
+
+# 従来方式 (全メトリックを同じ窓で同時測定) の対照に使う窓。
+# W0 を使うのは、現行設定の 20-220s をそのまま再現するため。1メトリックあたりの
+# 観測時間が時間分割版と等しくなるので、時間分割そのもののコストだけを分離できる。
+CONVENTIONAL_WINDOW_INDEX = 0
+
+
+def metric_window(metric):
+    """メトリック名 -> (開始秒, 終了秒)。区間は [start, end) で終端を含まない。"""
+    i = METRIC_WINDOW_ORDER.index(metric)
+    start = MEASURE_START_SEC + i * WINDOW_DURATION_SEC
+    return start, start + WINDOW_DURATION_SEC
+
+
+def conventional_window():
+    """従来方式の対照窓 (全メトリックをここで同時に測る)。"""
+    start = MEASURE_START_SEC + CONVENTIONAL_WINDOW_INDEX * WINDOW_DURATION_SEC
+    return start, start + WINDOW_DURATION_SEC
 MY_TRACE_TAGS = ['Mac'] #MY_TRACE_TAGS = ['Application']
 
 # --- DrIot MAC/PHY のタイミングパラメータ ---
