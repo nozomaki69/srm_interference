@@ -271,15 +271,19 @@ POS_TEMPLATE = "TEMPLATE.pos.j2"
 STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 
 # offered_load は「衝突なし飽和容量に対する提供負荷の比[%]」を表す (offered_load_pps で換算)
-# 100% は提供レートが飽和容量ちょうどになる点。120%以上は過飽和領域で、
-# 提供レートが飽和容量を超えるため待ち行列は原理的に発散し、送信窓の終端までに
-# 送りきれないパケットが残る(意図した挙動)。過飽和側では「実際に出た負荷」は
-# 100%付近で頭打ちになるので、verify_offered_load.py の ratio 判定は
-# load <= 100 の行だけに適用している。
+# 100% は提供レートが飽和容量ちょうどになる点。
+#
+# 以前は 20..200% の10値を振っていたが、120%以上は過飽和領域で待ち行列が原理的に
+# 発散し、実際に出る負荷は 100% 付近で頭打ちになる。つまり 120-200% の条件は
+# 「最も重く、かつ互いにほとんど区別がつかない」ものだった。そこでグリッドを
+# 20..100% の5値に絞る。ヒートマップは 5x5 になる。
+#
+# 副次的な効果として、全ての条件が load <= 100 になるので、verify_offered_load.py の
+# ratio 判定(過飽和側を除外していた)が全行に適用されるようになる。
 #
 # 注意: このグリッドを変えたら create_heatmap.py の LOAD_RANGE / max_load も
 # 追随する必要がある。二重管理を避けるため、あちらはこの定数を import している。
-OFFERED_LOAD_PERCENTS = list(range(20, 201, 20))   # 20,40,...,200 [% of saturation]
+OFFERED_LOAD_PERCENTS = list(range(20, 101, 20))   # 20,40,60,80,100 [% of saturation]
 
 # --- 全パラメータの組み合わせを事前に確定させておく ---
 # 元の入れ子ループと同じ順序 (bandwidth_pattern -> offered_load_pan2 -> offered_load_pan1 -> seed)
