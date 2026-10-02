@@ -7,78 +7,95 @@
 固定の閾値が条件を跨いで通用しない。実際 `icc` では帯域ペアごとに最適 τ が
 0.039〜0.078 とばらついていた。
 
-そこで**変動係数 CV = 標準偏差 / 平均**を使う。平均で正規化した無次元量なので、
-PER の絶対水準に依らない閾値が期待できる。
+そこで **ΔPER の変動係数 CV = 標準偏差 / 平均** を使い、閾値と比較するだけで
+干渉判定ができるかを調べる。平均で正規化した無次元量なので、PER の絶対水準に
+依らない閾値が期待できる。
 
-## 2. 設計の決定事項
+## 2. 統計量
 
-| 項目 | 決定 |
-|---|---|
-| UL と DL | **それぞれ独立に判定**する。CV_ul と CV_dl に別々の閾値を求め、結果も別々に出す |
-| 計算単位 | **RSSI ビン内**（現行踏襲）。起点 = 受信感度 + 3 dBm、幅 10 dBm |
-| 平均 PER が 0 付近 | **平均 PER に下限を設ける**。下回るビンはその方向について使わない |
-
-UL と DL を独立に見るので、ΔPER のような差分は取らない。
-干渉は DL 側（受信点がリング上に散らばる）の CV をより強く押し上げるはずなので、
-UL と DL のどちらが効くかもデータで分かる。
-
-## 3. 統計量
-
-各 Seed・各 PAN・各方向（ul / dl）について:
+各 Seed・各 PAN について:
 
 ```
+ΔPER_i = PER_DL,i − PER_UL,i                （端末ごと）
+
 for 各 RSSI ビン b (端末 2 台以上):
-    vals = そのビンの端末の PER（その方向）
-    m    = mean(vals)
-    if m < MEAN_PER_FLOOR:        # 下限を下回るビンはこの方向では使わない
+    m = mean(ΔPER in b)
+    if |m| < MEAN_ABS_FLOOR:     # 分母が 0 に近いビンは使わない
         skip
-    cv_b = std(vals, ddof=0) / m
+    cv_b = std(ΔPER in b) / |m|
 
-統計量 = max_b cv_b       （使えるビンが 1 つも無ければ 0.0 = 縮退）
+統計量 = max_b cv_b              （使えるビンが 1 つも無ければ 0.0 = 縮退）
 ```
 
-- ビンの切り方は `analyze_csv.select_bins()` をそのまま使う（定義を 1 箇所に保つ）
+- ビンの切り方は `analyze_csv.select_bins()` をそのまま使う（起点 = 受信感度 + 3 dBm、幅 10 dBm）
 - 標準偏差は現行の分散統計量と揃えて `ddof=0`
-- 下限 `MEAN_PER_FLOOR` は既定 0.01。下限で捨てたビン数を診断に出す
-- 下限の判定は**方向ごとに独立**に行う（UL では使えるが DL では使えないビンがあり得る）
+- **分母は絶対値 `|mean|`** を使う。ΔPER は符号を持つため
+
+## 3. ★ この統計量に固有の注意点
+
+### 3-1. ΔPER の平均は 0 付近になりやすい
+
+無干渉なら DL と UL の PER は近いので、ビン内平均 ΔPER は 0 付近に来る。
+`CV = SD / |mean|` の分母が消えるため、**発散が例外ではなく通常のケース**になる。
+
+対策として `MEAN_ABS_FLOOR`（既定 **0.001**）を設け、`|mean|` がこれ未満のビンは
+使わない。`icc` の PER（0.05〜0.4 程度）と違って ΔPER の平均は桁が小さいので、
+下限も小さく取る。
+
+**実データでは、まず診断出力の「下限で捨てたビン数」と「縮退した観測数」を
+確認すること。** これが大きければ、この統計量は成立していない。
+
+### 3-2. 判定の向きが逆になり得る
+
+干渉が強まると、ビン内の ΔPER は
+
+- 平均 |m| が大きくなる（DL だけ悪化するため）
+- 標準偏差も大きくなる（リング内で干渉の受け方が違うため）
+
+の両方が起きる。CV = SD/|m| は比なので、**平均の増加が標準偏差の増加を上回れば
+CV はむしろ下がる**。つまり「CV が大きい = 干渉あり」とは限らない。
+
+そこで閾値判定は **`統計量 ≥ τ` と `統計量 ≤ τ` の両方を試し、F1 が高いほうを採用**
+する。採用した向きは結果 CSV の `rule` 列（`ge` / `le`）に残す。
+これにより「CV で干渉判定できるか」を公平に評価できる。
 
 ## 4. 閾値の決め方
 
 `icc` と同じく、`interf` / `no_interf` 両方のラベルから **F1 を最大化する閾値**を選ぶ
 （genie-aided な上限）。ただし閾値の候補は固定格子ではなく
-**観測された統計量の値そのもの**を使う。
-
-CV は分散と違って 1 を超え得るので、固定格子だと上限の取り方で最適解を逃す。
-観測値を候補にすれば、どの範囲でも厳密に F1 最大の閾値が求まる。
+**観測された統計量の値そのもの**を使う。CV は分散と違って 1 を大きく超え得るので、
+固定格子だと上限の取り方で最適解を逃す。
 
 F1 の構造的下限は `icc` と同じく `2·n_pos / (2·n_pos + n_neg)`（100 対 100 なら 0.667）。
 
 ## 5. 出力
 
-### `plots/cv_detection_results.csv`
-
-条件 × 方向ごとに 1 行。`icc` の `interference_detection_results.csv` に
-**`link` 列（ul / dl）**を足した構成。
+### `plots/cv_detection_results{suffix}.csv`
 
 ```
-bandwidth, distance, pan1_offload, pan2_offload, pan, link,
+bandwidth, distance, pan1_offload, pan2_offload, pan, link, rule,
 best_threshold, TP, FP, FN, TN, precision, recall, fpr, f1,
 n_interf_seeds, n_no_interf_seeds,
 n_degenerate_interf, n_degenerate_no_interf,
 n_floor_skipped_interf, n_floor_skipped_no_interf
 ```
 
-行数は 6 帯域ペア × 5×5 負荷 × 2 PAN × 2 方向 = **600 行**。
+既定（`--statistic delta`）では `link` 列は `delta` 固定で、
+行数は 6 帯域ペア × 5×5 負荷 × 2 PAN = **300 行**（`icc` と同じ粒度）。
 
 ### ヒートマップ
 
-`plots/heatmaps_cv/heatmap_{帯域}_{距離}_{PAN}_{link}.pdf`、
-6 帯域ペア × 2 PAN × 2 方向 = **24 枚**（`icc` の 12 枚の 2 倍）。
-
+`plots/heatmaps_cv{suffix}/heatmap_{帯域}_{距離}_{PAN}_delta.pdf` = **12 枚**。
 カラーバーの下限は `icc` と同じく F1 の構造的下限に合わせ、下限に張り付いた
 セル（検知失敗）は灰色で潰す。
 
-## 6. 測定モード
+## 6. 参考実装：UL / DL を別々に見る版
+
+`--statistic links` を指定すると、ΔPER ではなく **UL の PER と DL の PER の CV を
+それぞれ独立に**計算して判定する（`link` 列が `ul` / `dl`、行数は 600、図は 24 枚）。
+本題は ΔPER 版だが、どちらの方向が効いているかを見たいときの補助として残してある。
+
+## 7. 測定モード
 
 `icc` の `--mode {td,conv}` をそのまま引き継ぐ。
 
@@ -87,26 +104,25 @@ n_floor_skipped_interf, n_floor_skipped_no_interf
 | `td`（既定） | 接尾辞なし（時間分割測定） | `cv_detection_results.csv` |
 | `conv` | `_conv`（W0 で同時測定） | `cv_detection_results_conv.csv` |
 
-これにより「CV にすると時間分割のコストが減るのか」も確認できる。
-
-## 7. 実装するファイル
+## 8. 実装するファイル
 
 | ファイル | 内容 |
 |---|---|
-| `script/analyze_cv.py`（新規） | `analyze_csv.py` から `select_bins` / `bin_anchor_dbm` / `load_and_aggregate` / `evaluate_interference_detection` を import して CV 統計量と判定を行う |
-| `script/create_heatmap.py` | `--statistic {variance,cv}` を追加。cv のときは `cv_detection_results{suffix}.csv` を読み、`link` 次元も回す |
+| `script/analyze_cv.py` | `analyze_csv.py` から `select_bins` / `bin_anchor_dbm` / `load_and_aggregate` を import して CV 統計量と判定を行う |
+| `script/create_heatmap.py` | `--statistic {variance,cv}`。cv のときは `cv_detection_results*` を読み、`link` 次元も回す（既に実装済み） |
 
-`analyze_csv.py` の既存の分散ベースの経路には手を入れない。同じブランチで
-分散版と CV 版の両方を出して比較できるようにするため。
+`analyze_csv.py` の分散ベースの経路には手を入れない。同じブランチで分散版と
+CV 版の両方を出して比較できるようにするため。
 
-## 8. 検証
+## 9. 検証
 
-1. `compute_seed_max_cv()` の単体テスト — 既知の PER 配列に対して
-   `std/mean` が正しく出ること、平均下限でビンが除外されること、
-   使えるビンが無いとき 0.0（縮退）を返すこと、UL と DL で独立に判定されること
-2. 合成 `simulation_results.csv` で end-to-end 実行し、出力が 600 行になること、
-   `link` 列が ul/dl に分かれること
-3. 実データで `--mode td` と `--mode conv` の両方を実行し、
-   分散版（`interference_detection_results.csv`）と F1 を比較する
-4. 診断で「平均下限で捨てたビン数」が過大でないこと。過大なら
-   `MEAN_PER_FLOOR` を見直す
+1. `compute_seed_max_cv()` の単体テスト — `std/|mean|` が正しいこと、
+   `|mean|` 下限でビンが除外されること、使えるビンが無いとき 0.0（縮退）を返すこと、
+   ビンをまたいで最大が選ばれること
+2. `evaluate_detection()` の単体テスト — `ge` / `le` の両方向を試し、
+   F1 が高いほうが選ばれること。完全分離で F1=1.0、分離不能で F1=構造的下限
+3. 合成 `simulation_results.csv` で end-to-end 実行し、出力が 300 行になること
+4. 実データで **診断出力の「下限で捨てたビン数」「縮退した観測数」を最初に確認**。
+   大きければこの統計量は成立していない
+5. 分散版（`interference_detection_results.csv`）と F1 を比較し、
+   帯域ペアを跨いだ閾値のばらつきが縮まっているかを見る
