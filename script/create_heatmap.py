@@ -23,12 +23,18 @@ PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 # 測定モードごとに入出力を分ける。analyze_csv.py の --mode と同じ規約:
 #   td   : 各メトリックを自分の200s窓で測る時間分割測定 (接尾辞なし)
 #   conv : 全メトリックを W0 の200sで同時に測る従来方式 (接尾辞 _conv)
-def input_csv_path(suffix):
-    return os.path.join(PLOT_BASE_DIR, f"interference_detection_results{suffix}.csv")
+# 統計量ごとの入出力:
+#   variance : ΔPER のビン内分散 (analyze_csv.py)      -> interference_detection_results*
+#   cv       : PER のビン内変動係数 (analyze_cv.py)     -> cv_detection_results*
+# cv は UL/DL を独立に判定するので link 次元が増え、図は2倍の枚数になる。
+def input_csv_path(suffix, statistic):
+    stem = "interference_detection_results" if statistic == "variance" else "cv_detection_results"
+    return os.path.join(PLOT_BASE_DIR, f"{stem}{suffix}.csv")
 
 
-def output_dir_path(suffix):
-    return os.path.join(PLOT_BASE_DIR, f"heatmaps{suffix}")
+def output_dir_path(suffix, statistic):
+    stem = "heatmaps" if statistic == "variance" else "heatmaps_cv"
+    return os.path.join(PLOT_BASE_DIR, f"{stem}{suffix}")
 
 LOAD_RANGE = list(OFFERED_LOAD_PERCENTS)
 MAX_LOAD = max(LOAD_RANGE)
@@ -58,7 +64,8 @@ def load_data(path: str) -> pd.DataFrame:
     df = df.rename(columns=COLUMN_RENAME)
     return df
 
-def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_dir: str, max_load: int = MAX_LOAD):
+def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_dir: str,
+                 max_load: int = MAX_LOAD, link: str = None):
     sub = df[
         (df["band_pair"] == band_pair)
         & (df["distance"] == distance)
@@ -66,6 +73,9 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
         & (df["pan1_load"] <= max_load)
         & (df["pan2_load"] <= max_load)
     ]
+    # cv 統計量は UL/DL を独立に判定するので、方向でも絞る
+    if link is not None:
+        sub = sub[sub["link"] == link]
     if sub.empty:
         return None
 
@@ -115,7 +125,8 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
     safe_band = str(band_pair).replace("/", "-")
     
     # Changed file extension to .pdf
-    fname = f"heatmap_{safe_band}_{distance}_{subject}.pdf"
+    link_tag = "" if link is None else f"_{link}"
+    fname = f"heatmap_{safe_band}_{distance}_{subject}{link_tag}.pdf"
     fpath = os.path.join(out_dir, fname)
     
     # Saved as PDF format
@@ -129,24 +140,30 @@ def main():
     parser.add_argument(
         "--mode", choices=("td", "conv"), default="td",
         help="td: 時間分割測定の結果(既定) / conv: 従来方式(W0で同時測定)の結果")
+    parser.add_argument(
+        "--statistic", choices=("variance", "cv"), default="variance",
+        help="variance: ΔPER のビン内分散(既定) / cv: PER のビン内変動係数(UL/DL独立)")
     args = parser.parse_args()
     suffix = "" if args.mode == "td" else "_conv"
 
-    input_csv = input_csv_path(suffix)
-    out_dir = output_dir_path(suffix)
-    print(f"--- 測定モード: {args.mode}  入力: {input_csv} ---")
+    input_csv = input_csv_path(suffix, args.statistic)
+    out_dir = output_dir_path(suffix, args.statistic)
+    print(f"--- 統計量: {args.statistic}  測定モード: {args.mode}  入力: {input_csv} ---")
 
     df = load_data(input_csv)
 
     combos = df[["band_pair", "distance"]].drop_duplicates()
     subjects = sorted(df["subject"].unique())
+    links = sorted(df["link"].unique()) if "link" in df.columns else [None]
 
     saved = []
     for _, row in combos.iterrows():
         for subject in subjects:
-            path = make_heatmap(df, row["band_pair"], row["distance"], subject, out_dir)
-            if path:
-                saved.append(path)
+            for link in links:
+                path = make_heatmap(df, row["band_pair"], row["distance"], subject,
+                                    out_dir, link=link)
+                if path:
+                    saved.append(path)
 
     print(f"Created {len(saved)} heatmaps:")
     for p in saved:
