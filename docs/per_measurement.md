@@ -183,3 +183,78 @@ PER の分子（dequeue したが最後まで ACK が返らなかった数）で
 （20–260 s、ドレイン 40 s 込み）を数えていた**。「200 s 測定」と呼んでいたものは
 実際には約 240 s だった。本ブランチの conv は 20–220 s ちょうどなので、
 **conv のほうが測定として正確**である。
+
+---
+
+## 付録：クリップ率の診断（`script/diagnose_per_clip.py`）
+
+### 背景
+
+実データで **クリップ率 9.50%（342,042 / 3,599,932）** が観測された。
+「約10回に1回、PER が負になって 0 に潰されている」という状態で、
+統計量の分子を直接汚染する。原因の切り分けが必要。
+
+当初は「受信数に再送フレームの重複が混ざっているため」と考えたが、
+**これは誤りだった**。driot は重複受信を `Ev= RxDupFrame` という別イベントで
+出力しており（`driot_mac.cpp:2598`、`ProcessDataFrame` の else 側 :2770）、
+`create_csv.py` のイベント分岐は完全一致なので最初から数えていない。
+
+### 想定される機序
+
+分母は「dequeue されたフレーム数」ではなく、そこから `macCsmaFailCount` を
+除いた数である。
+
+```
+分母 = macTxSuccess + macRetry + macMultipleRetry + macTxFail
+     = dequeue 数 − csma_fail − unresolved(1ノードあたり高々1)
+```
+
+一方 `ProcessCcaFailure`（`driot_mac.cpp:841`）は **再送の途中でも**
+バックオフ上限超過でフレームを破棄し、しかも `retryTxCount++` が
+コメントアウトされているため `Retry=` が進まない。その結果
+`create_csv.py` は `max_retry < MAX_FRAME_RETRIES` と見て `csma_fail` に
+分類する。**一度は電波に出て受信側に届いているのに分母から外れる**経路が存在する。
+
+td ではさらに、分子 Rx(W4) と分母 S(W0)+R(W1)+M(W2)+F(W3) が
+**互いに素なフレーム集合**になるため、包含関係そのものが無い。定常なら
+
+```
+PER = 1 − (1 − PER_frame) / (1 − p_csma)
+```
+
+となり、**`PER_frame < p_csma` のとき負**になる。
+
+### 予測
+
+| | 予測 |
+|---|---|
+| 自PAN負荷 | 低負荷では `p_csma ≈ 0` なのでクリップしない。**高負荷に集中** |
+| RSSI | 強い端末ほど `PER_frame ≈ 0` なので、わずかな `p_csma` でも負になる。**強いビンに集中** |
+| td vs conv | conv は同一窓なので概ね包含が成り立つ。**conv のほうが大幅に低い** |
+
+### 診断スクリプトが出すもの
+
+```sh
+python3 script/diagnose_per_clip.py              # td と conv の両方
+python3 script/diagnose_per_clip.py --mode conv  # 片方だけ
+```
+
+1. モード別の全体クリップ率
+2. 自PAN負荷別のクリップ率
+3. RSSI ビン別（起点からの相対位置）のクリップ率
+4. 方向（UL / DL）別のクリップ率
+5. `macCsmaFailCount` の割合（自PAN負荷別）
+6. `WindowDeq_*` の均衡（トラフィックが定常か）
+7. **分母に `macCsmaFailCount` を含めた場合のクリップ率** ← 修正案の効果を直接測る
+
+出力は標準出力のサマリと `plots/per_clip_diagnosis.csv`。
+
+### 切り分けの読み方
+
+| 結果 | 結論 |
+|---|---|
+| conv のクリップ率がほぼ 0% | 窓の分割が主因。td 固有 |
+| conv も 9% 前後 | `csma_fail` の除外が主因。両モード共通 |
+| 分母に csma_fail を含めるとクリップが消える | **修正案が有効**。`_one_side_per` に1項足すだけ |
+| 高負荷・強RSSI に集中している | 上の機序の裏付け |
+| `WindowDeq_*` が揃っていない | トラフィックが非定常で、分母の期待値がずれている |
