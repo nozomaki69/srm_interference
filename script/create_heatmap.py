@@ -28,12 +28,16 @@ PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 #   cv       : PER のビン内変動係数 (analyze_cv.py)     -> cv_detection_results*
 # cv は UL/DL を独立に判定するので link 次元が増え、図は2倍の枚数になる。
 def input_csv_path(suffix, statistic):
-    stem = "interference_detection_results" if statistic == "variance" else "cv_detection_results"
+    # analyze_cv.py は統計量ごとに cv_detection_results_{nvar,delta,links}*.csv を出す。
+    # --statistic cv は推奨既定の nvar を指す。delta / links を見たいときは --input を使う
+    # (analyze_cv.py が実行後にそのまま貼れるコマンドを表示する)。
+    stem = ("interference_detection_results" if statistic == "variance"
+            else "cv_detection_results_nvar")
     return os.path.join(PLOT_BASE_DIR, f"{stem}{suffix}.csv")
 
 
 def output_dir_path(suffix, statistic):
-    stem = "heatmaps" if statistic == "variance" else "heatmaps_cv"
+    stem = "heatmaps" if statistic == "variance" else "heatmaps_nvar"
     return os.path.join(PLOT_BASE_DIR, f"{stem}{suffix}")
 
 LOAD_RANGE = list(OFFERED_LOAD_PERCENTS)
@@ -142,13 +146,23 @@ def main():
         help="td: 時間分割測定の結果(既定) / conv: 従来方式(W0で同時測定)の結果")
     parser.add_argument(
         "--statistic", choices=("variance", "cv"), default="variance",
-        help="variance: ΔPER のビン内分散(既定) / cv: PER のビン内変動係数(UL/DL独立)")
+        help="variance: ΔPER のビン内分散(既定) / cv: cv_detection_results* を読む")
+    # analyze_cv.py は統計量ごとに別ファイルを出すので (nvar / delta / links)、
+    # フラグを増やさずに任意の CSV から図を作れるようにしておく。
+    # analyze_cv.py が実行後に、そのまま貼れるコマンドを表示する。
+    parser.add_argument(
+        "--input", default=None,
+        help="入力 CSV を直接指定する (--statistic / --mode より優先)")
+    parser.add_argument(
+        "--out-dir", default=None,
+        help="出力ディレクトリを直接指定する (--statistic / --mode より優先)")
     args = parser.parse_args()
     suffix = "" if args.mode == "td" else "_conv"
 
-    input_csv = input_csv_path(suffix, args.statistic)
-    out_dir = output_dir_path(suffix, args.statistic)
-    print(f"--- 統計量: {args.statistic}  測定モード: {args.mode}  入力: {input_csv} ---")
+    input_csv = args.input or input_csv_path(suffix, args.statistic)
+    out_dir = args.out_dir or output_dir_path(suffix, args.statistic)
+    print(f"--- 入力: {input_csv}")
+    print(f"--- 出力: {out_dir}/")
 
     df = load_data(input_csv)
 

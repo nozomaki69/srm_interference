@@ -101,6 +101,82 @@ def compute_seed_max_cv(value_list, rssi_list, num_devices, anchor_dbm, stats_ke
 
 
 # ============================================================
+# 正規化分散 (nvar): Var(ΔPER) / (vbar + sigma2_het)
+# ============================================================
+# CV が ΔPER の平均 0 付近で破綻したことへの対処 (docs/cv_detection.md の追補を参照)。
+# 分母を「平均」から「帰無時に期待されるばらつき」に替える。常に正で有限なので
+# 発散しない。変動係数ではなく分散比だが、無次元化という狙いは同じ。
+def _iter_bins(delta, nvar, rssi, num_devices, anchor_dbm):
+    """Seed ごと・ビンごとに (s2_unbiased, vbar, m) を返すジェネレータ。"""
+    d_all = np.asarray(delta, dtype=float)
+    v_all = np.asarray(nvar, dtype=float)
+    r_all = np.asarray(rssi, dtype=float)
+    for s0 in range(len(r_all) // num_devices):
+        sl = slice(s0 * num_devices, (s0 + 1) * num_devices)
+        r_v, d_v, v_v = r_all[sl], d_all[sl], v_all[sl]
+        valid = (r_v != 0) & np.isfinite(v_v)
+        r_v, d_v, v_v = r_v[valid], d_v[valid], v_v[valid]
+        out = []
+        for upper, lower in A.select_bins(r_v, anchor_dbm):
+            m = (r_v > lower) & (r_v <= upper)
+            n = int(m.sum())
+            if n < 2:
+                continue
+            out.append((float(np.var(d_v[m], ddof=1)), float(np.mean(v_v[m])), n))
+        yield out
+
+
+def estimate_sigma2_het(data):
+    """no_interf 側のビンから sigma2_het を積率法で推定する。
+
+    E[s2] = vbar + sigma2_het なので、ビンごとの (s2 - vbar) の中央値を取る。
+    注意: 二項ノイズ vbar が sigma2_het より大きい領域では過小推定になる
+    (中央値が chi2 の歪みを拾うため)。推定値は診断に出して妥当性を判断すること。
+    """
+    excess = []
+    for ck, entry in data.items():
+        pan1_ch, pan2_ch = ck[0], ck[1]
+        if A.get_interf_label(pan1_ch, pan2_ch) != "no_interf":
+            continue
+        for pan, ch in (("pan1", pan1_ch), ("pan2", pan2_ch)):
+            delta = (np.asarray(entry[pan + "_dl"], dtype=float)
+                     - np.asarray(entry[pan + "_ul"], dtype=float))
+            for bins in _iter_bins(delta, entry[pan + "_nvar"], entry[pan + "_rssi"],
+                                   A.NUM_DEVICE, A.bin_anchor_dbm(ch)):
+                for s2, vbar, _n in bins:
+                    excess.append(s2 - vbar)
+    if not excess:
+        return 0.0
+    return max(0.0, float(np.median(excess)))
+
+
+def compute_seed_max_nvar(delta, nvar, rssi, num_devices, anchor_dbm, sigma2_het,
+                          stats_key=None):
+    """各 Seed について Var(ΔPER)/(vbar + sigma2_het) の最大値を返す。
+
+    戻り値: (各Seedの値のリスト, 有効ビン0のSeed数, 0)
+    3 番目の 0 は CV 版と戻り値の形を揃えるためのダミー (nvar に下限は無い)。
+    """
+    values, n_degenerate = [], 0
+    for bins in _iter_bins(delta, nvar, rssi, num_devices, anchor_dbm):
+        best, n_used = 0.0, 0
+        for s2, vbar, n in bins:
+            denom = vbar + sigma2_het
+            if denom <= 0:
+                continue
+            n_used += 1
+            z = s2 / denom
+            if z > best:
+                best = z
+        if n_used == 0:
+            n_degenerate += 1
+            if stats_key is not None:
+                FLOOR_SKIPPED[stats_key] += 0
+        values.append(best)
+    return values, n_degenerate, 0
+
+
+# ============================================================
 # 閾値探索
 # ============================================================
 def evaluate_detection(interf_values, no_interf_values):
@@ -173,9 +249,9 @@ def _series(entry, pan, link):
     return np.asarray(entry[p + "_" + link], dtype=float)
 
 
-def run_cv_detection(data, statistic="delta"):
+def run_cv_detection(data, statistic="delta", sigma2_het=0.0):
     """帯域ペアごとに interf / no_interf を対にして判定する。"""
-    links = ["delta"] if statistic == "delta" else ["ul", "dl"]
+    links = {"delta": ["delta"], "nvar": ["nvar"], "links": ["ul", "dl"]}[statistic]
 
     groups = defaultdict(dict)
     for condition_key in data:
@@ -200,13 +276,24 @@ def run_cv_detection(data, statistic="delta"):
                     " 対比較が成立しません。")
 
             rssi_key = pan.lower() + "_rssi"
+            nvar_key = pan.lower() + "_nvar"
             for link in links:
-                iv, i_deg, i_flo = compute_seed_max_cv(
-                    _series(interf_entry, pan, link), interf_entry[rssi_key],
-                    A.NUM_DEVICE, anchor, (pan, link))
-                nv, n_deg, n_flo = compute_seed_max_cv(
-                    _series(no_interf_entry, pan, link), no_interf_entry[rssi_key],
-                    A.NUM_DEVICE, anchor, (pan, link))
+                if statistic == "nvar":
+                    iv, i_deg, i_flo = compute_seed_max_nvar(
+                        _series(interf_entry, pan, "delta"), interf_entry[nvar_key],
+                        interf_entry[rssi_key], A.NUM_DEVICE, anchor, sigma2_het,
+                        (pan, link))
+                    nv, n_deg, n_flo = compute_seed_max_nvar(
+                        _series(no_interf_entry, pan, "delta"), no_interf_entry[nvar_key],
+                        no_interf_entry[rssi_key], A.NUM_DEVICE, anchor, sigma2_het,
+                        (pan, link))
+                else:
+                    iv, i_deg, i_flo = compute_seed_max_cv(
+                        _series(interf_entry, pan, link), interf_entry[rssi_key],
+                        A.NUM_DEVICE, anchor, (pan, link))
+                    nv, n_deg, n_flo = compute_seed_max_cv(
+                        _series(no_interf_entry, pan, link), no_interf_entry[rssi_key],
+                        A.NUM_DEVICE, anchor, (pan, link))
                 if not iv or not nv:
                     print(f"Warning: no seed data for {bw_label} {distance}m "
                           f"pan1_{l1}_pan2_{l2} ({pan}/{link}) - skipping")
@@ -279,12 +366,17 @@ def main():
         help="td: 各メトリックを自分の200s窓で測る時間分割測定(既定) / "
              "conv: 全メトリックを W0 の200sで同時に測る従来方式")
     parser.add_argument(
-        "--statistic", choices=("delta", "links"), default="delta",
-        help="delta: ΔPER の CV(既定、本題) / "
-             "links: UL と DL の PER の CV をそれぞれ独立に(参考)")
+        "--statistic", choices=("nvar", "delta", "links"), default="nvar",
+        help="nvar: Var(ΔPER)/(vbar+sigma2_het) 正規化分散(既定・推奨) / "
+             "delta: ΔPER の CV (ΔPER の平均が0付近で破綻するため非推奨) / "
+             "links: UL と DL の PER の CV をそれぞれ独立に")
     parser.add_argument(
         "--mean-abs-floor", type=float, default=MEAN_ABS_FLOOR,
-        help="ビンの |平均| がこれ未満ならそのビンを使わない (CV の発散対策)")
+        help="delta/links でビンの |平均| がこれ未満ならそのビンを使わない")
+    parser.add_argument(
+        "--sigma2-het", default="auto",
+        help="nvar の分母に足すリング内の真のばらつき。'auto'(既定) なら "
+             "no_interf 側から積率法で推定。数値を与えると固定 (0 なら純粋な二項正規化)")
     args = parser.parse_args()
 
     MEAN_ABS_FLOOR = args.mean_abs_floor
@@ -302,13 +394,30 @@ def main():
     data = A.load_and_aggregate(A.CSV_FILE, A.STATS_DIR)
     print(f"--- Loaded {len(data)} conditions ---")
 
-    rows = run_cv_detection(data, args.statistic)
-    out = os.path.join(A.PLOT_BASE_DIR, f"cv_detection_results{suffix}.csv")
+    sigma2_het = 0.0
+    if args.statistic == "nvar":
+        if args.sigma2_het == "auto":
+            sigma2_het = estimate_sigma2_het(data)
+            print(f"--- sigma2_het = {sigma2_het:.6f} (no_interf から積率法で推定) ---")
+            print("    注意: 二項ノイズが sigma2_het より大きい領域では過小推定になる。")
+        else:
+            sigma2_het = float(args.sigma2_het)
+            print(f"--- sigma2_het = {sigma2_het:.6f} (指定値) ---")
+
+    rows = run_cv_detection(data, args.statistic, sigma2_het)
+    # 統計量ごとに別ファイルにする。同じ名前だと統計量を変えて連続実行したときに
+    # 前の結果を黙って上書きしてしまう。
+    out = os.path.join(A.PLOT_BASE_DIR,
+                       f"cv_detection_results_{args.statistic}{suffix}.csv")
     save_results(rows, out)
     print(f"--- Saved {len(rows)} rows to {out} ---")
 
     A.print_bin_diagnostics()
     print_summary(rows)
+    print()
+    print("ヒートマップを作るには:")
+    print(f"  python3 script/create_heatmap.py --input {out} \\")
+    print(f"      --out-dir {os.path.join(A.PLOT_BASE_DIR, f'heatmaps_{args.statistic}{suffix}')}")
 
 
 if __name__ == "__main__":

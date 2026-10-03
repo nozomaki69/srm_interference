@@ -313,9 +313,11 @@ def append_position_to_csv(path, fname, positions, write_header):
 # CSV 読み込み & 集計
 # ============================================================
 def make_empty_condition_data():
+    # *_nvar は ΔPER の推定誤差分散 (二項ノイズ)。analyze_cv.py の
+    # --statistic nvar が正規化の分母に使う。分散ベースの経路では使わない。
     return {
-        "pan1_ul": [], "pan1_dl": [], "pan1_rssi": [], "pan1_dist": [],
-        "pan2_ul": [], "pan2_dl": [], "pan2_rssi": [], "pan2_dist": [],
+        "pan1_ul": [], "pan1_dl": [], "pan1_rssi": [], "pan1_dist": [], "pan1_nvar": [],
+        "pan2_ul": [], "pan2_dl": [], "pan2_rssi": [], "pan2_dist": [], "pan2_nvar": [],
     }
 
 
@@ -378,6 +380,47 @@ def _one_side_per(r, idx, pan, dev, direction):
         CLIP_STATS["negative"] += 1
         return 0.0
     return per if per <= 1.0 else 1.0
+
+
+def _one_side_noise_var(r, idx, pan, dev, direction):
+    """PER 推定の二項ノイズ分散を返す。ΔPER の正規化の分母に使う。
+
+    式は測定モードで変わる (docs/cv_detection.md の A-3 を参照):
+
+      conv: Var(PER) = p(1-p) / N
+            分子 Rx と分母 S+R+M+F が同じ窓の同じフレーム集合なので、
+            分母は確定値で比は正真正銘の割合になる。
+
+      td  : Var(PER) = [ p(1-p) + (1-p)^2 (1 - Σpx^2) ] / N     px = (S,R,M,F)/N
+            分子 Rx(W4) と分母 S(W0)+R(W1)+M(W2)+F(W3) が互いに素なフレーム集合で、
+            分子と分母が独立かつ分母自体も確率変数になるぶん分散が増える
+            (conv の 3〜4 倍)。
+    """
+    sfx = COLUMN_SUFFIX
+    if direction == "ul":
+        prefix = f"{pan}_Dev{dev}_to_Co_"
+        n_rx = r[idx[f"{pan}_PC_Rx_from_Dev{dev}{sfx}"]]
+    else:
+        prefix = f"{pan}_Co_to_Dev{dev}_"
+        n_rx = r[idx[f"{pan}_Dev{dev}_Rx_from_PC{sfx}"]]
+
+    counts = [r[idx[prefix + name + sfx]] for name in
+              ("macTxSuccessCount", "macRetryCount",
+               "macMultipleRetryCount", "macTxFailCount")]
+    total = sum(counts)
+    if total <= 0:
+        return float("nan")
+
+    # p が 0 や 1 に張り付くと分散が 0 になるのでクリップする
+    p = min(max(1.0 - (n_rx / total), 0.5 / total), 1.0 - 0.5 / total)
+    base = p * (1.0 - p)
+
+    if COLUMN_SUFFIX == "_conv":
+        return base / total
+
+    # td: 分母が 4 つの独立な窓の和になるぶんの上乗せ
+    sum_sq = sum((c / total) ** 2 for c in counts)
+    return (base + (1.0 - p) ** 2 * (1.0 - sum_sq)) / total
 
 
 def load_and_aggregate(csv_file, stats_dir):
@@ -481,6 +524,10 @@ def load_and_aggregate(csv_file, stats_dir):
                 entry["pan1_ul"].append(ul_per)
                 entry["pan1_dl"].append(dl_per)
                 entry["pan1_rssi"].append(rssi)
+                # ΔPER = PER_DL - PER_UL の推定誤差分散。上下は独立に推定しているので和。
+                entry["pan1_nvar"].append(
+                    _one_side_noise_var(r, idx, "PAN1", dev, "dl")
+                    + _one_side_noise_var(r, idx, "PAN1", dev, "ul"))
                 entry["pan1_dist"].append(_calc_distance(positions, dev, 2))
 
             # この観測(1 Seed 分)のRSSIから、起点を超えた端末数を数える
@@ -498,6 +545,10 @@ def load_and_aggregate(csv_file, stats_dir):
                 entry["pan2_ul"].append(ul_per)
                 entry["pan2_dl"].append(dl_per)
                 entry["pan2_rssi"].append(rssi)
+                # ΔPER = PER_DL - PER_UL の推定誤差分散。上下は独立に推定しているので和。
+                entry["pan2_nvar"].append(
+                    _one_side_noise_var(r, idx, "PAN2", dev, "dl")
+                    + _one_side_noise_var(r, idx, "PAN2", dev, "ul"))
                 entry["pan2_dist"].append(_calc_distance(positions, dev, 1))
 
             # この観測(1 Seed 分)のRSSIから、起点を超えた端末数を数える
