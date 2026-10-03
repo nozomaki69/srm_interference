@@ -84,11 +84,16 @@ def bin_cvs(per_list, rssi_list, num_devices, anchor_dbm):
         yield out
 
 
-def collect(data, pans, aggregate):
+def collect(data, pans, aggregate, other_load=None, own_load=None):
     """(bandwidth, own_load, other_load, pan, label, cv_ul, cv_dl) を集める。
 
     aggregate="max" なら観測ごとに max_b cv_b を1点、"bin" ならビンごとに1点。
     UL と DL は同じビン構成から取るので、散布図で対にできる。
+
+    other_load / own_load を指定するとその負荷の条件だけに絞る。相手PAN負荷が
+    20〜40% の領域は oracle 閾値でも検知不能 (F1 が構造的下限に張り付く) なので、
+    全負荷を混ぜると信号が薄まる。干渉が実際に効いている領域だけを見たいときは
+    other_load=100 のように絞ること。
     """
     recs = []
     for ck, entry in data.items():
@@ -98,6 +103,10 @@ def collect(data, pans, aggregate):
         for pan, ch, own, other in (("PAN1", pan1_ch, l1, l2),
                                     ("PAN2", pan2_ch, l2, l1)):
             if pan not in pans:
+                continue
+            if other_load is not None and other != other_load:
+                continue
+            if own_load is not None and own != own_load:
                 continue
             anchor = A.bin_anchor_dbm(ch)
             p = pan.lower()
@@ -120,7 +129,7 @@ def collect(data, pans, aggregate):
 # ============================================================
 # 図
 # ============================================================
-def plot_ecdf(recs, out_path, aggregate):
+def plot_ecdf(recs, out_path, aggregate, cond="all loads"):
     """ECDF。閾値 tau で各クラスの何割が上に来るかを直接読める形。"""
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.6), sharex=True, sharey=True)
     for ax, (link, col) in zip(axes, (("Uplink (UL)", 5), ("Downlink (DL)", 6))):
@@ -137,14 +146,14 @@ def plot_ecdf(recs, out_path, aggregate):
         _style_axes(ax)
     axes[0].set_ylabel("Cumulative fraction")
     axes[0].legend(loc="lower right", frameon=True, fontsize=10)
-    fig.suptitle(f"ECDF of CV of PER  (aggregate={aggregate})   vertical line = median",
-                 fontsize=13)
+    fig.suptitle(f"ECDF of CV of PER  (aggregate={aggregate}, {cond})"
+                 f"   vertical line = median", fontsize=13)
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
 
-def plot_box_by_load(recs, out_path):
+def plot_box_by_load(recs, out_path, cond="all loads"):
     """自PAN負荷ごとの箱ひげ図。負荷に対して CV がどう動くかを見る。"""
     loads = sorted(set(r[1] for r in recs))
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), sharey=True)
@@ -168,13 +177,14 @@ def plot_box_by_load(recs, out_path):
     axes[0].set_ylabel("Coefficient of variation")
     axes[0].legend(handles=[plt.Rectangle((0, 0), 1, 1, color=COLOR[l]) for l in ORDER],
                    labels=[LABEL[l] for l in ORDER], loc="upper left", fontsize=10)
-    fig.suptitle("CV by own PAN offered load  (whiskers = 1.5 IQR, outliers hidden)", fontsize=13)
+    fig.suptitle(f"CV by own PAN offered load  ({cond})"
+                 f"   whiskers = 1.5 IQR, outliers hidden", fontsize=13)
     fig.tight_layout()
     fig.savefig(out_path, bbox_inches="tight")
     plt.close(fig)
 
 
-def plot_scatter(recs, out_path):
+def plot_scatter(recs, out_path, cond="all loads"):
     """CV_ul × CV_dl。UL を対照に使えるか（比や差で分離が良くなるか）を見る。"""
     fig, ax = plt.subplots(figsize=(6.4, 6.0))
     for lab in ORDER:
@@ -187,7 +197,8 @@ def plot_scatter(recs, out_path):
     ax.set_xlim(lim); ax.set_ylim(lim); ax.set_aspect("equal")
     ax.set_xlabel("Uplink CV")
     ax.set_ylabel("Downlink CV")
-    ax.set_title("Uplink vs downlink CV\n(above y=x: downlink is more dispersed)", fontsize=12)
+    ax.set_title(f"Uplink vs downlink CV  ({cond})"
+                 f"\n(above y=x: downlink is more dispersed)", fontsize=12)
     _style_axes(ax)
     # 点は alpha 0.35・小サイズなので、そのままだと凡例のマーカーが見えない。
     # 凡例だけ不透明・大きめにする。
@@ -199,7 +210,7 @@ def plot_scatter(recs, out_path):
     plt.close(fig)
 
 
-def save_summary(recs, path):
+def save_summary(recs, path, other_tag="all"):
     rows = []
     for lab in ORDER:
         for link, col in (("ul", 5), ("dl", 6)):
@@ -207,7 +218,8 @@ def save_summary(recs, path):
                 v = np.array([r[col] for r in recs if r[4] == lab and r[1] == load])
                 if not len(v):
                     continue
-                rows.append({"label": lab, "link": link, "own_load": load, "n": len(v),
+                rows.append({"label": lab, "link": link, "own_load": load,
+                             "other_load": other_tag, "n": len(v),
                              "median": round(float(np.median(v)), 4),
                              "q1": round(float(np.percentile(v, 25)), 4),
                              "q3": round(float(np.percentile(v, 75)), 4),
@@ -228,28 +240,50 @@ def main():
                         help="max: 観測ごとの max_b cv_b (検知器が使う量) / "
                              "bin: ビンごとの生の CV")
     parser.add_argument("--pan", choices=("PAN1", "PAN2", "both"), default="both")
+    # 相手PAN負荷 20〜40% は oracle 閾値でも F1 が構造的下限に張り付く検知不能領域
+    # なので、全負荷を混ぜると干渉ありの分布が薄まる。干渉が効いている領域だけを
+    # 見たいときは --other-load 100 のように絞る。
+    parser.add_argument("--other-load", default="all",
+                        help="相手PANの提供負荷で絞る (例: 100)。'all' なら絞らない")
+    parser.add_argument("--own-load", default="all",
+                        help="自PANの提供負荷で絞る (例: 100)。'all' なら絞らない")
     parser.add_argument("--out-dir", default=None)
     args = parser.parse_args()
 
+    other_load = None if args.other_load == "all" else int(args.other_load)
+    own_load = None if args.own_load == "all" else int(args.own_load)
+
+    # 図のタイトルと出力先のタグ。絞り込み条件ごとに図が上書きし合わないようにする。
+    conds, tags = [], []
+    if other_load is not None:
+        conds.append(f"other PAN load = {other_load}%"); tags.append(f"_other{other_load}")
+    if own_load is not None:
+        conds.append(f"own PAN load = {own_load}%"); tags.append(f"_own{own_load}")
+    cond = ", ".join(conds) if conds else "all loads"
+    tag = "".join(tags)
+    other_tag = "all" if other_load is None else str(other_load)
+
     A.set_measurement_mode(args.mode)
     suffix = A.COLUMN_SUFFIX
-    out_dir = args.out_dir or os.path.join(A.PLOT_BASE_DIR, f"cv_distribution{suffix}")
+    out_dir = args.out_dir or os.path.join(A.PLOT_BASE_DIR, f"cv_distribution{suffix}{tag}")
     os.makedirs(out_dir, exist_ok=True)
 
-    print(f"--- 測定モード: {args.mode}  集約: {args.aggregate}  対象: {args.pan} ---")
+    print(f"--- 測定モード: {args.mode}  集約: {args.aggregate}  対象: {args.pan}  絞り込み: {cond} ---")
     if not os.path.isfile(A.CSV_FILE):
         raise FileNotFoundError(f"CSV file not found: {A.CSV_FILE}")
     data = A.load_and_aggregate(A.CSV_FILE, A.STATS_DIR)
     print(f"--- Loaded {len(data)} conditions ---")
 
     pans = ("PAN1", "PAN2") if args.pan == "both" else (args.pan,)
-    recs = collect(data, pans, args.aggregate)
+    recs = collect(data, pans, args.aggregate, other_load, own_load)
     print(f"--- {len(recs)} 点を集計 ---")
+    if not recs:
+        raise SystemExit("絞り込み条件に該当する条件がありません。負荷の指定を確認してください。")
 
-    plot_ecdf(recs, os.path.join(out_dir, "cv_ecdf.pdf"), args.aggregate)
-    plot_box_by_load(recs, os.path.join(out_dir, "cv_box_by_load.pdf"))
-    plot_scatter(recs, os.path.join(out_dir, "cv_scatter.pdf"))
-    rows = save_summary(recs, os.path.join(out_dir, "cv_summary.csv"))
+    plot_ecdf(recs, os.path.join(out_dir, "cv_ecdf.pdf"), args.aggregate, cond)
+    plot_box_by_load(recs, os.path.join(out_dir, "cv_box_by_load.pdf"), cond)
+    plot_scatter(recs, os.path.join(out_dir, "cv_scatter.pdf"), cond)
+    rows = save_summary(recs, os.path.join(out_dir, "cv_summary.csv"), other_tag)
     print(f"--- 出力: {out_dir}/ (cv_ecdf.pdf, cv_box_by_load.pdf, cv_scatter.pdf, cv_summary.csv) ---")
 
     print()
