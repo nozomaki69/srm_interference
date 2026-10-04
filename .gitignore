@@ -1,3 +1,18 @@
+# トレース集約の生データ。30,000ラン x 1,822列で数百MBになる
 plots/simulation_results.csv
-plots/positions.csv
+
+# SLURM のログと manifest (sbatch_jobs.sh が作る中間物)
+plots/logs/
+plots/manifests/
+
+# スイープ中の中間ファイル (集計が済んだバッチから順に消される)
+*.config
+*.pos
+*.statconfig
+*.trace
+*.stat
+*.done
+
 __pycache__/
+.DS_Store
+.nfs*

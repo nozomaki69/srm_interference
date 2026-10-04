@@ -2,38 +2,24 @@
 # -*- coding: utf-8 -*-
 
 import os
-import re
 import sys
 import csv
-import json
 import argparse
 from collections import defaultdict
 
 import numpy as np
-import pandas as pd
 import scipy.stats as stats
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.ticker as mtick
 
 # ============================================================
 # 設定
 # ============================================================
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-STATS_DIR = os.path.join(SCRIPT_DIR, "..")                         # .pos ファイルの場所
 CSV_FILE = os.path.join(SCRIPT_DIR, "..", "plots", "simulation_results.csv")
 PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
-
-# .pos から抽出した座標を永続化しておくCSV。
-# 一度参照した .pos ファイルはここに保存してから削除するので、
-# .pos が無くなった後の再実行でもここから読み込める。
-POSITIONS_CSV = os.path.join(PLOT_BASE_DIR, "positions.csv")
 
 NUM_DEVICE = 30
 PAN1_DEVS = list(range(3, 3 + NUM_DEVICE))                   # NUM_DEVICE=30 なら 3..32
 PAN2_DEVS = list(range(3 + NUM_DEVICE, 3 + 2 * NUM_DEVICE))  # NUM_DEVICE=30 なら 33..62
-FONT_SIZE = 45
 
 # チャネル番号 -> 帯域(kbps)
 CHANNEL_KBPS = {0: 50, 1: 100, 2: 200, 3: 50, 4: 100, 5: 200}
@@ -56,9 +42,8 @@ RX_SENSITIVITY_DBM = {c["id"]: c["rx_sensitivity_dbm"] for c in _CHANNELS}
 # --- RSSIビン設定 -----------------------------------------------------
 # RSSIビンの幅(dBm)。★ここを変更するだけで、以下の解析すべてのビン幅が
 # 一括で変わる★:
-#   - plot_delta_per_analysis              (ΔPERの箱ひげ図)
-#   - plot_variance_distribution_boxplot   (ΔPER分散の箱ひげ図)
-#   - select_bins                          (干渉検知に使うRSSIビン)
+#   - select_bins                 (干渉検知に使うRSSIビン)
+#   - compute_seed_max_variance   (Seedごとの干渉指標)
 RSSI_BIN_SIZE_DBM = 10
 
 # ビンの起点を受信感度から何dBm上に置くか。
@@ -194,8 +179,8 @@ def select_bins(rssi_values, anchor_dbm, bin_size=RSSI_BIN_SIZE_DBM, min_count=2
     (実測RSSIの最小値 + 5dBm) と違うのはこの点で、最弱端を落とす意図
     (セル端は二項ノイズが最大で誤検知の床を決める) 自体は残っている。
 
-    ΔPER分散の箱ひげ図・分散分布の箱ひげ図・干渉検知の統計量がすべてこの関数を
-    経由することで、「どのビンを使うか」の定義が1箇所に集まる。
+    干渉検知の統計量がこの関数を経由することで、「どのビンを使うか」の定義が
+    1箇所に集まる。
     端末が min_count 個未満しか入らないビンは返さない(間が空くこともある)。
     """
     r = np.asarray(rssi_values, dtype=float).flatten()
@@ -235,89 +220,20 @@ def get_bandwidth_label(pan1_ch, pan2_ch):
     return f"{k1}vs{k2}"
 
 
-def pos_filename(pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload, seed):
-    """
-    .pos ファイル名を組み立てる。
-    generate_config.py は干渉の有無で "interf_" / "no_interf_" のどちらかの
-    プレフィックスでファイルを生成しているため、ここでも同じ判定を使う
-    （以前は "interf_" 固定になっており、no_interf の組み合わせで
-    ファイルが見つからないバグがあった）。
-    """
-    prefix = get_interf_label(pan1_ch, pan2_ch)  # 'interf' or 'no_interf'
-    return (
-        f"{prefix}_dist_{distance}m_channel_{pan1_ch}_vs_{pan2_ch}"
-        f"_pan1_{pan1_offload}_pan2_{pan2_offload}_seed{seed}.pos"
-    )
-
-
-def parse_pos_file(filepath):
-    """.pos ファイルを解析し、ノードの初期座標（メートル単位）を抽出する。"""
-    positions = {}
-    with open(filepath, "r") as f:
-        for line in f:
-            parts = line.split()
-            # 1行目 (時間 = 0) の座標のみを抽出
-            if len(parts) > 4 and parts[1] == "0":
-                try:
-                    node_id = int(parts[0])
-                    x_m = float(parts[2])
-                    y_m = float(parts[3])
-                    positions[node_id] = (x_m, y_m)
-                except ValueError:
-                    continue
-    return positions
-
-
-# ============================================================
-# 座標の永続化 (positions.csv)
-# ============================================================
-def load_saved_positions(path):
-    """
-    既に positions.csv に保存済みの座標をすべて読み込む。
-    .pos ファイルが既に削除されていても、ここに載っていればそのまま使える。
-    戻り値: { pos_filename: {node_id: (x, y), ...}, ... }
-    """
-    saved = {}
-    if not os.path.isfile(path):
-        return saved
-
-    with open(path, "r", encoding="utf-8", newline="") as f:
-        reader = csv.reader(f)
-        header = next(reader, None)
-        for row in reader:
-            if len(row) < 2:
-                continue
-            fname, positions_json = row[0], row[1]
-            try:
-                raw = json.loads(positions_json)
-                saved[fname] = {int(k): tuple(v) for k, v in raw.items()}
-            except (ValueError, json.JSONDecodeError):
-                # 壊れた行はスキップ（該当ファイルは再度 .pos が必要になるが、
-                # .pos 側が既に削除済みの場合は Warning: pos file not found として扱われる）
-                continue
-    return saved
-
-
-def append_position_to_csv(path, fname, positions, write_header):
-    """positions.csv に1件(1 .posファイル分)を追記する。"""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        if write_header:
-            writer.writerow(["fname", "positions_json"])
-        positions_json = json.dumps({str(k): list(v) for k, v in positions.items()})
-        writer.writerow([fname, positions_json])
-
-
 # ============================================================
 # CSV 読み込み & 集計
 # ============================================================
 def make_empty_condition_data():
-    # *_nvar は ΔPER の推定誤差分散 (二項ノイズ)。analyze_cv.py の
-    # --statistic nvar が正規化の分母に使う。分散ベースの経路では使わない。
+    """1条件 (帯域ペア・距離・負荷の組) に、全 Seed x 全デバイス分を平らに貯める。
+
+    統計量に要るのは UL/DL の PER と RSSI だけ。ノード座標から出す距離と
+    ΔPER の推定誤差分散 (二項ノイズ) も以前は貯めていたが、前者は距離-PER の
+    エラーバー図、後者は変動係数ベースの判定でしか使っておらず、
+    どちらもこのブランチには無いので持たない。
+    """
     return {
-        "pan1_ul": [], "pan1_dl": [], "pan1_rssi": [], "pan1_dist": [], "pan1_nvar": [],
-        "pan2_ul": [], "pan2_dl": [], "pan2_rssi": [], "pan2_dist": [], "pan2_nvar": [],
+        "pan1_ul": [], "pan1_dl": [], "pan1_rssi": [],
+        "pan2_ul": [], "pan2_dl": [], "pan2_rssi": [],
     }
 
 
@@ -382,67 +298,16 @@ def _one_side_per(r, idx, pan, dev, direction):
     return per if per <= 1.0 else 1.0
 
 
-def _one_side_noise_var(r, idx, pan, dev, direction):
-    """PER 推定の二項ノイズ分散を返す。ΔPER の正規化の分母に使う。
-
-    式は測定モードで変わる (docs/cv_detection.md の A-3 を参照):
-
-      conv: Var(PER) = p(1-p) / N
-            分子 Rx と分母 S+R+M+F が同じ窓の同じフレーム集合なので、
-            分母は確定値で比は正真正銘の割合になる。
-
-      td  : Var(PER) = [ p(1-p) + (1-p)^2 (1 - Σpx^2) ] / N     px = (S,R,M,F)/N
-            分子 Rx(W4) と分母 S(W0)+R(W1)+M(W2)+F(W3) が互いに素なフレーム集合で、
-            分子と分母が独立かつ分母自体も確率変数になるぶん分散が増える
-            (conv の 3〜4 倍)。
-    """
-    sfx = COLUMN_SUFFIX
-    if direction == "ul":
-        prefix = f"{pan}_Dev{dev}_to_Co_"
-        n_rx = r[idx[f"{pan}_PC_Rx_from_Dev{dev}{sfx}"]]
-    else:
-        prefix = f"{pan}_Co_to_Dev{dev}_"
-        n_rx = r[idx[f"{pan}_Dev{dev}_Rx_from_PC{sfx}"]]
-
-    counts = [r[idx[prefix + name + sfx]] for name in
-              ("macTxSuccessCount", "macRetryCount",
-               "macMultipleRetryCount", "macTxFailCount")]
-    total = sum(counts)
-    if total <= 0:
-        return float("nan")
-
-    # p が 0 や 1 に張り付くと分散が 0 になるのでクリップする
-    p = min(max(1.0 - (n_rx / total), 0.5 / total), 1.0 - 0.5 / total)
-    base = p * (1.0 - p)
-
-    if COLUMN_SUFFIX == "_conv":
-        return base / total
-
-    # td: 分母が 4 つの独立な窓の和になるぶんの上乗せ
-    sum_sq = sum((c / total) ** 2 for c in counts)
-    return (base + (1.0 - p) ** 2 * (1.0 - sum_sq)) / total
-
-
-def load_and_aggregate(csv_file, stats_dir):
+def load_and_aggregate(csv_file):
     """
     CSV を読み込み、(PAN1_CH, PAN2_CH, Distance, PAN1_Offload, PAN2_Offload) を
-    条件キーとして、全 Seed x 全デバイス分の UL/DL PER・RSSI・(.pos から算出した)
-    距離を1つの配列に蓄積する。
+    条件キーとして、全 Seed x 全デバイス分の UL/DL PER と RSSI を
+    1つの配列に蓄積する。
 
-    各 .pos ファイルは、最初に参照(読み込み)された時点で座標を positions.csv に
-    保存してからディスクから削除する。座標が既に positions.csv に保存済みの
-    場合は、.pos ファイルの有無に関わらずそちらを使う(再実行時に .pos が
-    無くても解析できる)。
+    .pos ファイル(ノード座標)は読まない。座標が要るのは距離-PER のエラーバー図
+    だけで、このブランチはヒートマップと折れ線しか出さないため。
     """
     data = defaultdict(make_empty_condition_data)
-    pos_cache = {}  # このプロセス内で同じ .pos を何度も読まないようにするキャッシュ
-    deleted_pos_count = 0
-    missing_pos_count = 0
-    reused_from_csv_count = 0
-
-    # 既に保存済みの座標を先に読み込んでおく
-    saved_positions = load_saved_positions(POSITIONS_CSV)
-    positions_csv_exists = os.path.isfile(POSITIONS_CSV)
 
     with open(csv_file, mode="r", encoding="utf-8") as f:
         reader = csv.reader(f)
@@ -470,49 +335,12 @@ def load_and_aggregate(csv_file, stats_dir):
             distance = r[idx["Distance"]]
             pan1_offload = r[idx["PAN1_Offload"]]
             pan2_offload = r[idx["PAN2_Offload"]]
-            seed = r[idx["Seed"]]
 
             condition_key = (pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload)
 
-            # --- 座標を取得（seed ごとに個別の .pos / positions.csv の1行に対応） ---
-            fname = pos_filename(pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload, seed)
-            if fname not in pos_cache:
-                if fname in saved_positions:
-                    # positions.csv に既に保存済み -> .pos を読まずにそちらを使う
-                    pos_cache[fname] = saved_positions[fname]
-                    reused_from_csv_count += 1
-                    # 万一 .pos がまだ残っていたら(前回の削除失敗など)ついでに消しておく
-                    fpath = os.path.join(stats_dir, fname)
-                    if os.path.isfile(fpath):
-                        try:
-                            os.remove(fpath)
-                        except OSError:
-                            pass
-                else:
-                    fpath = os.path.join(stats_dir, fname)
-                    if os.path.isfile(fpath):
-                        positions = parse_pos_file(fpath)
-                        pos_cache[fname] = positions
-                        # 削除する前に座標を positions.csv に保存する
-                        append_position_to_csv(
-                            POSITIONS_CSV, fname, positions,
-                            write_header=not positions_csv_exists,
-                        )
-                        positions_csv_exists = True
-                        try:
-                            os.remove(fpath)
-                            deleted_pos_count += 1
-                        except OSError as e:
-                            print(f"Warning: failed to delete pos file {fpath}: {e}")
-                    else:
-                        print(f"Warning: pos file not found (and not in positions.csv either): {fpath}")
-                        pos_cache[fname] = None
-                        missing_pos_count += 1
-            positions = pos_cache[fname]
-
             entry = data[condition_key]
 
-            # --- PAN1（座標基準ノードは id=2） ---
+            # --- PAN1 ---
             for dev in PAN1_DEVS:
                 # 上り (デバイス -> PC) と下り (PC -> デバイス) で、それぞれ
                 # 受信側の受信数を分子にしたPERを出す。定義は _one_side_per() を参照。
@@ -524,16 +352,11 @@ def load_and_aggregate(csv_file, stats_dir):
                 entry["pan1_ul"].append(ul_per)
                 entry["pan1_dl"].append(dl_per)
                 entry["pan1_rssi"].append(rssi)
-                # ΔPER = PER_DL - PER_UL の推定誤差分散。上下は独立に推定しているので和。
-                entry["pan1_nvar"].append(
-                    _one_side_noise_var(r, idx, "PAN1", dev, "dl")
-                    + _one_side_noise_var(r, idx, "PAN1", dev, "ul"))
-                entry["pan1_dist"].append(_calc_distance(positions, dev, 2))
 
             # この観測(1 Seed 分)のRSSIから、起点を超えた端末数を数える
             _update_anchor_stats("PAN1", pan1_ch, entry["pan1_rssi"][-NUM_DEVICE:])
 
-            # --- PAN2（座標基準ノードは id=1） ---
+            # --- PAN2 ---
             for dev in PAN2_DEVS:
                 # 上り (デバイス -> PC) と下り (PC -> デバイス) で、それぞれ
                 # 受信側の受信数を分子にしたPERを出す。定義は _one_side_per() を参照。
@@ -545,19 +368,9 @@ def load_and_aggregate(csv_file, stats_dir):
                 entry["pan2_ul"].append(ul_per)
                 entry["pan2_dl"].append(dl_per)
                 entry["pan2_rssi"].append(rssi)
-                # ΔPER = PER_DL - PER_UL の推定誤差分散。上下は独立に推定しているので和。
-                entry["pan2_nvar"].append(
-                    _one_side_noise_var(r, idx, "PAN2", dev, "dl")
-                    + _one_side_noise_var(r, idx, "PAN2", dev, "ul"))
-                entry["pan2_dist"].append(_calc_distance(positions, dev, 1))
 
             # この観測(1 Seed 分)のRSSIから、起点を超えた端末数を数える
             _update_anchor_stats("PAN2", pan2_ch, entry["pan2_rssi"][-NUM_DEVICE:])
-
-    print(
-        f"--- positions: newly saved & .pos deleted: {deleted_pos_count}, "
-        f"reused from positions.csv: {reused_from_csv_count}, missing: {missing_pos_count} ---"
-    )
 
     # 受信数ベースのPERは重複受信で負になり得る。どれだけ起きたかを必ず出す。
     # 割合が大きいなら、この定義は「ACK損失が損失として現れない」という
@@ -577,178 +390,10 @@ def load_and_aggregate(csv_file, stats_dir):
     return data
 
 
-def _calc_distance(positions, dev_id, ref_id):
-    """positions が無い、あるいは該当ノードが無い場合は NaN を返す。"""
-    if positions is None or dev_id not in positions or ref_id not in positions:
-        return np.nan
-    dx = positions[dev_id][0] - positions[ref_id][0]
-    dy = positions[dev_id][1] - positions[ref_id][1]
-    return float(np.sqrt(dx ** 2 + dy ** 2))
-
-
-# ============================================================
-# プロット関数（旧コードから移植）
-# ============================================================
-def plot_delta_per_analysis(delta_per, rssi_list, anchor_dbm, filename, plot_dir):
-    rssi_list = np.array(rssi_list, dtype=float).flatten()
-    delta_per = np.array(delta_per, dtype=float).flatten()
-
-    # ビン境界は起点が固定になったのでSeedをまたいでも同じだが、Seedごとに
-    # 最大RSSIが違うためビンの本数は変わる。従来どおり強い側から数えた
-    # インデックス(1 = 最強ビン)で束ねる。
-    num_seeds = len(rssi_list) // NUM_DEVICE
-    per_index = defaultdict(list)
-
-    for s in range(num_seeds):
-        rssi_seed = rssi_list[s * NUM_DEVICE:(s + 1) * NUM_DEVICE]
-        delta_seed = delta_per[s * NUM_DEVICE:(s + 1) * NUM_DEVICE]
-
-        valid = rssi_seed != 0
-        r_v = rssi_seed[valid]
-        d_v = delta_seed[valid]
-
-        for b, (upper, lower) in enumerate(select_bins(r_v, anchor_dbm, min_count=1)):
-            mask = (r_v > lower) & (r_v <= upper)
-            if np.count_nonzero(mask) > 0:
-                per_index[b].extend(d_v[mask].tolist())
-
-    indices = sorted(per_index)
-    bin_data_list = [per_index[b] for b in indices]
-    labels = [str(b + 1) for b in indices]
-
-    fig, ax = plt.subplots(figsize=(10, 10))
-    ax.tick_params(axis="both", labelsize=FONT_SIZE - 20, width=3.0, which="major", length=20)
-
-    if bin_data_list:
-        ax.boxplot(bin_data_list)
-        ax.set_xticks(range(1, len(labels) + 1))
-        ax.set_xticklabels(labels)
-    plt.ylim(-1.0, 1.0)
-    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-
-    os.makedirs(plot_dir, exist_ok=True)
-    plt.savefig(os.path.join(plot_dir, filename), bbox_inches='tight', pad_inches=0.05)
-    plt.close()
-
-
-def plot_variance_distribution_boxplot(delta_per, rssi_list, anchor_dbm, filename, plot_dir):
-    rssi_list = np.array(rssi_list, dtype=float).flatten()
-    delta_per = np.array(delta_per, dtype=float).flatten()
-
-    # 統計量(compute_seed_max_variance)と同じビン定義。境界は固定だが本数は
-    # Seedごとに変わるので、強い側から数えたインデックス(1 = 最強ビン)で束ねる。
-    num_seeds = len(rssi_list) // NUM_DEVICE
-    variances_per_index = defaultdict(list)
-
-    for s in range(num_seeds):
-        start_idx = s * NUM_DEVICE
-        end_idx = (s + 1) * NUM_DEVICE
-
-        rssi_seed = rssi_list[start_idx:end_idx]
-        delta_seed = delta_per[start_idx:end_idx]
-
-        valid = rssi_seed != 0
-        r_v = rssi_seed[valid]
-        d_v = delta_seed[valid]
-
-        for b, (upper, lower) in enumerate(select_bins(r_v, anchor_dbm)):
-            mask = (r_v > lower) & (r_v <= upper)
-            bin_values = d_v[mask]
-            if len(bin_values) > 1:
-                variances_per_index[b].append(np.var(bin_values))
-
-    fig, ax = plt.subplots(figsize=(10, 10))
-    ax.tick_params(axis="both", labelsize=FONT_SIZE - 20, width=3.0, which="major", length=20)
-
-    indices = sorted(variances_per_index)
-    plot_data = [variances_per_index[b] for b in indices]
-    plot_labels = [str(b + 1) for b in indices]
-
-    if plot_data:
-        ax.boxplot(plot_data)
-        ax.set_xticks(range(1, len(plot_labels) + 1))
-        ax.set_xticklabels(plot_labels)
-
-    plt.ylim(0, 0.4)
-    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-
-    os.makedirs(plot_dir, exist_ok=True)
-    plt.savefig(os.path.join(plot_dir, filename), bbox_inches='tight', pad_inches=0.05)
-    plt.close()
-
-
-def add_errorbar_plot(distance, per, color, label, ax):
-    distance = np.asarray(distance, dtype=float)
-    per = np.asarray(per, dtype=float)
-
-    # 座標が取得できなかった (NaN) サンプルは除外する
-    valid = ~np.isnan(distance)
-    distance = distance[valid]
-    per = per[valid]
-    if len(distance) == 0:
-        return
-
-    bin_size = 100
-    bins = np.arange(50, np.nanmax(distance) + bin_size, bin_size)
-
-    df = pd.DataFrame({'dist': distance, 'per': per})
-    df['bin'] = pd.cut(df['dist'], bins=bins, labels=bins[:-1] + bin_size / 2)
-
-    stats_df = df.groupby('bin', observed=False)['per'].agg(['mean', 'count', 'std']).dropna()
-
-    ci95_hi = []
-    for i in range(len(stats_df)):
-        m, n, s = stats_df.iloc[i][['mean', 'count', 'std']]
-        if n > 1:
-            interval = stats.t.ppf(0.975, n - 1) * (s / np.sqrt(n))
-            ci95_hi.append(interval)
-        else:
-            ci95_hi.append(0)
-
-    ax.errorbar(
-        stats_df.index.astype(float),
-        stats_df['mean'],
-        yerr=ci95_hi,
-        fmt='o',
-        color=color,
-        label=label,
-        capsize=8,
-        capthick=3,
-        elinewidth=3,
-        markersize=12,
-    )
-
-
-def plot_distance_vs_per_errorbar(dist_up, per_up, dist_down, per_down, filename, plot_dir):
-    fig, ax = plt.subplots(figsize=(13, 10))
-
-    if len(dist_up) > 0:
-        add_errorbar_plot(dist_up, per_up, 'blue', 'UpLink', ax)
-    if len(dist_down) > 0:
-        add_errorbar_plot(dist_down, per_down, 'red', 'DownLink', ax)
-
-    ax.set_ylim(0.0, 1.0)
-    ax.tick_params(axis="both", labelsize=FONT_SIZE, width=3.0, which="major", length=20)
-
-    leg = ax.legend(fontsize=FONT_SIZE)
-    leg.get_frame().set_linewidth(1.8)
-
-    ax.xaxis.set_major_formatter(mtick.StrMethodFormatter('{x:,.0f}'))
-    ax.xaxis.set_major_locator(mtick.MultipleLocator(1000))
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
-    fig.tight_layout()
-    os.makedirs(plot_dir, exist_ok=True)
-    plt.savefig(os.path.join(plot_dir, filename), bbox_inches='tight', pad_inches=0.05)
-    plt.close()
-
-
 # ============================================================
 # 干渉検知（帯域幅ペアごとに interf/no_interf を比較）
 # ============================================================
-# 干渉検知に使うRSSIビンは select_bins() が返す
-# （plot_variance_distribution_boxplot と同じ定義）。起点は
+# 干渉検知に使うRSSIビンは select_bins() が返す。起点は
 # bin_anchor_dbm(ch) が返すチャネル固有の固定値なので、ビン境界は
 # Seed にも負荷にも依存しない。
 
@@ -983,16 +628,12 @@ def save_interference_detection_csv(rows, output_path):
 # ============================================================
 def main():
     parser = argparse.ArgumentParser(
-        description="干渉検知の解析。測定モード(時間分割 / 従来)を切り替えられる。")
+        description="干渉検知の解析。検知結果CSVを出すだけで、図は作らない "
+                    "(図は create_heatmap.py と plot_detection_lines.py の担当)。")
     parser.add_argument(
         "--mode", choices=("td", "conv"), default="td",
         help="td: 各メトリックを自分の200s窓で測る時間分割測定(既定) / "
              "conv: 全メトリックを W0 の200sで同時に測る従来方式")
-    parser.add_argument(
-        "--no-plots", action="store_true",
-        help="条件別プロット(300条件 x 6枚)を飛ばし、検知結果CSVだけを作り直す。"
-             "列を1本足しただけの再解析ではプロットは変わらないので、"
-             "実行時間の大半を占めるこの工程を省ける")
     args = parser.parse_args()
     set_measurement_mode(args.mode)
     print(f"--- 測定モード: {MEASUREMENT_MODE} (列の接尾辞 '{COLUMN_SUFFIX}') ---")
@@ -1001,10 +642,10 @@ def main():
         raise FileNotFoundError(f"CSV file not found: {CSV_FILE}")
 
     print(f"--- Loading {CSV_FILE} ---")
-    data = load_and_aggregate(CSV_FILE, STATS_DIR)
+    data = load_and_aggregate(CSV_FILE)
     print(f"--- Loaded {len(data)} conditions ---")
 
-    # --- 干渉検知（帯域幅ペアごとに interf/no_interf を比較, プロットはしない） ---
+    # --- 干渉検知（帯域幅ペアごとに interf/no_interf を比較） ---
     print("--- Running interference detection analysis ---")
     interference_rows = run_interference_detection(data)
     interference_csv_path = os.path.join(
@@ -1014,49 +655,6 @@ def main():
 
     # ビンの起点を固定値に変えた影響(端末が何台残るか)をここで実測値として出す。
     print_bin_diagnostics()
-
-    if args.no_plots:
-        # 条件別プロットは検知結果CSVに一切関与しない (ここより前で書き終えている)。
-        # 列を足しただけの再解析では figures は変わらないので飛ばせる。
-        print("--- Skipping per-condition plots (--no-plots) ---")
-    else:
-        for condition_key, entry in data.items():
-            pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload = condition_key
-
-            interf_label = get_interf_label(pan1_ch, pan2_ch)
-            bw_label = get_bandwidth_label(pan1_ch, pan2_ch)
-
-            # td と conv で図が上書きし合わないようディレクトリを分ける
-            plot_dir = os.path.join(PLOT_BASE_DIR, bw_label, f"{distance}m",
-                                    interf_label + COLUMN_SUFFIX)
-            suffix = f"pan1_{pan1_offload}_pan2_{pan2_offload}"
-
-            print(f"Plotting: {plot_dir} / {suffix}")
-
-            # --- PAN1 ---
-            pan1_diff = np.array(entry["pan1_dl"]) - np.array(entry["pan1_ul"])
-            plot_delta_per_analysis(pan1_diff, entry["pan1_rssi"], bin_anchor_dbm(pan1_ch),
-                                    f"pan1_box_{suffix}.pdf", plot_dir)
-            plot_variance_distribution_boxplot(pan1_diff, entry["pan1_rssi"], bin_anchor_dbm(pan1_ch),
-                                               f"pan1_s_{suffix}.pdf", plot_dir)
-            plot_distance_vs_per_errorbar(
-                entry["pan1_dist"], entry["pan1_ul"],
-                entry["pan1_dist"], entry["pan1_dl"],
-                f"pan1_errorbar_{suffix}.pdf", plot_dir,
-            )
-
-            # --- PAN2 ---
-            pan2_diff = np.array(entry["pan2_dl"]) - np.array(entry["pan2_ul"])
-            plot_delta_per_analysis(pan2_diff, entry["pan2_rssi"], bin_anchor_dbm(pan2_ch),
-                                    f"pan2_box_{suffix}.pdf", plot_dir)
-            plot_variance_distribution_boxplot(pan2_diff, entry["pan2_rssi"], bin_anchor_dbm(pan2_ch),
-                                               f"pan2_s_{suffix}.pdf", plot_dir)
-            plot_distance_vs_per_errorbar(
-                entry["pan2_dist"], entry["pan2_ul"],
-                entry["pan2_dist"], entry["pan2_dl"],
-                f"pan2_errorbar_{suffix}.pdf", plot_dir,
-            )
-
 
     print("--- Done ---")
 

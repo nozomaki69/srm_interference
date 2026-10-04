@@ -23,22 +23,14 @@ PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 # 測定モードごとに入出力を分ける。analyze_csv.py の --mode と同じ規約:
 #   td   : 各メトリックを自分の200s窓で測る時間分割測定 (接尾辞なし)
 #   conv : 全メトリックを W0 の200sで同時に測る従来方式 (接尾辞 _conv)
-# 統計量ごとの入出力:
-#   variance : ΔPER のビン内分散 (analyze_csv.py)      -> interference_detection_results*
-#   cv       : PER のビン内変動係数 (analyze_cv.py)     -> cv_detection_results*
-# cv は UL/DL を独立に判定するので link 次元が増え、図は2倍の枚数になる。
-def input_csv_path(suffix, statistic):
-    # analyze_cv.py は統計量ごとに cv_detection_results_{nvar,delta,links}*.csv を出す。
-    # --statistic cv は推奨既定の nvar を指す。delta / links を見たいときは --input を使う
-    # (analyze_cv.py が実行後にそのまま貼れるコマンドを表示する)。
-    stem = ("interference_detection_results" if statistic == "variance"
-            else "cv_detection_results_nvar")
-    return os.path.join(PLOT_BASE_DIR, f"{stem}{suffix}.csv")
+# 統計量は ΔPER のビン内分散ひとつ (analyze_csv.py の出力) だけ。
+def input_csv_path(suffix):
+    return os.path.join(PLOT_BASE_DIR,
+                        f"interference_detection_results{suffix}.csv")
 
 
-def output_dir_path(suffix, statistic):
-    stem = "heatmaps" if statistic == "variance" else "heatmaps_nvar"
-    return os.path.join(PLOT_BASE_DIR, f"{stem}{suffix}")
+def output_dir_path(suffix):
+    return os.path.join(PLOT_BASE_DIR, f"heatmaps{suffix}")
 
 LOAD_RANGE = list(OFFERED_LOAD_PERCENTS)
 MAX_LOAD = max(LOAD_RANGE)
@@ -145,22 +137,16 @@ def main():
         "--mode", choices=("td", "conv"), default="td",
         help="td: 時間分割測定の結果(既定) / conv: 従来方式(W0で同時測定)の結果")
     parser.add_argument(
-        "--statistic", choices=("variance", "cv"), default="variance",
-        help="variance: ΔPER のビン内分散(既定) / cv: cv_detection_results* を読む")
-    # analyze_cv.py は統計量ごとに別ファイルを出すので (nvar / delta / links)、
-    # フラグを増やさずに任意の CSV から図を作れるようにしておく。
-    # analyze_cv.py が実行後に、そのまま貼れるコマンドを表示する。
-    parser.add_argument(
         "--input", default=None,
-        help="入力 CSV を直接指定する (--statistic / --mode より優先)")
+        help="入力 CSV を直接指定する (--mode より優先)")
     parser.add_argument(
         "--out-dir", default=None,
-        help="出力ディレクトリを直接指定する (--statistic / --mode より優先)")
+        help="出力ディレクトリを直接指定する (--mode より優先)")
     args = parser.parse_args()
     suffix = "" if args.mode == "td" else "_conv"
 
-    input_csv = args.input or input_csv_path(suffix, args.statistic)
-    out_dir = args.out_dir or output_dir_path(suffix, args.statistic)
+    input_csv = args.input or input_csv_path(suffix)
+    out_dir = args.out_dir or output_dir_path(suffix)
     print(f"--- 入力: {input_csv}")
     print(f"--- 出力: {out_dir}/")
 

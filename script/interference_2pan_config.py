@@ -278,7 +278,7 @@ STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 # 「最も重く、かつ互いにほとんど区別がつかない」ものだった。そこでグリッドを
 # 20..100% の5値に絞る。ヒートマップは 5x5 になる。
 #
-# 副次的な効果として、全ての条件が load <= 100 になるので、verify_offered_load.py の
+# 副次的な効果として、全ての条件が load <= 100 になるので、オファードロード換算の
 # ratio 判定(過飽和側を除外していた)が全行に適用されるようになる。
 #
 # 注意: このグリッドを変えたら create_heatmap.py の LOAD_RANGE / max_load も

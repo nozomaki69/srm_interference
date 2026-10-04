@@ -9,7 +9,7 @@
 PAN2 の図では自分と相手が入れ替わったままラベルも無い。
 
 ここでは相手負荷 = 100% の1行だけを切り出し、自分 / 相手を明示的に読み替えて
-折れ線にする。設計と図の読み方は docs/detection_line_plots.md を参照。
+折れ線にする。設計と図の読み方は docs/README.md を参照。
 
   横軸: 自PAN負荷 20-100%
   縦軸: --metric で切り替え。f1 (既定) / auc。軸と参照線は METRIC_SPEC で指標ごと
@@ -50,7 +50,7 @@ BANDWIDTHS = sorted(set(A.CHANNEL_KBPS.values()))   # [50, 100, 200]
 # dataviz のカテゴリカル枠スロット 1-3。この3スロットは全ペア (all-pairs) で
 # light/dark 両モードのゲートを通ることが配色定義側に明記されている
 # (最悪ペアで CVD dE 9.2 light / 9.4 dark、通常視 dE 24.0 light / 20.9 dark)。
-# plot_cv_distribution.py:36-40 がスロット 1/2 を同じ出典で使っており、その延長。
+# (スロット 1/2 は以前 CV 分布図でも同じ出典で使っていた。それを3色に延長した。)
 #
 # ただしスロット3の aqua は light 面でコントラスト 3:1 を下回るため relief rule
 # (見えるラベルか表を添える) が要る。線3本の図では右端に直接ラベルを置き、
@@ -65,7 +65,7 @@ MODE_LABEL = {"conv": "conv", "td": "td"}
 MODES = ("conv", "td")
 
 # 図中のテキストは英語にする。計算機 (Linux) に日本語フォントが無いと豆腐文字に
-# なるため (plot_cv_distribution.py:42-43 と同じ規則)。
+# なるため。コメント・argparse ヘルプ・コンソール出力は日本語のままでよい。
 XLABEL = "Own PAN offered load [%]"
 
 # 指標ごとの軸と参照線。y 軸を固定するのは、図をまたいで比較できることが
@@ -107,7 +107,7 @@ def input_csv_path(mode):
 def load_series(csv_file, metric):
     """CSV を読み、{(own_bw, other_bw): {own_load: value}} を返す。
 
-    own / other の導出根拠は docs/detection_line_plots.md §2。
+    own / other の導出根拠は docs/README.md の「折れ線グラフ」節。
     bandwidth "AvsB" は PAN1=A kbps / PAN2=B kbps と読んでよい
     (get_bandwidth_label() のソートが TARGET_BANDWIDTH_PATTERNS 上では恒等のため)。
     """
@@ -119,8 +119,8 @@ def load_series(csv_file, metric):
         raise KeyError(
             f"{csv_file} に列 '{metric}' がありません。\n"
             f"  利用できる列: {', '.join(rows[0].keys())}\n"
-            f"  auc が無い場合は CSV が古いので、docs/detection_line_plots.md §8 の\n"
-            f"  手順で計算機の再解析 (script/sbatch_reanalyze.sh) を回してください。"
+            f"  auc が無い場合は CSV が古いので、./script/sbatch_reanalyze.sh で\n"
+            f"  解析をやり直してください。"
         )
 
     series = defaultdict(dict)
@@ -128,7 +128,6 @@ def load_series(csv_file, metric):
         a, b = (int(x) for x in r["bandwidth"].split("vs"))
         pan = r["pan"]
         # 検知を行っている側 (pan 列) が「自分」。
-        # 並び順は plot_cv_distribution.py:103-104 の慣例に合わせる。
         if pan == "PAN1":
             own_bw, other_bw = a, b
             own_load, other_load = int(r["pan1_offload"]), int(r["pan2_offload"])

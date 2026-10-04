@@ -19,10 +19,9 @@ PARSE_PARALLEL=50
 # configファイル生成スクリプト (ファイル名が違う場合はここを変更してください)
 GEN_CONFIG_SCRIPT="$SCRIPT_DIR/interference_2pan_config.py"
 
-# 全バッチ終了後に実行する解析スクリプト
-ANALYZE_SCRIPT="$SCRIPT_DIR/analyze_csv.py"
-# analyze_csv.py が出力した interference_detection_results.csv からヒートマップを作るスクリプト
-HEATMAP_SCRIPT="$SCRIPT_DIR/create_heatmap.py"
+# 全バッチ終了後に実行する解析。td/conv 両モードの検知結果CSV・ヒートマップ・
+# 折れ線グラフをまとめて作る (手順の定義元は run_analysis.sh 側に置く)。
+ANALYSIS_SCRIPT="$SCRIPT_DIR/run_analysis.sh"
 
 cd "$CMD_DIR" || exit
 
@@ -31,6 +30,31 @@ mkdir -p "$CMD_DIR/plots"
 MANIFEST_DIR="$CMD_DIR/plots/manifests"
 LOG_DIR="$CMD_DIR/plots/logs"
 mkdir -p "$MANIFEST_DIR" "$LOG_DIR"
+
+# SLURM のシミュレーションジョブは 30,000 件走るので、ログを全部残すと
+# .out/.err で 60,000 ファイルになる。書式を確認できるよう**一番最初に投入した
+# ジョブの分だけ**を残し、残りは削除する。
+# FIRST_SIM_JOB_ID は最初のバッチの1件目を投入した時点で一度だけ記録する。
+FIRST_SIM_JOB_ID=""
+
+prune_sim_logs() {
+    shopt -s nullglob
+    local logs=( "$LOG_DIR"/sim_*.out "$LOG_DIR"/sim_*.err )
+    shopt -u nullglob
+    [ ${#logs[@]} -eq 0 ] && return 0
+
+    local removed=0
+    for f in "${logs[@]}"; do
+        # 残すのは最初の1ジョブ分だけ
+        if [ -n "$FIRST_SIM_JOB_ID" ] && [[ "$(basename "$f")" == sim_${FIRST_SIM_JOB_ID}.* ]]; then
+            continue
+        fi
+        rm -f "$f" && removed=$((removed + 1))
+    done
+    if [ "$removed" -gt 0 ]; then
+        echo "SLURMログを $removed 件削除しました (残したのは sim_${FIRST_SIM_JOB_ID}.out/.err)。"
+    fi
+}
 
 if [ -f "$OUTPUT_CSV" ]; then
     echo "古いCSVファイルが見つかりました。削除してリセットします: $OUTPUT_CSV"
@@ -58,16 +82,6 @@ if [ "$STALE_COUNT" -gt 0 ]; then
         echo "エラー: 残留ファイルの削除に失敗しました。手動で掃除してから再実行してください。"
         exit 1
     fi
-fi
-
-# positions.csv は .pos を消したあとの再解析用キャッシュだが、analyze_csv.py は
-# .pos よりこちらを優先する。生成パラメータ (NUM_DEVICE / 通信範囲 / 帯域ペア) を
-# 変えてスイープし直した場合、ファイル名が同じなら古い座標が黙って使われてしまうので、
-# 新しいスイープを始めるこのタイミングで破棄する。
-POSITIONS_CSV="$CMD_DIR/plots/positions.csv"
-if [ -f "$POSITIONS_CSV" ]; then
-    echo "前回の座標キャッシュを削除します (古い座標が再利用されるのを防ぐため): $POSITIONS_CSV"
-    rm -f "$POSITIONS_CSV"
 fi
 
 # 全体のシミュレーション組み合わせ数を取得
@@ -139,6 +153,10 @@ while [ "$CURSOR" -lt "$TOTAL_COMBOS" ]; do
             exit 1
         fi
         JOB_IDS+=("$JID")
+        # 一番最初に投入したジョブのログだけ後で残す
+        if [ -z "$FIRST_SIM_JOB_ID" ]; then
+            FIRST_SIM_JOB_ID="$JID"
+        fi
     done
 
     # ジョブIDをカンマ区切りに変換 (例: 101,102,103)
@@ -281,6 +299,7 @@ while [ "$CURSOR" -lt "$TOTAL_COMBOS" ]; do
         rm -f "$CMD_DIR"/*.trace "$CMD_DIR"/*.config "$CMD_DIR"/*.stat "$CMD_DIR"/*.statconfig "$CMD_DIR"/*.done
         rm -f "${PARTIAL_CSVS[@]}"
         rm -f "$MANIFEST_DIR"/manifest_cursor${CURSOR}_*.txt
+        prune_sim_logs
     else
         echo "エラー: 集計処理中に問題が発生しました。調査のためこのバッチのファイルは残します。"
         exit 1
@@ -294,21 +313,14 @@ echo "========================================"
 echo "すべてのシミュレーションと集計が完了しました！"
 echo "========================================"
 
-echo "解析スクリプトを実行します: $ANALYZE_SCRIPT"
-if python3 "$ANALYZE_SCRIPT"; then
-    echo "解析が完了しました。"
-else
-    echo "エラー: $ANALYZE_SCRIPT の実行に失敗しました。"
+echo "解析と作図を実行します: $ANALYSIS_SCRIPT"
+if ! bash "$ANALYSIS_SCRIPT"; then
+    echo "エラー: $ANALYSIS_SCRIPT の実行に失敗しました。"
     exit 1
 fi
 
-echo "ヒートマップ生成スクリプトを実行します: $HEATMAP_SCRIPT"
-if python3 "$HEATMAP_SCRIPT"; then
-    echo "ヒートマップ生成が完了しました。"
-else
-    echo "エラー: $HEATMAP_SCRIPT の実行に失敗しました。"
-    exit 1
-fi
+# 最初のジョブのログだけ残して、残りを片付ける
+prune_sim_logs
 
 echo "========================================"
 echo "すべての処理が完了しました！"
