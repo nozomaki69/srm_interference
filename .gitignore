@@ -1,6 +1,10 @@
 # トレース集約の生データ。30,000ラン x 1,822列で数百MBになる
 plots/simulation_results.csv
 
+# .pos から抽出した座標のキャッシュ (87MB)。このブランチのコードは参照しないが、
+# 過去の実行で作られた実物が計算機に残っているので、誤ってコミットされないよう除外する。
+plots/positions.csv
+
 # SLURM のログと manifest (sbatch_jobs.sh が作る中間物)
 plots/logs/
 plots/manifests/
