@@ -12,7 +12,7 @@ PAN2 の図では自分と相手が入れ替わったままラベルも無い。
 折れ線にする。設計と図の読み方は docs/detection_line_plots.md を参照。
 
   横軸: 自PAN負荷 20-100%
-  縦軸: F1 (--metric で CSV の他の列にも切り替え可。将来 auc 列が入ったら --metric auc)
+  縦軸: --metric で切り替え。f1 (既定) / auc。軸と参照線は METRIC_SPEC で指標ごと
   色  : 相手の帯域 (50 / 100 / 200 kbps)
   線種: 測定モード (conv = 実線 / td = 点線)
 """
@@ -67,15 +67,33 @@ MODES = ("conv", "td")
 # 図中のテキストは英語にする。計算機 (Linux) に日本語フォントが無いと豆腐文字に
 # なるため (plot_cv_distribution.py:42-43 と同じ規則)。
 XLABEL = "Own PAN offered load [%]"
-METRIC_LABEL = {"f1": "F1 score", "auc": "AUC"}
 
-# 図をまたいで比較できるように y 軸は固定する。実測レンジは
-# td 0.717-0.945 / conv 0.813-1.000 (分散統計量, 10/2 時点)。
-YLIM = (0.65, 1.0)
+# 指標ごとの軸と参照線。y 軸を固定するのは、図をまたいで比較できることが
+# この図の目的だから (自動スケールにすると枚ごとに縮尺が変わって比較できない)。
+#
+#   f1  : 実測レンジは td 0.717-0.945 / conv 0.813-1.000 (分散統計量, 10/2 時点)。
+#         参照線 2/3 は全 Seed を「干渉あり」と判定したときの退化した F1
+#         (precision 0.5, recall 1.0)。これ以下は検知できていないのと同じ。
+#   auc : 参照線 0.5 はランダム判定。下限を 0.5 に置いて床を見せる。
+#         実データを見てから詰めてよい。
+METRIC_SPEC = {
+    "f1":  {"label": "F1 score", "ylim": (0.65, 1.0),
+            "ref": 2.0 / 3.0, "ref_label": "all-positive F1"},
+    "auc": {"label": "AUC", "ylim": (0.50, 1.0),
+            "ref": 0.5, "ref_label": "chance"},
+}
 
-# 全 Seed を「干渉あり」と判定したときの退化した F1 (precision 0.5, recall 1.0)。
-# これ以下は検知できていないのと同じ、という下限。
-DEGENERATE_F1 = 2.0 / 3.0
+# 未知の指標でも落とさず描く。縮尺の根拠も参照線の意味も決められないので、
+# 自動スケールにして参照線は引かない。
+DEFAULT_SPEC = {"label": None, "ylim": None, "ref": None, "ref_label": None}
+
+
+def metric_spec(metric):
+    spec = dict(DEFAULT_SPEC, **METRIC_SPEC.get(metric, {}))
+    if spec["label"] is None:
+        spec["label"] = metric
+    return spec
+
 
 GRID_KW = dict(color="0.85", linestyle="--", linewidth=0.8)
 
@@ -101,8 +119,8 @@ def load_series(csv_file, metric):
         raise KeyError(
             f"{csv_file} に列 '{metric}' がありません。\n"
             f"  利用できる列: {', '.join(rows[0].keys())}\n"
-            f"  auc を使いたい場合は docs/detection_line_plots.md §7 の手順で\n"
-            f"  analyze_csv.py に auc 列を追加し、計算機で再解析してください。"
+            f"  auc が無い場合は CSV が古いので、docs/detection_line_plots.md §8 の\n"
+            f"  手順で計算機の再解析 (script/sbatch_reanalyze.sh) を回してください。"
         )
 
     series = defaultdict(dict)
@@ -167,15 +185,18 @@ def _draw_panel(ax, data, own_bw, modes, metric, direct_labels):
                             color=COLOR[other_bw], fontsize=9,
                             va="center", fontweight="bold")
 
-    ax.axhline(DEGENERATE_F1, color="0.6", linewidth=1.0, linestyle="-",
-               zorder=0)
-    # 無印の水平線だと何の線か分からないので必ず注記する
-    ax.annotate("all-positive F1", xy=(max(loads), DEGENERATE_F1),
-                xytext=(0, 3), textcoords="offset points",
-                color="0.45", fontsize=8, ha="right", va="bottom")
+    spec = metric_spec(metric)
+    if spec["ref"] is not None:
+        ax.axhline(spec["ref"], color="0.6", linewidth=1.0, linestyle="-",
+                   zorder=0)
+        # 無印の水平線だと何の線か分からないので必ず注記する
+        ax.annotate(spec["ref_label"], xy=(max(loads), spec["ref"]),
+                    xytext=(0, 3), textcoords="offset points",
+                    color="0.45", fontsize=8, ha="right", va="bottom")
     ax.set_xticks(loads)
     ax.set_xlim(min(loads) - 5, max(loads) + 12)
-    ax.set_ylim(*YLIM)
+    if spec["ylim"] is not None:
+        ax.set_ylim(*spec["ylim"])
     ax.set_xlabel(XLABEL, fontsize=10)
     ax.set_title(f"Own PAN: {own_bw} kbps", fontsize=12)
     _style_axes(ax)
@@ -186,7 +207,7 @@ def plot_single(data, own_bw, modes, metric, out_dir, tag, fmt):
     direct = len(modes) == 1
     fig, ax = plt.subplots(figsize=(5.4, 4.4))
     _draw_panel(ax, data, own_bw, modes, metric, direct)
-    ax.set_ylabel(METRIC_LABEL.get(metric, metric), fontsize=10)
+    ax.set_ylabel(metric_spec(metric)["label"], fontsize=10)
     ax.legend(title=f"Other PAN ({OTHER_LOAD_PERCENT}% load)",
               loc="lower left", frameon=True, fontsize=9, title_fontsize=9)
     path = os.path.join(out_dir, f"{metric}_own{own_bw}_{tag}.{fmt}")
@@ -201,7 +222,7 @@ def plot_3panel(data, modes, metric, out_dir, tag, fmt):
     fig, axes = plt.subplots(1, 3, figsize=(14.0, 4.4), sharey=True)
     for ax, own_bw in zip(axes, BANDWIDTHS):
         _draw_panel(ax, data, own_bw, modes, metric, direct)
-    axes[0].set_ylabel(METRIC_LABEL.get(metric, metric), fontsize=10)
+    axes[0].set_ylabel(metric_spec(metric)["label"], fontsize=10)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, title=f"Other PAN ({OTHER_LOAD_PERCENT}% load)",
                loc="center left", bbox_to_anchor=(1.0, 0.5),

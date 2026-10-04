@@ -844,6 +844,35 @@ def evaluate_interference_detection(interf_values, no_interf_values):
     return best
 
 
+def _rank_auc(interf_values, no_interf_values):
+    """順位ベースの AUC。Mann-Whitney U / (n_pos * n_neg) と同じ。
+
+        AUC = P(指標_interf > 指標_no_interf) + 0.5 * P(同値)
+
+    F1 が「最良の1点」での性能なのに対し、AUC は閾値の選び方に依らない分離度を
+    表すので、両方を並べて見るために出す。
+
+    閾値グリッド上の台形則にしないのは、VARIANCE_THRESHOLDS が
+    np.arange(0.0, 1.001, 0.001) で 1.0 打ち切りのため (:757)。指標が 1.0 を
+    超える条件では ROC が途中で切れて AUC が頭打ちになる。生の値の順位なら
+    打ち切りが無い。
+
+    向きは補正しない。判定は `>= th` の片側固定 (:826) なので AUC の向きは一意で、
+    0.5 を下回ったら「指標が干渉の有無と逆相関している」という情報そのもの。
+    max(auc, 1 - auc) にすると、それが潰れる。
+
+    rankdata は同順位に midrank を与えるので、有効ビンが作れず指標が 0.0 に
+    固定された Seed (:789, :809) どうしの同値も正しく 0.5 として数えられる。
+    """
+    n_pos = len(interf_values)
+    n_neg = len(no_interf_values)
+    if n_pos == 0 or n_neg == 0:
+        return float("nan")
+
+    ranks = stats.rankdata(np.concatenate([interf_values, no_interf_values]))
+    return (ranks[:n_pos].sum() - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
+
+
 def run_interference_detection(data):
     """
     帯域幅の組み合わせ（例: 50vs50）ごとに、干渉あり/なしシナリオの
@@ -918,6 +947,9 @@ def run_interference_detection(data):
                 "recall": round(result["recall"], 3),
                 "fpr": round(result["fpr"], 3),
                 "f1": round(result["f1"], 3),
+                # 閾値の選び方に依らない分離度。定義は _rank_auc() を参照。
+                # 100x100 ペアなので刻みが 1e-4。他の指標より1桁多く残す。
+                "auc": round(_rank_auc(interf_values, no_interf_values), 4),
                 "n_interf_seeds": result["n_interf_seeds"],
                 "n_no_interf_seeds": result["n_no_interf_seeds"],
                 # 有効ビンが1つも作れず干渉指標が 0.0 に縮退したSeed数。
@@ -934,7 +966,7 @@ def save_interference_detection_csv(rows, output_path):
     fieldnames = [
         "bandwidth", "distance", "pan1_offload", "pan2_offload", "pan",
         "best_threshold", "TP", "FP", "FN", "TN",
-        "precision", "recall", "fpr", "f1",
+        "precision", "recall", "fpr", "f1", "auc",
         "n_interf_seeds", "n_no_interf_seeds",
         "n_degenerate_interf", "n_degenerate_no_interf",
     ]
@@ -956,6 +988,11 @@ def main():
         "--mode", choices=("td", "conv"), default="td",
         help="td: 各メトリックを自分の200s窓で測る時間分割測定(既定) / "
              "conv: 全メトリックを W0 の200sで同時に測る従来方式")
+    parser.add_argument(
+        "--no-plots", action="store_true",
+        help="条件別プロット(300条件 x 6枚)を飛ばし、検知結果CSVだけを作り直す。"
+             "列を1本足しただけの再解析ではプロットは変わらないので、"
+             "実行時間の大半を占めるこの工程を省ける")
     args = parser.parse_args()
     set_measurement_mode(args.mode)
     print(f"--- 測定モード: {MEASUREMENT_MODE} (列の接尾辞 '{COLUMN_SUFFIX}') ---")
@@ -978,42 +1015,48 @@ def main():
     # ビンの起点を固定値に変えた影響(端末が何台残るか)をここで実測値として出す。
     print_bin_diagnostics()
 
-    for condition_key, entry in data.items():
-        pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload = condition_key
+    if args.no_plots:
+        # 条件別プロットは検知結果CSVに一切関与しない (ここより前で書き終えている)。
+        # 列を足しただけの再解析では figures は変わらないので飛ばせる。
+        print("--- Skipping per-condition plots (--no-plots) ---")
+    else:
+        for condition_key, entry in data.items():
+            pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload = condition_key
 
-        interf_label = get_interf_label(pan1_ch, pan2_ch)
-        bw_label = get_bandwidth_label(pan1_ch, pan2_ch)
+            interf_label = get_interf_label(pan1_ch, pan2_ch)
+            bw_label = get_bandwidth_label(pan1_ch, pan2_ch)
 
-        # td と conv で図が上書きし合わないようディレクトリを分ける
-        plot_dir = os.path.join(PLOT_BASE_DIR, bw_label, f"{distance}m",
-                                interf_label + COLUMN_SUFFIX)
-        suffix = f"pan1_{pan1_offload}_pan2_{pan2_offload}"
+            # td と conv で図が上書きし合わないようディレクトリを分ける
+            plot_dir = os.path.join(PLOT_BASE_DIR, bw_label, f"{distance}m",
+                                    interf_label + COLUMN_SUFFIX)
+            suffix = f"pan1_{pan1_offload}_pan2_{pan2_offload}"
 
-        print(f"Plotting: {plot_dir} / {suffix}")
+            print(f"Plotting: {plot_dir} / {suffix}")
 
-        # --- PAN1 ---
-        pan1_diff = np.array(entry["pan1_dl"]) - np.array(entry["pan1_ul"])
-        plot_delta_per_analysis(pan1_diff, entry["pan1_rssi"], bin_anchor_dbm(pan1_ch),
-                                f"pan1_box_{suffix}.pdf", plot_dir)
-        plot_variance_distribution_boxplot(pan1_diff, entry["pan1_rssi"], bin_anchor_dbm(pan1_ch),
-                                           f"pan1_s_{suffix}.pdf", plot_dir)
-        plot_distance_vs_per_errorbar(
-            entry["pan1_dist"], entry["pan1_ul"],
-            entry["pan1_dist"], entry["pan1_dl"],
-            f"pan1_errorbar_{suffix}.pdf", plot_dir,
-        )
+            # --- PAN1 ---
+            pan1_diff = np.array(entry["pan1_dl"]) - np.array(entry["pan1_ul"])
+            plot_delta_per_analysis(pan1_diff, entry["pan1_rssi"], bin_anchor_dbm(pan1_ch),
+                                    f"pan1_box_{suffix}.pdf", plot_dir)
+            plot_variance_distribution_boxplot(pan1_diff, entry["pan1_rssi"], bin_anchor_dbm(pan1_ch),
+                                               f"pan1_s_{suffix}.pdf", plot_dir)
+            plot_distance_vs_per_errorbar(
+                entry["pan1_dist"], entry["pan1_ul"],
+                entry["pan1_dist"], entry["pan1_dl"],
+                f"pan1_errorbar_{suffix}.pdf", plot_dir,
+            )
 
-        # --- PAN2 ---
-        pan2_diff = np.array(entry["pan2_dl"]) - np.array(entry["pan2_ul"])
-        plot_delta_per_analysis(pan2_diff, entry["pan2_rssi"], bin_anchor_dbm(pan2_ch),
-                                f"pan2_box_{suffix}.pdf", plot_dir)
-        plot_variance_distribution_boxplot(pan2_diff, entry["pan2_rssi"], bin_anchor_dbm(pan2_ch),
-                                           f"pan2_s_{suffix}.pdf", plot_dir)
-        plot_distance_vs_per_errorbar(
-            entry["pan2_dist"], entry["pan2_ul"],
-            entry["pan2_dist"], entry["pan2_dl"],
-            f"pan2_errorbar_{suffix}.pdf", plot_dir,
-        )
+            # --- PAN2 ---
+            pan2_diff = np.array(entry["pan2_dl"]) - np.array(entry["pan2_ul"])
+            plot_delta_per_analysis(pan2_diff, entry["pan2_rssi"], bin_anchor_dbm(pan2_ch),
+                                    f"pan2_box_{suffix}.pdf", plot_dir)
+            plot_variance_distribution_boxplot(pan2_diff, entry["pan2_rssi"], bin_anchor_dbm(pan2_ch),
+                                               f"pan2_s_{suffix}.pdf", plot_dir)
+            plot_distance_vs_per_errorbar(
+                entry["pan2_dist"], entry["pan2_ul"],
+                entry["pan2_dist"], entry["pan2_dl"],
+                f"pan2_errorbar_{suffix}.pdf", plot_dir,
+            )
+
 
     print("--- Done ---")
 

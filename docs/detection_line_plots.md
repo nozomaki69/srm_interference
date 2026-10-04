@@ -141,28 +141,95 @@ python3 script/plot_detection_lines.py --out-dir <dir>
 python3 script/plot_detection_lines.py --td-csv <path> --conv-csv <path>
 ```
 
-## 7. AUC について
+## 7. AUC
 
-AUC も要望されているが、**今回は入っていない**。
+F1 と並べて AUC も出す。CSV の `auc` 列を使い、
+`python3 script/plot_detection_lines.py --metric auc` で同じ12枚が AUC 版で出る。
 
-`interference_detection_results*.csv` は最良閾値 1 点の混同行列しか持たず、ROC が
-引けない。`auc` ブランチには sklearn ベースの ROC 実装があるが、あちらは
-`analyze_csv.py` 自体を持たない別世代のツールチェーンで流用できない。
+### 定義
 
-入れるときの手順:
+順位ベースの AUC（Mann-Whitney U / (n_pos * n_neg) と同じ）。
 
-1. `analyze_csv.py:890-904` の `interf_values` / `no_interf_values`（Seed ごとの
-   最大ビン分散、各 100 要素）がそのまま使える。`evaluate_interference_detection()`
-   を呼ぶ直前に AUC を計算する。
-2. 分散の判定は `>= th` の片側のみ（`analyze_csv.py:826`）なので、
-   `roc_auc_score` をそのまま使ってよい。`analyze_cv.py` の方は `rule` が `ge`/`le` の
-   両方を取る（`analyze_cv.py:200-207`）ので、そちらに入れる場合は向きの扱いが要る。
-3. 退化した Seed は 0.0 に固定される（`analyze_csv.py:789, 809`）ため同値が多い。
-   粗い閾値グリッド上の台形則ではなく、順位ベースの tie 対応 AUC を使うこと。
-   `analyze_csv.py` は既に `scipy.stats` を import しているので
-   `scipy.stats.mannwhitneyu` でも出せる（sklearn 1.9.0 も利用可）。
-4. `fieldnames`（`analyze_csv.py:934-940`）に `auc` を追加。
-5. 計算機で `analyze_csv.py --mode td` と `--mode conv` を再実行して CSV を作り直す。
-   `plots/simulation_results.csv` が要るのでローカルでは完結しない。
-6. 図は `python3 script/plot_detection_lines.py --metric auc` を実行するだけ。
-   スクリプト側の変更は不要。
+```
+AUC = P(統計量_interf > 統計量_no_interf) + 0.5 * P(同値)
+```
+
+実装は `analyze_csv.py::_rank_auc()`。`scipy.stats.rankdata` で順位を取るだけで、
+新しい依存は増えていない（`analyze_csv.py:14` が既に `scipy.stats` を import している）。
+
+**閾値グリッド上の台形則にしない理由。** `VARIANCE_THRESHOLDS` は
+`np.arange(0.0, 1.001, 0.001)` で 1.0 打ち切り（`analyze_csv.py:757`）なので、
+統計量が 1.0 を超える条件では ROC が途中で切れて AUC が頭打ちになる。生の値の
+順位を使えば打ち切りが無い。同じ理由で、`best_threshold` が 1.0 に張り付いている
+セルでは F1 も頭打ちの可能性があることに注意（AUC はその影響を受けない）。
+
+**向きを補正しない理由。** 分散の判定は `>= th` の片側固定（`analyze_csv.py:826`）
+なので AUC の向きは一意に決まる。`max(auc, 1 - auc)` のような補正はしていない。
+0.5 を下回ったら「統計量が干渉の有無と逆相関している」という情報そのものなので、
+潰さずにそのまま出す。
+
+**同値の扱い。** 有効ビンが1つも作れなかった Seed は統計量が 0.0 に固定される
+（`analyze_csv.py:789, 809`）ので、原理的には同値が溜まり得る。`rankdata` は
+同順位に midrank を与えるため、同値ペアは正しく 0.5 として数えられる。
+なお 10/2 時点のデータでは退化 Seed は td / conv とも全300セルで0件だったので、
+現状これは効いていない（`n_degenerate_interf` / `n_degenerate_no_interf` 列で確認できる）。
+
+### 図の違い
+
+y 軸と参照線は指標ごとに変える（`plot_detection_lines.py` の `METRIC_SPEC`）。
+
+| 指標 | y 軸 | 参照線 |
+|---|---|---|
+| `f1` | `[0.65, 1.0]` | 2/3 ... 全 Seed を陽性と判定したときの退化した F1 |
+| `auc` | `[0.50, 1.0]` | 0.5 ... ランダム判定 (chance) |
+
+未知の指標名を渡した場合は y 軸を自動スケールにし、参照線は引かない。
+
+### `analyze_cv.py` には入れていない
+
+CV / nvar の方は `rule` が `ge` と `le` の両方を取り、セルごとに勝った向きが
+記録される（`analyze_cv.py:200-207`）。素の `AUC` は「高い方が陽性」を前提に
+するので、向きを揃える設計判断（`max(a, 1-a)` にするか、向き付きで出すか）が
+別途要る。そこを決めていないので入れていない。
+
+## 8. 計算機での再解析
+
+`auc` 列は既存の CSV には無いので、計算機で `analyze_csv.py` を回し直す必要がある。
+
+```sh
+git fetch && git checkout cv && git pull
+bash script/sbatch_reanalyze.sh          # td と conv を --no-plots で SLURM に投入
+# 完了後
+python3 script/plot_detection_lines.py --metric auc
+```
+
+### 再シミュレーションは不要
+
+必要なのは `plots/simulation_results.csv` だけ。
+
+`load_and_aggregate` は `.pos` を読んだ時点で座標を `plots/positions.csv` に
+**保存してから** `.pos` を消す（`analyze_csv.py:485-491`）。保存が削除より先なので、
+2回目以降は `positions.csv` だけで動く（`:472-476`）。
+
+さらに `positions.csv` も失われていた場合でも、**検知結果 CSV は正しく出る**。
+座標が無いと `_calc_distance` が NaN を返すが（`:580-586`）、`*_dist` を使うのは
+`plot_distance_vs_per_errorbar` だけで、`run_interference_detection` は
+`pan{1,2}_{dl,ul,rssi}` しか見ない（`:877-898`）。`--no-plots` ならそもそも無関係。
+
+> **注意**: `script/sbatch_jobs.sh:63-71` は新しいスイープの冒頭で
+> `plots/positions.csv` を削除する。キャッシュを残したいなら再解析の前に
+> `sbatch_jobs.sh` を回さないこと。
+
+### `--no-plots`
+
+`analyze_csv.py` は検知結果 CSV を書いた後（`:972-976`）に条件別プロットのループ
+（`:981-1016`）を回す。300条件 x 6枚 = **1,800枚/モード**で、しかも箱ひげ側は
+`run_interference_detection` が済ませたビニングを図ごとにやり直すため、ここが
+実行時間の大半を占める。
+
+列を追加しただけの再解析ではプロットは一切変わらないので `--no-plots` で飛ばす。
+2つの工程は完全に独立していて、CSV の方が先に完了している
+（`run_interference_detection` はプロット関数を呼ばず、プロットループは
+`interference_rows` を読まない）。
+
+図も作り直したいときは `bash script/sbatch_reanalyze.sh --with-plots`。
