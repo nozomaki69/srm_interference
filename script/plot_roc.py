@@ -44,18 +44,21 @@ BANDWIDTHS = L.BANDWIDTHS
 MODES = L.MODES
 
 # --- 配色 -------------------------------------------------------------
-# 1パネル内で変わるのは自PAN負荷で、これは順序のある量。カテゴリカル配色では
-# なく単一色相の濃淡 (dataviz の sequential、blue ランプ) を薄い->濃いで当てる。
-# 負荷が上がる = 検知が難しくなる方向を濃い色にしている。
+# 1パネルに自PAN負荷 5 段ぶんの曲線が重なる。以前は単一色相 (blue) の濃淡で
+# 「順序のある量」を表していたが、**5段を濃淡だけで分けると判別できない**。
+# 実測すると全ペアの最小 OKLab dE が通常視で 5.0、deuteran で 2.2 しかなく、
+# 色覚多様性の基準 (8) どころか通常視の床 (15) にも遠く届いていなかった。
+# マーカーで冗長符号化も試したが、階段状の曲線に点が乗ると逆に読みにくい。
 #
-# ランプの薄い側 (250 / 300) は白地でコントラストが 2:1 台しかなく線が見えない
-# ので使わない。濃い側に寄せた 350 / 450 / 500 / 600 / 700 を使う。
-LOAD_COLORS = ["#5598e7", "#2a78d6", "#256abf", "#184f95", "#0d366b"]
-
-# 濃い側に寄せたぶん隣接する段どうしが近くなるので、マーカーで冗長符号化する。
-# 階段状の曲線が潰れないよう markevery で間引く。
-LOAD_MARKERS = ["o", "s", "^", "D", "v"]
-MARKEVERY = 12
+# そこで色相を分ける。寒色->暖色の並びにして「負荷が上がる = 暖色」という
+# 順序感は残した (violet -> blue -> green -> orange -> red)。
+# いずれも白地でコントラスト 3:1 以上 (最小 3.2:1)。
+#
+# 注意: 5 色を1枚に重ねる以上、全ペアの CVD dE は 5.5 どまりで基準 8 には届かない
+# (カテゴリカル枠で全ペアを通せるのは3色まで、と配色定義側にも明記がある)。
+# 曲線が入れ子状に並ぶという位置の手がかりと、凡例が負荷の昇順で AUC 付きで
+# 並ぶことを併用して識別する前提。
+LOAD_COLORS = ["#4a3aa7", "#2a78d6", "#008300", "#eb6834", "#e34948"]
 
 GRID_KW = L.GRID_KW
 
@@ -130,8 +133,6 @@ def _draw_panel(ax, scores, own_bw, other_bw):
             continue
         fpr, tpr = roc_curve(cell["interf"], cell["no_interf"])
         ax.plot(fpr, tpr, color=LOAD_COLORS[i % len(LOAD_COLORS)],
-                marker=LOAD_MARKERS[i % len(LOAD_MARKERS)],
-                markersize=5, markevery=MARKEVERY,
                 linewidth=2.0,
                 label=f"{load}%  (AUC {auc_of(fpr, tpr):.3f})")
         n_drawn += 1
