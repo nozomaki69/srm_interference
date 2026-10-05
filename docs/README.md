@@ -8,7 +8,7 @@
 
 - **判定方法**: ΔPER の RSSI ビン内分散を閾値と比較する（1つだけ）
 - **測定モード**: td と conv の両方
-- **出力**: ヒートマップと折れ線グラフだけ
+- **出力**: ヒートマップ・折れ線グラフ・ROC 曲線
 - **実行**: `./script/sbatch_jobs.sh` 1本で、シミュレーションから図まで通る
 
 `cv` ブランチにあった変動係数 CV・正規化分散 nvar・CV 分布図・配置図・
@@ -109,7 +109,7 @@ conv は分母に `macCsmaFailCount` を足すとクリップが**厳密に 0 �
 ```
 
 これ1本で、config 生成 → シミュレーション → トレース解析 → td/conv 両モードの
-解析 → ヒートマップ → 折れ線グラフ まで通る。
+解析 → ヒートマップ → 折れ線グラフ → ROC 曲線 まで通る。
 
 パイプラインの形:
 
@@ -119,8 +119,9 @@ conv は分母に `macCsmaFailCount` を足すとクリップが**厳密に 0 �
 2. 各ランを `sim_worker_slurm.sh` 経由で SLURM に投入する。2,000 件ずつのバッチ
 3. `create_csv.py` が `.trace` を 50 並列で解析し `plots/simulation_results.csv` に集約。
    `.trace` は巨大なのでバッチごとに削除する
-4. `analyze_csv.py --mode {td,conv}` が検知結果 CSV を出す
-5. `create_heatmap.py --mode {td,conv}` と `plot_detection_lines.py` が図を出す
+4. `analyze_csv.py --mode {td,conv}` が検知結果 CSV と Seed 別スコア CSV を出す
+5. `create_heatmap.py --mode {td,conv}` / `plot_detection_lines.py` /
+   `plot_roc.py` が図を出す（手順は `run_analysis.sh` にまとめてある）
 
 解析だけやり直すときは `./script/sbatch_reanalyze.sh`（再シミュレーション不要。
 `plots/simulation_results.csv` だけあればよい）。
@@ -141,7 +142,9 @@ conv は分母に `macCsmaFailCount` を足すとクリップが**厳密に 0 �
 | `plots/interference_detection_results_conv.csv` | 検知結果 conv |
 | `plots/heatmaps/` | ヒートマップ td（6帯域ペア × 2 PAN = 12枚） |
 | `plots/heatmaps_conv/` | ヒートマップ conv（12枚） |
-| `plots/detection_lines/` | 折れ線グラフ（12枚 + 描画値の CSV） |
+| `plots/detection_lines/` | 折れ線グラフ（F1・AUC で12枚ずつ + 描画値の CSV） |
+| `plots/detection_scores{,_conv}.csv` | Seed ごとの干渉指標。ROC の入力 |
+| `plots/roc/` | ROC 曲線（6枚） |
 
 ### ヒートマップ
 
@@ -175,6 +178,30 @@ other_load = pan2_offload if pan == "PAN1" else pan1_offload
 **PAN1 のみを採る**。非対称ペアは片方の PAN しか該当しないので、全線を 1 PAN 分
 (100+100 Seed) に揃えてノイズ水準を均一にするため。
 
+### ROC 曲線
+
+`auc` 列は面積の数値でしかないので、「低 FPR 側で素直に立ち上がっているのか、
+高 FPR 側でようやく稼いでいるのか」が分からない。閾値をどこに置くかの議論も
+できない。そこで曲線そのものを描く。
+
+断面は折れ線グラフと揃えてあり、相手PAN負荷 = 100% に固定。
+1枚 = 自帯域 × 測定モードで 6 枚、1枚に 3 パネル（相手帯域）、
+1パネルに 5 本（自PAN負荷 20–100%）、凡例に AUC を併記する。
+色は順序のある量なので単一色相の濃淡（dataviz の blue ランプ 250→700）で、
+負荷が上がる＝検知が難しくなる方向を濃くしている。
+
+**ROC を引くには Seed ごとのスコアが要る。** 検知結果 CSV は最良閾値 1 点の
+混同行列しか持たず、そこからは曲線を復元できない。そこで `analyze_csv.py` が
+`plots/detection_scores{,_conv}.csv` にスコアを書き出す（300セル × 200 Seed）。
+これを残しておけば、155MB の `simulation_results.csv` を再解析しなくても
+曲線を引き直せるし、閾値の置き方を後から検討することもできる。
+
+曲線の計算で注意している点が 1 つある。**同じスコアの点は 1 点にまとめる。**
+同値を境に TP と FP が同時に増えるので、1 件ずつ点を打つと「先に TP だけ
+増えた」ように見えて階段が嘘になる。こうして引いた曲線の台形則面積は
+`_rank_auc()` が返す値と機械精度（1e-16）で一致することを検証してある。
+つまり**図に描いてある曲線の面積が、CSV の `auc` 列そのもの**である。
+
 ## 7. ファイル構成
 
 ```
@@ -184,15 +211,21 @@ script/
   create_csv.py                 .trace -> simulation_results.csv (td/conv 同時)
   analyze_csv.py                PER・RSSIビン・分散統計量・検知結果 CSV
   create_heatmap.py             ヒートマップ
-  plot_detection_lines.py       折れ線グラフ
+  plot_detection_lines.py       折れ線グラフ。own/other の読み替え規則の定義元
+  plot_roc.py                   ROC 曲線
+  run_analysis.sh               解析から作図までの手順。下の2つから呼ばれる
   sbatch_jobs.sh                全体の driver
-  sbatch_reanalyze.sh           解析だけやり直す
+  sbatch_reanalyze.sh           解析と作図だけやり直す
 template/                       Jinja2 テンプレート
 docs/README.md                  このファイル
 ```
 
-`analyze_csv.py` は検知結果 CSV を作るだけで、図は出さない。
-図は `create_heatmap.py` と `plot_detection_lines.py` の担当。
+`analyze_csv.py` は CSV を作るだけで、図は出さない。
+図は `create_heatmap.py` / `plot_detection_lines.py` / `plot_roc.py` の担当。
+
+自分 / 相手の読み替え規則は `plot_detection_lines.py::own_other()` が唯一の
+定義元で、`plot_roc.py` はそれを import して使う。2箇所に書くと片方だけ直して
+静かにずれるため。
 
 ## 8. ここで意図的にやっていないこと
 
@@ -200,6 +233,6 @@ docs/README.md                  このファイル
   分散を閾値と比べる判定は統計的に弱いという問題意識から試したもので、
   このブランチには持ち込んでいない
 - **条件別の箱ひげ図・距離-PER のエラーバー図・ノード配置図**。
-  ヒートマップと折れ線だけという方針のため
+  ヒートマップ・折れ線・ROC だけという方針のため
 - **PER のクリップの修正**。§3 のとおり把握しているが未修正
 - `base_simulator`（`source/simulator/`）の変更。ライセンス上の制約で触らない

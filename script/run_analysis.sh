@@ -10,6 +10,8 @@
 #   plots/interference_detection_results{,_conv}.csv
 #   plots/heatmaps{,_conv}/                             12枚ずつ
 #   plots/detection_lines/                              f1 と auc で12枚ずつ
+#   plots/detection_scores{,_conv}.csv                  Seed ごとの干渉指標
+#   plots/roc/                                          ROC 曲線 6枚
 
 set -uo pipefail
 
@@ -49,6 +51,13 @@ for METRIC in f1 auc; do
     fi
 done
 
+# ROC は td/conv それぞれのスコアCSVを両方読むので、ここも両モードが揃ってから。
+echo "--- ROC 曲線 ---"
+if ! python3 "$SCRIPT_DIR/plot_roc.py"; then
+    echo "エラー: plot_roc.py に失敗しました" >&2
+    exit 1
+fi
+
 echo "========================================"
 echo "解析と作図が完了しました"
 echo "  plots/interference_detection_results.csv       (td)"
@@ -56,4 +65,5 @@ echo "  plots/interference_detection_results_conv.csv  (conv)"
 echo "  plots/heatmaps/        $(ls "$CMD_DIR/plots/heatmaps" 2>/dev/null | wc -l | tr -d ' ') 枚"
 echo "  plots/heatmaps_conv/   $(ls "$CMD_DIR/plots/heatmaps_conv" 2>/dev/null | wc -l | tr -d ' ') 枚"
 echo "  plots/detection_lines/ $(ls "$CMD_DIR/plots/detection_lines" 2>/dev/null | wc -l | tr -d ' ') ファイル"
+echo "  plots/roc/             $(ls "$CMD_DIR/plots/roc" 2>/dev/null | wc -l | tr -d ' ') 枚"
 echo "========================================"

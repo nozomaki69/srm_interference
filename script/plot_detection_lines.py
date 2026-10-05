@@ -104,12 +104,41 @@ def input_csv_path(mode):
     return os.path.join(PLOT_BASE_DIR, f"interference_detection_results{suffix}.csv")
 
 
+def own_other(row):
+    """結果CSVの1行を「自分 / 相手」に読み替える。plot_roc.py と共有する。
+
+    検知を行っている側 (pan 列) が「自分」。bandwidth "AvsB" は PAN1=A kbps /
+    PAN2=B kbps と読んでよい ――ラベルを作る get_bandwidth_label() はソートする
+    が、TARGET_BANDWIDTH_PATTERNS が常に kbps(PAN1) <= kbps(PAN2) を満たすので
+    そのソートは恒等写像になる。導出根拠は docs/README.md の「折れ線グラフ」節。
+
+    この断面に入らない行 (相手負荷が OTHER_LOAD_PERCENT でない、対称ペアの
+    PAN2 側) は None を返す。対称ペアで PAN1 だけを採るのは、非対称ペアは
+    片方の PAN しか該当しないので、全系列を 1 PAN 分 (100+100 Seed) に揃えて
+    ノイズ水準を均一にするため。
+
+    規則を2箇所に書くと片方だけ直して静かにずれるので、ここを唯一の定義元にする。
+    """
+    a, b = (int(x) for x in row["bandwidth"].split("vs"))
+    pan = row["pan"]
+    if pan == "PAN1":
+        own_bw, other_bw = a, b
+        own_load, other_load = int(row["pan1_offload"]), int(row["pan2_offload"])
+    else:
+        own_bw, other_bw = b, a
+        own_load, other_load = int(row["pan2_offload"]), int(row["pan1_offload"])
+
+    if other_load != OTHER_LOAD_PERCENT:
+        return None
+    if a == b and pan != "PAN1":
+        return None
+    return {"own_bw": own_bw, "other_bw": other_bw, "own_load": own_load}
+
+
 def load_series(csv_file, metric):
     """CSV を読み、{(own_bw, other_bw): {own_load: value}} を返す。
 
-    own / other の導出根拠は docs/README.md の「折れ線グラフ」節。
-    bandwidth "AvsB" は PAN1=A kbps / PAN2=B kbps と読んでよい
-    (get_bandwidth_label() のソートが TARGET_BANDWIDTH_PATTERNS 上では恒等のため)。
+    自分 / 相手の読み替えと断面の絞り込みは own_other() が担当する。
     """
     with open(csv_file, "r", encoding="utf-8", newline="") as f:
         rows = list(csv.DictReader(f))
@@ -125,24 +154,10 @@ def load_series(csv_file, metric):
 
     series = defaultdict(dict)
     for r in rows:
-        a, b = (int(x) for x in r["bandwidth"].split("vs"))
-        pan = r["pan"]
-        # 検知を行っている側 (pan 列) が「自分」。
-        if pan == "PAN1":
-            own_bw, other_bw = a, b
-            own_load, other_load = int(r["pan1_offload"]), int(r["pan2_offload"])
-        else:
-            own_bw, other_bw = b, a
-            own_load, other_load = int(r["pan2_offload"]), int(r["pan1_offload"])
-
-        if other_load != OTHER_LOAD_PERCENT:
+        own = own_other(r)
+        if own is None:
             continue
-        # 対称ペアは PAN1/PAN2 の両方が該当してしまう。非対称ペアは片方しか無いので、
-        # 全線を 1 PAN 分 (100+100 Seed) に揃えるため PAN1 だけを採る。
-        if a == b and pan != "PAN1":
-            continue
-
-        series[(own_bw, other_bw)][own_load] = float(r[metric])
+        series[(own["own_bw"], own["other_bw"])][own["own_load"]] = float(r[metric])
     return series
 
 

@@ -497,17 +497,21 @@ def _rank_auc(interf_values, no_interf_values):
     F1 が「最良の1点」での性能なのに対し、AUC は閾値の選び方に依らない分離度を
     表すので、両方を並べて見るために出す。
 
-    閾値グリッド上の台形則にしないのは、VARIANCE_THRESHOLDS が
-    np.arange(0.0, 1.001, 0.001) で 1.0 打ち切りのため (:757)。指標が 1.0 を
-    超える条件では ROC が途中で切れて AUC が頭打ちになる。生の値の順位なら
-    打ち切りが無い。
+    閾値グリッド上の台形則にしないのは、VARIANCE_THRESHOLDS が 1.0 打ち切りの
+    固定グリッドだから。指標が 1.0 を超える条件では ROC が途中で切れて AUC が
+    頭打ちになる。生の値の順位なら打ち切りも刻み幅の影響も無い。
 
-    向きは補正しない。判定は `>= th` の片側固定 (:826) なので AUC の向きは一意で、
-    0.5 を下回ったら「指標が干渉の有無と逆相関している」という情報そのもの。
-    max(auc, 1 - auc) にすると、それが潰れる。
+    向きは補正しない。evaluate_interference_detection() の判定が `>= th` の
+    片側固定なので AUC の向きも一意に決まる。0.5 を下回ったら「指標が干渉の
+    有無と逆相関している」という情報そのもので、max(auc, 1 - auc) にすると
+    それが潰れる。
 
-    rankdata は同順位に midrank を与えるので、有効ビンが作れず指標が 0.0 に
-    固定された Seed (:789, :809) どうしの同値も正しく 0.5 として数えられる。
+    rankdata は同順位に midrank を与える。有効ビンが1つも作れなかった Seed は
+    compute_seed_max_variance() が max_var の初期値 0.0 をそのまま返すので
+    同値が溜まり得るが、midrank によりその組は正しく 0.5 として数えられる。
+
+    曲線そのものを見たいときは plot_roc.py。同じスコアから ROC を引くので、
+    その台形則面積はここで返す値と一致する。
     """
     n_pos = len(interf_values)
     n_neg = len(no_interf_values)
@@ -534,6 +538,9 @@ def run_interference_detection(data):
         groups[group_key][interf_label] = condition_key
 
     rows = []
+    # Seed ごとのスコア。ROC を引くのに要る (検知結果CSVは最良閾値1点の混同行列
+    # しか持たないので、そこからは曲線を復元できない)。
+    score_rows = []
     for (bw_label, distance, pan1_offload, pan2_offload), pair in sorted(groups.items()):
         if "interf" not in pair or "no_interf" not in pair:
             # 対になるシナリオ（干渉あり/なし両方）が揃っていない場合はスキップ
@@ -577,6 +584,22 @@ def run_interference_detection(data):
 
             result = evaluate_interference_detection(interf_values, no_interf_values)
 
+            # compute_seed_max_variance は Seed 順に返すので、添字が
+            # simulation_results.csv の Seed 番号と一致する。
+            for klass, values in (("interf", interf_values),
+                                  ("no_interf", no_interf_values)):
+                for seed, score in enumerate(values):
+                    score_rows.append({
+                        "bandwidth": bw_label,
+                        "distance": distance,
+                        "pan1_offload": pan1_offload,
+                        "pan2_offload": pan2_offload,
+                        "pan": pan_name,
+                        "klass": klass,
+                        "seed": seed,
+                        "score": f"{score:.9g}",
+                    })
+
             rows.append({
                 "bandwidth": bw_label,
                 "distance": distance,
@@ -604,7 +627,23 @@ def run_interference_detection(data):
                 "n_degenerate_no_interf": no_interf_degen,
             })
 
-    return rows
+    return rows, score_rows
+
+
+def save_detection_scores_csv(rows, output_path):
+    """Seed ごとの干渉指標を書き出す。ROC 曲線 (plot_roc.py) の入力。
+
+    検知結果CSVは最良閾値1点の混同行列しか持たないので、そこからは ROC を
+    復元できない。ここでスコアそのものを残しておけば、155MB の
+    simulation_results.csv を再解析しなくても曲線を引き直せる。
+    """
+    fieldnames = ["bandwidth", "distance", "pan1_offload", "pan2_offload",
+                  "pan", "klass", "seed", "score"]
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def save_interference_detection_csv(rows, output_path):
@@ -647,11 +686,16 @@ def main():
 
     # --- 干渉検知（帯域幅ペアごとに interf/no_interf を比較） ---
     print("--- Running interference detection analysis ---")
-    interference_rows = run_interference_detection(data)
+    interference_rows, score_rows = run_interference_detection(data)
     interference_csv_path = os.path.join(
         PLOT_BASE_DIR, f"interference_detection_results{COLUMN_SUFFIX}.csv")
     save_interference_detection_csv(interference_rows, interference_csv_path)
     print(f"--- Saved {len(interference_rows)} rows to {interference_csv_path} ---")
+
+    scores_csv_path = os.path.join(
+        PLOT_BASE_DIR, f"detection_scores{COLUMN_SUFFIX}.csv")
+    save_detection_scores_csv(score_rows, scores_csv_path)
+    print(f"--- Saved {len(score_rows)} score rows to {scores_csv_path} ---")
 
     # ビンの起点を固定値に変えた影響(端末が何台残るか)をここで実測値として出す。
     print_bin_diagnostics()
