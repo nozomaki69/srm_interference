@@ -29,8 +29,27 @@ def input_csv_path(suffix):
                         f"interference_detection_results{suffix}.csv")
 
 
-def output_dir_path(suffix):
-    return os.path.join(PLOT_BASE_DIR, f"heatmaps{suffix}")
+# 指標ごとの仕様。色の範囲は両方 0.5-1.0 で揃えてあるので、F1 版と AUC 版を
+# 並べて同じ濃さ = 同じ値として読める。
+#
+#   f1  : 最良閾値 tau での性能。その tau もセルに出す
+#   auc : 閾値に依らない分離度。**AUC に閾値という概念が無いので tau は出さない**。
+#         刻みが 1e-4 (100x100 ペア) なので F1 より1桁多い3桁で出す
+# cell_w はセル1つの幅(インチ)。"AUC=0.503" は F1 の "F1: 0.95" より横に長く、
+# 既定の 1.0 では隣のセルの文字とぶつかるので広げる。
+METRIC_SPEC = {
+    "f1":  {"column": "f1",  "dir": "heatmaps",     "decimals": 2,
+            "show_threshold": True,  "label": "F1",
+            "cell_w": 1.0, "fontsize": 9},
+    "auc": {"column": "auc", "dir": "heatmaps_auc", "decimals": 3,
+            "show_threshold": False, "label": "AUC",
+            "cell_w": 1.35, "fontsize": 8},
+}
+VMIN, VMAX = 0.5, 1.0
+
+
+def output_dir_path(suffix, metric):
+    return os.path.join(PLOT_BASE_DIR, f"{METRIC_SPEC[metric]['dir']}{suffix}")
 
 LOAD_RANGE = list(OFFERED_LOAD_PERCENTS)
 MAX_LOAD = max(LOAD_RANGE)
@@ -61,7 +80,8 @@ def load_data(path: str) -> pd.DataFrame:
     return df
 
 def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_dir: str,
-                 max_load: int = MAX_LOAD, link: str = None):
+                 metric: str = "f1", max_load: int = MAX_LOAD):
+    spec = METRIC_SPEC[metric]
     sub = df[
         (df["band_pair"] == band_pair)
         & (df["distance"] == distance)
@@ -69,66 +89,65 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
         & (df["pan1_load"] <= max_load)
         & (df["pan2_load"] <= max_load)
     ]
-    # cv 統計量は UL/DL を独立に判定するので、方向でも絞る
-    if link is not None:
-        sub = sub[sub["link"] == link]
     if sub.empty:
         return None
 
     sub = sub.drop_duplicates(subset=["pan1_load", "pan2_load"], keep="last")
 
-    f1_pivot = sub.pivot(index="pan1_load", columns="pan2_load", values="f1")
-    th_pivot = sub.pivot(index="pan1_load", columns="pan2_load", values="threshold")
+    # 縦が自PAN1負荷、横がPAN2負荷。create_heatmap は pan1/pan2 をそのまま軸にする
+    # (自分/相手への読み替えは折れ線側 plot_detection_lines.own_other() が行う)。
+    val_pivot = sub.pivot(index="pan1_load", columns="pan2_load", values=spec["column"])
+    th_pivot = (sub.pivot(index="pan1_load", columns="pan2_load", values="threshold")
+                if spec["show_threshold"] else None)
 
-    rows = sorted(set(LOAD_RANGE) | set(f1_pivot.index))
-    cols = sorted(set(LOAD_RANGE) | set(f1_pivot.columns))
-    f1_pivot = f1_pivot.reindex(index=rows, columns=cols)
-    th_pivot = th_pivot.reindex(index=rows, columns=cols)
+    rows = sorted(set(LOAD_RANGE) | set(val_pivot.index))
+    cols = sorted(set(LOAD_RANGE) | set(val_pivot.columns))
+    val_pivot = val_pivot.reindex(index=rows, columns=cols)
+    if th_pivot is not None:
+        th_pivot = th_pivot.reindex(index=rows, columns=cols)
 
     # Increased cell sizes to ensure text visibility
-    fig_w = 1.0 * len(cols)
+    fig_w = spec["cell_w"] * len(cols)
     fig_h = 0.9 * len(rows)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
-    im = ax.imshow(f1_pivot.values, cmap="YlGnBu", vmin=0.5, vmax=1, aspect="auto")
+    im = ax.imshow(val_pivot.values, cmap="YlGnBu", vmin=VMIN, vmax=VMAX, aspect="auto")
 
     ax.set_xticks(range(len(cols)))
     ax.set_xticklabels(cols)
     ax.set_yticks(range(len(rows)))
     ax.set_yticklabels(rows)
-    ax.invert_yaxis() 
-    
-    # Removed X-axis, Y-axis, and top titles as requested
+    ax.invert_yaxis()
 
-    for i, load1 in enumerate(rows):
-        for j, load2 in enumerate(cols):
-            f1_val = f1_pivot.iloc[i, j]
-            th_val = th_pivot.iloc[i, j]
-            if pd.isna(f1_val):
+    # 白文字に切り替える閾値。YlGnBu は正規化 0.6 あたりでようやく濃い青緑になるので、
+    # そこを境にする。以前は値 0.6 (正規化 0.2 = まだ薄い黄緑) で白にしており、
+    # 文字が背景に埋もれていた。
+    white_text_from = VMIN + 0.6 * (VMAX - VMIN)
+
+    for i, _ in enumerate(rows):
+        for j, _ in enumerate(cols):
+            val = val_pivot.iloc[i, j]
+            if pd.isna(val):
                 continue
-            text_color = "white" if f1_val > 0.6 else "black"
-            # Removed Japanese, changed to "Th=" to save space, increased font size
-            ax.text(
-                j, i, f"Tau: {th_val:.2f}\nF1: {f1_val:.2f}",
-                ha="center", va="center", color=text_color, fontsize=9, fontweight="bold"
-            )
+            text_color = "white" if val > white_text_from else "black"
+            if spec["show_threshold"]:
+                text = f"Tau: {th_pivot.iloc[i, j]:.2f}\n{spec['label']}: {val:.{spec['decimals']}f}"
+            else:
+                text = f"{spec['label']}={val:.{spec['decimals']}f}"
+            ax.text(j, i, text, ha="center", va="center",
+                    color=text_color, fontsize=spec["fontsize"], fontweight="bold")
 
-    cbar = fig.colorbar(im, ax=ax)
-    # Removed cbar label
+    fig.colorbar(im, ax=ax)
 
     fig.tight_layout()
     os.makedirs(out_dir, exist_ok=True)
     safe_band = str(band_pair).replace("/", "-")
-    
-    # Changed file extension to .pdf
-    link_tag = "" if link is None else f"_{link}"
-    fname = f"heatmap_{safe_band}_{distance}_{subject}{link_tag}.pdf"
+    fname = f"heatmap_{safe_band}_{distance}_{subject}.pdf"
     fpath = os.path.join(out_dir, fname)
-    
-    # Saved as PDF format
     fig.savefig(fpath, format="pdf", bbox_inches="tight")
     plt.close(fig)
     return fpath
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -137,33 +156,40 @@ def main():
         "--mode", choices=("td", "conv"), default="td",
         help="td: 時間分割測定の結果(既定) / conv: 従来方式(W0で同時測定)の結果")
     parser.add_argument(
+        "--metric", choices=tuple(METRIC_SPEC), default="f1",
+        help="f1: 最良閾値での F1 と tau (既定) / auc: 閾値に依らない AUC")
+    parser.add_argument(
         "--input", default=None,
         help="入力 CSV を直接指定する (--mode より優先)")
     parser.add_argument(
         "--out-dir", default=None,
-        help="出力ディレクトリを直接指定する (--mode より優先)")
+        help="出力ディレクトリを直接指定する (--mode / --metric より優先)")
     args = parser.parse_args()
     suffix = "" if args.mode == "td" else "_conv"
 
     input_csv = args.input or input_csv_path(suffix)
-    out_dir = args.out_dir or output_dir_path(suffix)
+    out_dir = args.out_dir or output_dir_path(suffix, args.metric)
     print(f"--- 入力: {input_csv}")
     print(f"--- 出力: {out_dir}/")
 
     df = load_data(input_csv)
+    column = METRIC_SPEC[args.metric]["column"]
+    if column not in df.columns:
+        raise KeyError(
+            f"{input_csv} に列 '{column}' がありません。\n"
+            f"  利用できる列: {', '.join(df.columns)}\n"
+            f"  CSV が古い場合は ./script/sbatch_reanalyze.sh で解析をやり直してください。")
 
     combos = df[["band_pair", "distance"]].drop_duplicates()
     subjects = sorted(df["subject"].unique())
-    links = sorted(df["link"].unique()) if "link" in df.columns else [None]
 
     saved = []
     for _, row in combos.iterrows():
         for subject in subjects:
-            for link in links:
-                path = make_heatmap(df, row["band_pair"], row["distance"], subject,
-                                    out_dir, link=link)
-                if path:
-                    saved.append(path)
+            path = make_heatmap(df, row["band_pair"], row["distance"], subject,
+                                out_dir, metric=args.metric)
+            if path:
+                saved.append(path)
 
     print(f"Created {len(saved)} heatmaps:")
     for p in saved:

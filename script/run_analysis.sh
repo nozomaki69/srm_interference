@@ -8,7 +8,7 @@
 #
 # 出力:
 #   plots/interference_detection_results{,_conv}.csv
-#   plots/heatmaps{,_conv}/                             12枚ずつ
+#   plots/heatmaps{,_conv}/ plots/heatmaps_auc{,_conv}/  12枚ずつ
 #   plots/detection_lines/                              f1 と auc で12枚ずつ
 #   plots/detection_scores{,_conv}.csv                  Seed ごとの干渉指標
 #   plots/roc/                                          ROC 曲線 6枚
@@ -35,35 +35,18 @@ for MODE in td conv; do
         exit 1
     fi
 
-    echo "--- ヒートマップ (--mode $MODE) ---"
-    if ! python3 "$SCRIPT_DIR/create_heatmap.py" --mode "$MODE"; then
-        echo "エラー: create_heatmap.py --mode $MODE に失敗しました" >&2
-        exit 1
-    fi
 done
 
-# 折れ線は td と conv を1枚に重ねるので、両モードのCSVが揃ってから。
-for METRIC in f1 auc; do
-    echo "--- 折れ線グラフ (--metric $METRIC) ---"
-    if ! python3 "$SCRIPT_DIR/plot_detection_lines.py" --metric "$METRIC"; then
-        echo "エラー: plot_detection_lines.py --metric $METRIC に失敗しました" >&2
-        exit 1
-    fi
-done
-
-# ROC は td/conv それぞれのスコアCSVを両方読むので、ここも両モードが揃ってから。
-echo "--- ROC 曲線 ---"
-if ! python3 "$SCRIPT_DIR/plot_roc.py"; then
-    echo "エラー: plot_roc.py に失敗しました" >&2
+# 作図は plot_figures.sh が唯一の定義元。手順を2箇所に書くと片方だけ直して
+# 静かにずれる (図の設定だけ変えたいときはそちらを単体で回せる)。
+if ! bash "$SCRIPT_DIR/plot_figures.sh"; then
+    echo "エラー: plot_figures.sh に失敗しました" >&2
     exit 1
 fi
 
 echo "========================================"
 echo "解析と作図が完了しました"
-echo "  plots/interference_detection_results.csv       (td)"
-echo "  plots/interference_detection_results_conv.csv  (conv)"
-echo "  plots/heatmaps/        $(ls "$CMD_DIR/plots/heatmaps" 2>/dev/null | wc -l | tr -d ' ') 枚"
-echo "  plots/heatmaps_conv/   $(ls "$CMD_DIR/plots/heatmaps_conv" 2>/dev/null | wc -l | tr -d ' ') 枚"
-echo "  plots/detection_lines/ $(ls "$CMD_DIR/plots/detection_lines" 2>/dev/null | wc -l | tr -d ' ') ファイル"
-echo "  plots/roc/             $(ls "$CMD_DIR/plots/roc" 2>/dev/null | wc -l | tr -d ' ') 枚"
+echo "  plots/interference_detection_results{,_conv}.csv   検知結果"
+echo "  plots/detection_scores{,_conv}.csv                 Seed ごとの指標"
+echo "  (図の一覧は上の plot_figures.sh の出力を参照)"
 echo "========================================"

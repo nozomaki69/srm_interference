@@ -126,6 +126,9 @@ conv は分母に `macCsmaFailCount` を足すとクリップが**厳密に 0 �
 解析だけやり直すときは `./script/sbatch_reanalyze.sh`（再シミュレーション不要。
 `plots/simulation_results.csv` だけあればよい）。
 
+**作図の設定だけ変えたときは `./script/plot_figures.sh`。** 既存の CSV から図を
+作り直すだけなので、155MB の `simulation_results.csv` を再パースしない。
+
 ### SLURM ログ
 
 シミュレーションは 30,000 ジョブ走るので、そのままだとログが 60,000 ファイルできる。
@@ -140,16 +143,31 @@ conv は分母に `macCsmaFailCount` を足すとクリップが**厳密に 0 �
 | `plots/simulation_results.csv` | トレースの集約（gitignore。巨大） |
 | `plots/interference_detection_results.csv` | 検知結果 td |
 | `plots/interference_detection_results_conv.csv` | 検知結果 conv |
-| `plots/heatmaps/` | ヒートマップ td（6帯域ペア × 2 PAN = 12枚） |
-| `plots/heatmaps_conv/` | ヒートマップ conv（12枚） |
+| `plots/heatmaps{,_conv}/` | F1 ヒートマップ（6帯域ペア × 2 PAN = 12枚ずつ） |
+| `plots/heatmaps_auc{,_conv}/` | AUC ヒートマップ（12枚ずつ） |
 | `plots/detection_lines/` | 折れ線グラフ（F1・AUC で12枚ずつ + 描画値の CSV） |
 | `plots/detection_scores{,_conv}.csv` | Seed ごとの干渉指標。ROC の入力 |
 | `plots/roc/` | ROC 曲線（6枚） |
 
 ### ヒートマップ
 
-自PAN負荷（縦）× 相手PAN負荷（横）の 5×5 格子に F1 を色で出す。
-1枚が (帯域ペア, PAN) の1組。
+PAN1 負荷（縦）× PAN2 負荷（横）の 5×5 格子に指標を色で出す。
+1枚が (帯域ペア, PAN) の1組で、`--metric` で F1 版と AUC 版を切り替える。
+
+| `--metric` | セルの文字 | 出力先 |
+|---|---|---|
+| `f1`（既定） | `Tau: x.xx` / `F1: x.xx` | `plots/heatmaps{,_conv}/` |
+| `auc` | `AUC=x.xxx` | `plots/heatmaps_auc{,_conv}/` |
+
+色の範囲は両方 **0.5–1.0** に揃えてあるので、F1 版と AUC 版を並べて
+「同じ濃さ＝同じ値」として読める。
+
+**AUC 版には閾値を出さない。** AUC は閾値の選び方に依らない指標で、
+τ という概念自体が無いため。AUC は刻みが 1e-4 なので F1 より1桁多い3桁で出す。
+
+なおこの図の軸は `pan1_offload` / `pan2_offload` そのもので、
+**自分 / 相手への読み替えはしていない**。`PAN2` の図では縦が相手、横が自分になる。
+読み替えた断面が見たいときは折れ線グラフのほう。
 
 ### 折れ線グラフ
 
@@ -216,7 +234,8 @@ script/
   create_heatmap.py             ヒートマップ
   plot_detection_lines.py       折れ線グラフ。own/other の読み替え規則の定義元
   plot_roc.py                   ROC 曲線
-  run_analysis.sh               解析から作図までの手順。下の2つから呼ばれる
+  plot_figures.sh               図だけ作り直す (解析は走らせない)
+  run_analysis.sh               解析から作図まで。下の2つから呼ばれる
   sbatch_jobs.sh                全体の driver
   sbatch_reanalyze.sh           解析と作図だけやり直す
 template/                       Jinja2 テンプレート

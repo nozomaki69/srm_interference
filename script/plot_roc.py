@@ -47,12 +47,16 @@ MODES = L.MODES
 # 1パネル内で変わるのは自PAN負荷で、これは順序のある量。カテゴリカル配色では
 # なく単一色相の濃淡 (dataviz の sequential、blue ランプ) を薄い->濃いで当てる。
 # 負荷が上がる = 検知が難しくなる方向を濃い色にしている。
-# ランプの段は 250 / 350 / 450 / 550 / 700。
-LOAD_COLORS = ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#0d366b"]
+#
+# ランプの薄い側 (250 / 300) は白地でコントラストが 2:1 台しかなく線が見えない
+# ので使わない。濃い側に寄せた 350 / 450 / 500 / 600 / 700 を使う。
+LOAD_COLORS = ["#5598e7", "#2a78d6", "#256abf", "#184f95", "#0d366b"]
 
-# 一番薄い段は light 面でコントラストが 3:1 に届かないので relief rule が要る。
-# 凡例に負荷と AUC を文字で併記し、スコアの実体を detection_scores*.csv に
-# 残してあることで対応する。
+# 濃い側に寄せたぶん隣接する段どうしが近くなるので、マーカーで冗長符号化する。
+# 階段状の曲線が潰れないよう markevery で間引く。
+LOAD_MARKERS = ["o", "s", "^", "D", "v"]
+MARKEVERY = 12
+
 GRID_KW = L.GRID_KW
 
 # 図中のテキストは英語。計算機 (Linux) に日本語フォントが無いと豆腐になるため。
@@ -126,6 +130,8 @@ def _draw_panel(ax, scores, own_bw, other_bw):
             continue
         fpr, tpr = roc_curve(cell["interf"], cell["no_interf"])
         ax.plot(fpr, tpr, color=LOAD_COLORS[i % len(LOAD_COLORS)],
+                marker=LOAD_MARKERS[i % len(LOAD_MARKERS)],
+                markersize=5, markevery=MARKEVERY,
                 linewidth=2.0,
                 label=f"{load}%  (AUC {auc_of(fpr, tpr):.3f})")
         n_drawn += 1
