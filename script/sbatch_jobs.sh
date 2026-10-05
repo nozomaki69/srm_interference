@@ -62,15 +62,14 @@ if [ -f "$OUTPUT_CSV" ]; then
 fi
 
 # 前回実行時の残留ファイルをクリーンアップ
-# 注意: .pos はバッチ完了時には消さず、解析スクリプト(analyze_csv.py等)が
-# 全バッチ終了後に参照した時点で削除する運用のため、この起動時クリーンアップで
-# まとめて消える。まだ解析していない前回分の .pos が残っている場合は、
-# このスクリプトを再実行する前に analyze_csv.py を実行しておくこと。
+# 正常に完走していればバッチごとに消えているので、ここで引っかかるのは
+# 途中で異常終了した回の残骸だけ。安全網として残してある。
 #
-# glob 展開 + rm ではなく find -delete を使う理由: .pos はスイープ中ずっと
-# 溜まり続けて最大12万件になるため、`rm -f *.pos` だと引数リストが ARG_MAX
-# (約2MB) を超えて "Argument list too long" で失敗する。しかも従来はその失敗を
-# チェックしていなかったので、前回の残骸を抱えたまま次のスイープが走っていた。
+# glob 展開 + rm ではなく find -delete を使う理由: 異常終了の仕方によっては
+# 数万件が残り得て、`rm -f *.pos` だと引数リストが ARG_MAX (約2MB) を超えて
+# "Argument list too long" で失敗するため。しかも従来はその失敗をチェック
+# していなかったので、前回の残骸を抱えたまま次のスイープが走っていた。
+# (バッチ内のクリーンアップのほうは1バッチ=2000件までなので glob で足りる。)
 STALE_COUNT=$(find "$CMD_DIR" -maxdepth 1 -type f \
     \( -name '*.config' -o -name '*.pos' -o -name '*.statconfig' \
        -o -name '*.trace' -o -name '*.stat' -o -name '*.done' \) | wc -l)
@@ -293,10 +292,27 @@ while [ "$CURSOR" -lt "$TOTAL_COMBOS" ]; do
             cat "$pcsv" >> "$OUTPUT_CSV"
         done
 
-        # .pos は解析スクリプト(analyze_csv.py)が全バッチ終了後に距離計算のため
-        # 参照するので、ここでは削除しない。参照された時点でそちらが削除する。
-        echo "マージ成功！このバッチの .trace / .config / .stat / .statconfig / .done / 部分CSV / manifest を削除します..."
-        rm -f "$CMD_DIR"/*.trace "$CMD_DIR"/*.config "$CMD_DIR"/*.stat "$CMD_DIR"/*.statconfig "$CMD_DIR"/*.done
+        # .pos をここで消してよい理由: .pos を読むのはシミュレータだけで
+        # (TEMPLATE.config.j2 の mobility-trace-file)、しかもそのラン自身の実行中に
+        # 限られる。ここは当バッチの sim 完了バリアと .trace 解析完了バリアの
+        # 両方より後ろなので、走行中のランと競合しない。次バッチの .pos はまだ
+        # 生成されていないので、グロブが拾うのは当バッチ分だけ。
+        #
+        # 以前は「解析スクリプトが全バッチ終了後に距離計算のため参照する」ので
+        # 残していたが、条件別プロットを外した際に analyze_csv.py から座標まわりを
+        # すべて削除したため、もう読み手はいない。
+        #
+        # 起動時のクリーンアップと同じく glob + rm ではなく find -delete を使う。
+        # 1バッチ2000ラン x 6種 x パス長170バイト程度 = 約2MB で ARG_MAX に達し、
+        # "Argument list too long" で削除が失敗する (6種を1行に並べると確実に超える)。
+        echo "マージ成功！このバッチの .trace / .config / .pos / .stat / .statconfig / .done / 部分CSV / manifest を削除します..."
+        if ! find "$CMD_DIR" -maxdepth 1 -type f \
+            \( -name '*.trace' -o -name '*.config' -o -name '*.pos' \
+               -o -name '*.stat' -o -name '*.statconfig' -o -name '*.done' \) -delete; then
+            echo "エラー: このバッチの中間ファイルの削除に失敗しました。"
+            echo "       ディスクを圧迫するので手動で掃除してください。"
+            exit 1
+        fi
         rm -f "${PARTIAL_CSVS[@]}"
         rm -f "$MANIFEST_DIR"/manifest_cursor${CURSOR}_*.txt
         prune_sim_logs

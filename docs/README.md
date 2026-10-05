@@ -118,7 +118,12 @@ conv は分母に `macCsmaFailCount` を足すとクリップが**厳密に 0 �
    （12帯域ペア × 負荷 5×5 × Seed 100 = 30,000 ラン）
 2. 各ランを `sim_worker_slurm.sh` 経由で SLURM に投入する。2,000 件ずつのバッチ
 3. `create_csv.py` が `.trace` を 50 並列で解析し `plots/simulation_results.csv` に集約。
-   `.trace` は巨大なのでバッチごとに削除する
+   中間ファイル（`.config`/`.pos`/`.statconfig`/`.trace`/`.stat`/`.done`）は
+   バッチの集計が済んだ時点でまとめて削除する。`.trace` が巨大なのが主な理由だが、
+   `.pos` も 30,000 ラン分で約 187MB 溜まる。
+   いずれもシミュレーション中にしか読まれないので、バッチ完了後は残す必要がない
+   （`.pos` を読むのはシミュレータだけ ―― `TEMPLATE.config.j2` の
+   `mobility-trace-file`）
 4. `analyze_csv.py --mode {td,conv}` が検知結果 CSV と Seed 別スコア CSV を出す
 5. `create_heatmap.py --mode {td,conv}` / `plot_detection_lines.py` /
    `plot_roc.py` が図を出す（手順は `run_analysis.sh` にまとめてある）
