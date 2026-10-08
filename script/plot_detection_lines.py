@@ -66,7 +66,9 @@ MODES = ("conv", "td")
 
 # 図中のテキストは英語にする。計算機 (Linux) に日本語フォントが無いと豆腐文字に
 # なるため。コメント・argparse ヘルプ・コンソール出力は日本語のままでよい。
-XLABEL = "Own PAN offered load [%]"
+#
+# 軸ラベルとタイトルは入れない (横軸 = 自PAN負荷 [%]、縦軸 = 指標)。
+# 図のキャプションで説明する前提。
 
 # 指標ごとの軸と参照線。y 軸を固定するのは、図をまたいで比較できることが
 # この図の目的だから (自動スケールにすると枚ごとに縮尺が変わって比較できない)。
@@ -96,6 +98,29 @@ def metric_spec(metric):
 
 
 GRID_KW = dict(color="0.85", linestyle="--", linewidth=0.8)
+
+# --- 論文向けの体裁 -----------------------------------------------------
+# タイトルと軸ラベルは入れない (図のキャプションで説明する前提)。そのぶん
+# 目盛りの数字・目盛り線・凡例を大きくして、縮小しても読めるようにする。
+# plot_roc.py もここから import して同じ体裁にする。
+TICK_LABELSIZE = 20     # 目盛りの数字
+TICK_LENGTH = 10        # 目盛り線の長さ
+TICK_WIDTH = 2.0        # 目盛り線の太さ
+LEGEND_FONTSIZE = 18
+ANNOT_FONTSIZE = 15     # 参照線の注記、線の直接ラベル
+
+
+def style_axes(ax):
+    """グリッド・枠線・目盛りをまとめて整える。"""
+    ax.grid(True, **GRID_KW)
+    ax.set_axisbelow(True)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color("0.4")
+        ax.spines[side].set_linewidth(TICK_WIDTH)
+    ax.tick_params(axis="both", which="major", labelsize=TICK_LABELSIZE,
+                   length=TICK_LENGTH, width=TICK_WIDTH)
 
 
 def input_csv_path(mode):
@@ -161,15 +186,6 @@ def load_series(csv_file, metric):
     return series
 
 
-def _style_axes(ax):
-    ax.grid(True, **GRID_KW)
-    ax.set_axisbelow(True)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    for side in ("left", "bottom"):
-        ax.spines[side].set_color("0.4")
-
-
 def _draw_panel(ax, data, own_bw, modes, metric, direct_labels):
     """1つの軸に、ある自帯域についての線を引く。
 
@@ -195,8 +211,8 @@ def _draw_panel(ax, data, own_bw, modes, metric, direct_labels):
                 # relief rule 対応。凡例と重複するが、色が薄いスロットでも
                 # どの線がどれか図だけで分かるようにする。
                 ax.annotate(f"{other_bw}k", xy=(xs[-1], ys[-1]),
-                            xytext=(5, 0), textcoords="offset points",
-                            color=COLOR[other_bw], fontsize=9,
+                            xytext=(6, 0), textcoords="offset points",
+                            color=COLOR[other_bw], fontsize=ANNOT_FONTSIZE,
                             va="center", fontweight="bold")
 
     spec = metric_spec(metric)
@@ -205,25 +221,21 @@ def _draw_panel(ax, data, own_bw, modes, metric, direct_labels):
                    zorder=0)
         # 無印の水平線だと何の線か分からないので必ず注記する
         ax.annotate(spec["ref_label"], xy=(max(loads), spec["ref"]),
-                    xytext=(0, 3), textcoords="offset points",
-                    color="0.45", fontsize=8, ha="right", va="bottom")
+                    xytext=(0, 4), textcoords="offset points",
+                    color="0.45", fontsize=ANNOT_FONTSIZE, ha="right", va="bottom")
     ax.set_xticks(loads)
     ax.set_xlim(min(loads) - 5, max(loads) + 12)
     if spec["ylim"] is not None:
         ax.set_ylim(*spec["ylim"])
-    ax.set_xlabel(XLABEL, fontsize=10)
-    ax.set_title(f"Own PAN: {own_bw} kbps", fontsize=12)
-    _style_axes(ax)
+    style_axes(ax)
 
 
 def plot_single(data, own_bw, modes, metric, out_dir, tag, fmt):
     """自帯域1つ分の図を1枚描く。"""
     direct = len(modes) == 1
-    fig, ax = plt.subplots(figsize=(5.4, 4.4))
+    fig, ax = plt.subplots(figsize=(7.2, 5.8))
     _draw_panel(ax, data, own_bw, modes, metric, direct)
-    ax.set_ylabel(metric_spec(metric)["label"], fontsize=10)
-    ax.legend(title=f"Other PAN ({OTHER_LOAD_PERCENT}% load)",
-              loc="lower left", frameon=True, fontsize=9, title_fontsize=9)
+    ax.legend(loc="lower left", frameon=True, fontsize=LEGEND_FONTSIZE)
     path = os.path.join(out_dir, f"{metric}_own{own_bw}_{tag}.{fmt}")
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
@@ -233,14 +245,12 @@ def plot_single(data, own_bw, modes, metric, out_dir, tag, fmt):
 def plot_3panel(data, modes, metric, out_dir, tag, fmt):
     """自帯域3つを横並びのサブプロットにした1枚。"""
     direct = len(modes) == 1
-    fig, axes = plt.subplots(1, 3, figsize=(14.0, 4.4), sharey=True)
+    fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.8), sharey=True)
     for ax, own_bw in zip(axes, BANDWIDTHS):
         _draw_panel(ax, data, own_bw, modes, metric, direct)
-    axes[0].set_ylabel(metric_spec(metric)["label"], fontsize=10)
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, title=f"Other PAN ({OTHER_LOAD_PERCENT}% load)",
-               loc="center left", bbox_to_anchor=(1.0, 0.5),
-               frameon=True, fontsize=9, title_fontsize=9)
+    fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.5),
+               frameon=True, fontsize=LEGEND_FONTSIZE)
     fig.tight_layout()
     path = os.path.join(out_dir, f"{metric}_3panel_{tag}.{fmt}")
     fig.savefig(path, bbox_inches="tight")

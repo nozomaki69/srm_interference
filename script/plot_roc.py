@@ -68,10 +68,11 @@ LOAD_COLORS = [
 LINEWIDTH = 2.8
 
 GRID_KW = L.GRID_KW
+# 体裁は折れ線側と共有する (plot_detection_lines が定義元)
+LEGEND_FONTSIZE = L.LEGEND_FONTSIZE
 
-# 図中のテキストは英語。計算機 (Linux) に日本語フォントが無いと豆腐になるため。
-XLABEL = "False positive rate"
-YLABEL = "True positive rate"
+# 軸ラベルとタイトルは入れない (横軸 = FPR、縦軸 = TPR)。
+# 図のキャプションで説明する前提。
 
 
 def input_csv_path(mode):
@@ -149,35 +150,24 @@ def _draw_panel(ax, scores, own_bw, other_bw):
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.set_aspect("equal")
-    ax.set_xlabel(XLABEL, fontsize=10)
-    ax.set_title(f"Other PAN: {other_bw} kbps", fontsize=11)
-    ax.grid(True, **GRID_KW)
-    ax.set_axisbelow(True)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    for side in ("left", "bottom"):
-        ax.spines[side].set_color("0.4")
+    L.style_axes(ax)
     # データが無いパネルに空の凡例枠だけ出ると紛らわしい
     if n_drawn:
-        ax.legend(title="Own PAN load", loc="lower right",
-                  frameon=True, fontsize=8, title_fontsize=8)
+        ax.legend(loc="lower right", frameon=True, fontsize=LEGEND_FONTSIZE)
     else:
-        ax.text(0.5, 0.5, "no data", transform=ax.transAxes,
-                ha="center", va="center", color="0.55", fontsize=10)
+        ax.text(0.5, 0.5, "no data", transform=ax.transAxes, ha="center",
+                va="center", color="0.55", fontsize=L.ANNOT_FONTSIZE)
 
 
 def plot_single(scores, own_bw, other_bw, mode, out_dir, fmt):
     """1条件 (自帯域 x 相手帯域 x モード) を1枚に描く。
 
     _draw_panel() が1パネル分を完結して描くので、呼び出し方を変えるだけ。
-    ただし単独図では「どの条件か」が図の中に無いと分からないので、
-    _draw_panel が付ける "Other PAN: X kbps" を上書きして自帯域とモードも入れる
-    (3パネル版ではこれを suptitle が担っている)。
+    どの条件かはファイル名 roc_own{A}_other{B}_{mode} で区別する
+    (図中にタイトルは入れない)
     """
-    fig, ax = plt.subplots(figsize=(4.8, 4.8))
+    fig, ax = plt.subplots(figsize=(6.6, 6.6))
     _draw_panel(ax, scores, own_bw, other_bw)
-    ax.set_ylabel(YLABEL, fontsize=10)
-    ax.set_title(f"Own {own_bw} kbps / Other {other_bw} kbps  ({mode})", fontsize=11)
     fig.tight_layout()
     path = os.path.join(out_dir, f"roc_own{own_bw}_other{other_bw}_{mode}.{fmt}")
     fig.savefig(path, bbox_inches="tight")
@@ -187,13 +177,10 @@ def plot_single(scores, own_bw, other_bw, mode, out_dir, fmt):
 
 def plot_one(scores, own_bw, mode, out_dir, fmt):
     """相手帯域 3 つを横並びにした1枚 (--layout panel)。"""
-    fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.8))
+    # パネルは左から相手帯域 50 / 100 / 200 kbps の順 (タイトルは入れない)
+    fig, axes = plt.subplots(1, 3, figsize=(19.0, 6.6))
     for ax, other_bw in zip(axes, BANDWIDTHS):
         _draw_panel(ax, scores, own_bw, other_bw)
-    axes[0].set_ylabel(YLABEL, fontsize=10)
-    fig.suptitle(f"Own PAN: {own_bw} kbps   "
-                 f"(other PAN at {L.OTHER_LOAD_PERCENT}% load, {mode})",
-                 fontsize=12)
     fig.tight_layout()
     path = os.path.join(out_dir, f"roc_own{own_bw}_{mode}.{fmt}")
     fig.savefig(path, bbox_inches="tight")

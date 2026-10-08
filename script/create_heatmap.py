@@ -16,6 +16,8 @@ sys.path.insert(0, SCRIPT_DIR)
 # 範囲外のセルが黙って捨てられる (以前 LOAD_RANGE / max_load が 10..100 固定のまま
 # 残っており、負荷100%超を追加しても描画されないバグがあった)。
 from interference_2pan_config import OFFERED_LOAD_PERCENTS  # noqa: E402
+# 目盛りの体裁は折れ線・ROC と共有する (plot_detection_lines が定義元)
+from plot_detection_lines import TICK_LABELSIZE, TICK_LENGTH, TICK_WIDTH  # noqa: E402
 # 結果ファイル(interference_detection_results.csv)・出力先(heatmaps/)は
 # いずれも scripts/ の1つ上の plots/ 以下にある(analyze_csv.py の PLOT_BASE_DIR と同じ場所)
 PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
@@ -35,15 +37,16 @@ def input_csv_path(suffix):
 #   f1  : 最良閾値 tau での性能。その tau もセルに出す
 #   auc : 閾値に依らない分離度。**AUC に閾値という概念が無いので tau は出さない**。
 #         刻みが 1e-4 (100x100 ペア) なので F1 より1桁多い3桁で出す
-# cell_w はセル1つの幅(インチ)。"AUC=0.503" は F1 の "F1: 0.95" より横に長く、
-# 既定の 1.0 では隣のセルの文字とぶつかるので広げる。
+# cell_w はセル1つの幅(インチ)、fontsize はセル内の文字の大きさ。
+# "AUC=0.503" は F1 の "F1: 0.95" より横に長いぶん広く取る。
+# 文字を大きくした (9/8 -> 13) のに合わせて幅も広げてある。
 METRIC_SPEC = {
     "f1":  {"column": "f1",  "dir": "heatmaps",     "decimals": 2,
             "show_threshold": True,  "label": "F1",
-            "cell_w": 1.0, "fontsize": 9},
+            "cell_w": 1.65, "fontsize": 13},
     "auc": {"column": "auc", "dir": "heatmaps_auc", "decimals": 3,
             "show_threshold": False, "label": "AUC",
-            "cell_w": 1.35, "fontsize": 8},
+            "cell_w": 1.85, "fontsize": 13},
 }
 VMIN, VMAX = 0.5, 1.0
 
@@ -108,7 +111,7 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
 
     # Increased cell sizes to ensure text visibility
     fig_w = spec["cell_w"] * len(cols)
-    fig_h = 0.9 * len(rows)
+    fig_h = 1.25 * len(rows)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
     im = ax.imshow(val_pivot.values, cmap="YlGnBu", vmin=VMIN, vmax=VMAX, aspect="auto")
@@ -118,18 +121,24 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
     ax.set_yticks(range(len(rows)))
     ax.set_yticklabels(rows)
     ax.invert_yaxis()
+    # 目盛りは折れ線・ROC と同じ大きさに揃える (軸ラベルとタイトルは入れない)
+    ax.tick_params(axis="both", which="major", labelsize=TICK_LABELSIZE,
+                   length=TICK_LENGTH, width=TICK_WIDTH)
 
-    # 白文字に切り替える閾値。YlGnBu は正規化 0.6 あたりでようやく濃い青緑になるので、
-    # そこを境にする。以前は値 0.6 (正規化 0.2 = まだ薄い黄緑) で白にしており、
-    # 文字が背景に埋もれていた。
-    white_text_from = VMIN + 0.6 * (VMAX - VMIN)
+    # 白文字に切り替える閾値。YlGnBu 上で白文字と黒文字の WCAG コントラストを
+    # 計算すると、入れ替わるのは値 0.838 (正規化 0.676) のところ。
+    #   値 0.80 -> 白 3.30:1 / 黒 6.36:1   黒のほうが読める
+    #   値 0.85 -> 白 5.14:1 / 黒 4.09:1   白のほうが読める
+    # 以前は 0.80 を境にしていたため、0.80〜0.84 の帯が「白文字だが黒のほうが
+    # 読みやすい」状態になっていた。切り替えを実際の交点に合わせる。
+    WHITE_TEXT_FROM = 0.84
 
     for i, _ in enumerate(rows):
         for j, _ in enumerate(cols):
             val = val_pivot.iloc[i, j]
             if pd.isna(val):
                 continue
-            text_color = "white" if val > white_text_from else "black"
+            text_color = "white" if val > WHITE_TEXT_FROM else "black"
             if spec["show_threshold"]:
                 text = f"Tau: {th_pivot.iloc[i, j]:.2f}\n{spec['label']}: {val:.{spec['decimals']}f}"
             else:
@@ -137,7 +146,9 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
             ax.text(j, i, text, ha="center", va="center",
                     color=text_color, fontsize=spec["fontsize"], fontweight="bold")
 
-    fig.colorbar(im, ax=ax)
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.ax.tick_params(labelsize=TICK_LABELSIZE, length=TICK_LENGTH,
+                        width=TICK_WIDTH)
 
     fig.tight_layout()
     os.makedirs(out_dir, exist_ok=True)
