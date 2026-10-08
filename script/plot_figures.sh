@@ -14,7 +14,7 @@
 #   plots/heatmaps{,_conv}/        F1 ヒートマップ      12枚ずつ
 #   plots/heatmaps_auc{,_conv}/    AUC ヒートマップ     12枚ずつ
 #   plots/detection_lines/         折れ線 f1 / auc      12枚ずつ + 描画値CSV
-#   plots/roc/                     ROC 曲線             6枚
+#   plots/roc/                     ROC 曲線             18枚 (1条件1枚)
 #
 # 解析からやり直したいときは ./script/sbatch_reanalyze.sh (こちらも最後にこれを呼ぶ)。
 

@@ -12,9 +12,11 @@
 
 断面は折れ線グラフ (plot_detection_lines.py) と揃えてある:
   相手PAN負荷 = 100% に固定
-  1枚   = 自帯域 x 測定モード            -> roc_own{50,100,200}_{conv,td}
-  1枚に 3パネル (相手帯域 50/100/200 kbps)
-  1パネルに 5本 (自PAN負荷 20-100%)、凡例に AUC を併記
+  1枚に 5本 (自PAN負荷 20-100%)、凡例に AUC を併記
+
+--layout で1枚の粒度を選ぶ:
+  single (既定) 1条件1枚  roc_own{A}_other{B}_{mode}  3x3x2 = 18枚
+  panel         相手帯域3つを横並び roc_own{A}_{mode}  3x2   =  6枚
 """
 
 import os
@@ -164,7 +166,27 @@ def _draw_panel(ax, scores, own_bw, other_bw):
                 ha="center", va="center", color="0.55", fontsize=10)
 
 
+def plot_single(scores, own_bw, other_bw, mode, out_dir, fmt):
+    """1条件 (自帯域 x 相手帯域 x モード) を1枚に描く。
+
+    _draw_panel() が1パネル分を完結して描くので、呼び出し方を変えるだけ。
+    ただし単独図では「どの条件か」が図の中に無いと分からないので、
+    _draw_panel が付ける "Other PAN: X kbps" を上書きして自帯域とモードも入れる
+    (3パネル版ではこれを suptitle が担っている)。
+    """
+    fig, ax = plt.subplots(figsize=(4.8, 4.8))
+    _draw_panel(ax, scores, own_bw, other_bw)
+    ax.set_ylabel(YLABEL, fontsize=10)
+    ax.set_title(f"Own {own_bw} kbps / Other {other_bw} kbps  ({mode})", fontsize=11)
+    fig.tight_layout()
+    path = os.path.join(out_dir, f"roc_own{own_bw}_other{other_bw}_{mode}.{fmt}")
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 def plot_one(scores, own_bw, mode, out_dir, fmt):
+    """相手帯域 3 つを横並びにした1枚 (--layout panel)。"""
     fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.8))
     for ax, other_bw in zip(axes, BANDWIDTHS):
         _draw_panel(ax, scores, own_bw, other_bw)
@@ -184,6 +206,9 @@ def main():
     p.add_argument("--td-csv", default=None, help="td の Seed 別スコア CSV")
     p.add_argument("--conv-csv", default=None, help="conv の Seed 別スコア CSV")
     p.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
+    p.add_argument("--layout", default="single", choices=("single", "panel"),
+                   help="single: 1条件1枚 (既定、18枚) / "
+                        "panel: 相手帯域3つを横並びにした1枚 (6枚)")
     p.add_argument("--format", default="pdf", choices=("pdf", "png"),
                    help="出力形式 (既定: pdf)。目視確認には png")
     args = p.parse_args()
@@ -207,7 +232,12 @@ def main():
         print(f"    条件 {len(scores)}/{expected}")
 
         for own_bw in BANDWIDTHS:
-            written.append(plot_one(scores, own_bw, mode, args.out_dir, args.format))
+            if args.layout == "single":
+                for other_bw in BANDWIDTHS:
+                    written.append(plot_single(scores, own_bw, other_bw, mode,
+                                               args.out_dir, args.format))
+            else:
+                written.append(plot_one(scores, own_bw, mode, args.out_dir, args.format))
 
     print(f"\n--- {args.out_dir} に {len(written)} ファイル出力 ---")
     for path in written:
