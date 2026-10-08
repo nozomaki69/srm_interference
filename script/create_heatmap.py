@@ -39,14 +39,14 @@ def input_csv_path(suffix):
 #         刻みが 1e-4 (100x100 ペア) なので F1 より1桁多い3桁で出す
 # cell_w はセル1つの幅(インチ)、fontsize はセル内の文字の大きさ。
 # "AUC=0.503" は F1 の "F1: 0.95" より横に長いぶん広く取る。
-# 文字を大きくした (9/8 -> 13) のに合わせて幅も広げてある。
+# セルの高さ (CELL_H) より幅をかなり大きく取って横長にしてある。
 METRIC_SPEC = {
     "f1":  {"column": "f1",  "dir": "heatmaps",     "decimals": 2,
             "show_threshold": True,  "label": "F1",
-            "cell_w": 1.65, "fontsize": 13},
+            "cell_w": 2.30, "fontsize": 17},
     "auc": {"column": "auc", "dir": "heatmaps_auc", "decimals": 3,
             "show_threshold": False, "label": "AUC",
-            "cell_w": 1.85, "fontsize": 13},
+            "cell_w": 2.55, "fontsize": 17},
 }
 VMIN, VMAX = 0.5, 1.0
 
@@ -109,9 +109,10 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
     if th_pivot is not None:
         th_pivot = th_pivot.reindex(index=rows, columns=cols)
 
-    # Increased cell sizes to ensure text visibility
+    # セル1つの高さ(インチ)。幅 (cell_w) をこれより大きく取ることで横長にする。
+    CELL_H = 1.15
     fig_w = spec["cell_w"] * len(cols)
-    fig_h = 1.25 * len(rows)
+    fig_h = CELL_H * len(rows)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
     im = ax.imshow(val_pivot.values, cmap="YlGnBu", vmin=VMIN, vmax=VMAX, aspect="auto")
