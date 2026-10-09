@@ -194,8 +194,11 @@ def _draw_panel(ax, data, own_bw, modes, metric):
     modes: 描くモードのタプル。1つなら単独図、2つなら比較図。
     """
     loads = sorted(OFFERED_LOAD_PERCENTS)
-    for other_bw in BANDWIDTHS:
-        for mode in modes:
+    # モードを外側で回すので、凡例は「実線 50/100/200 -> 点線 50/100/200」の順に
+    # 並ぶ (MODES = conv, td で conv が実線)。帯域を外側にすると
+    # 50実線/50点線/100実線/... と交互になって読みにくい。
+    for mode in modes:
+        for other_bw in BANDWIDTHS:
             pts = data[mode].get((own_bw, other_bw))
             if not pts:
                 continue
