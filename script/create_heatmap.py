@@ -23,8 +23,8 @@ from plot_detection_lines import TICK_LABELSIZE, TICK_LENGTH, TICK_WIDTH  # noqa
 PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 
 # 測定モードごとに入出力を分ける。analyze_csv.py の --mode と同じ規約:
-#   td   : 各メトリックを自分の200s窓で測る時間分割測定 (接尾辞なし)
-#   conv : 全メトリックを W0 の200sで同時に測る従来方式 (接尾辞 _conv)
+#   sequential   : 各メトリックを自分の200s窓で順に測る (接尾辞なし)
+#   simultaneous : 全メトリックを W0 の200sで同時に測る参照 (接尾辞 _simultaneous)
 # 統計量は ΔPER のビン内分散ひとつ (analyze_csv.py の出力) だけ。
 def input_csv_path(suffix):
     return os.path.join(PLOT_BASE_DIR,
@@ -76,7 +76,7 @@ def load_data(path: str) -> pd.DataFrame:
         raise FileNotFoundError(
             f"Input CSV not found: {path}\n"
             f"先に analyze_csv.py を同じモードで実行してください "
-            f"(例: python3 script/analyze_csv.py --mode conv)"
+            f"(例: python3 script/analyze_csv.py --mode simultaneous)"
         )
     df = pd.read_csv(path)
     df = df.rename(columns=COLUMN_RENAME)
@@ -165,8 +165,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="干渉検知結果のヒートマップ。測定モードで入出力を切り替える。")
     parser.add_argument(
-        "--mode", choices=("td", "conv"), default="td",
-        help="td: 時間分割測定の結果(既定) / conv: 従来方式(W0で同時測定)の結果")
+        "--mode", choices=("sequential", "simultaneous"), default="sequential",
+        help="sequential: 時間分割測定の結果(既定) / "
+             "simultaneous: W0で同時測定した参照の結果")
     parser.add_argument(
         "--metric", choices=tuple(METRIC_SPEC), default="f1",
         help="f1: 最良閾値での F1 と tau (既定) / auc: 閾値に依らない AUC")
@@ -177,7 +178,7 @@ def main():
         "--out-dir", default=None,
         help="出力ディレクトリを直接指定する (--mode / --metric より優先)")
     args = parser.parse_args()
-    suffix = "" if args.mode == "td" else "_conv"
+    suffix = "" if args.mode == "sequential" else "_simultaneous"
 
     input_csv = args.input or input_csv_path(suffix)
     out_dir = args.out_dir or output_dir_path(suffix, args.metric)

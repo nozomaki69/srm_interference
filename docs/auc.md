@@ -56,7 +56,7 @@ Seed ごとに次を計算する（`compute_seed_max_variance()`）。
 **F1 と AUC はこの同じ 2 本の配列を共有する。** 統計量を変えているわけではなく、
 同じスコアに対する 2 通りの要約である。
 
-スコアそのものは `plots/detection_scores{,_conv}.csv` に残してある
+スコアそのものは `plots/detection_scores{,_simultaneous}.csv` に残してある
 （300 セル × 200 Seed = 60,000 行）。検知結果 CSV は最良閾値 1 点の混同行列しか
 持たないので、そこからは ROC を復元できないため。これを残しておけば 155MB の
 `simulation_results.csv` を再解析せずに曲線を引き直せる。
@@ -140,7 +140,7 @@ AUC = 9.0 / (4×3) = 0.75
 
 同値が出る経路は実在する。有効ビン（端末 2 個以上）が 1 つも作れなかった Seed は
 `compute_seed_max_variance()` が `max_var` の初期値 0.0 をそのまま返すため。
-実データでは退化 Seed は td/conv とも 0 件だった（CSV の `n_degenerate_*` 列）。
+実データでは退化 Seed は sequential/simultaneous とも 0 件だった（CSV の `n_degenerate_*` 列）。
 
 ### 端のケースと丸め
 
@@ -158,7 +158,7 @@ AUC = 9.0 / (4×3) = 0.75
 ## 4. AUC ヒートマップ
 
 `create_heatmap.py --metric auc` で、PAN1負荷 × PAN2負荷の 5×5 格子に AUC を
-色で出す（`plots/heatmaps_auc{,_conv}/`、12枚ずつ）。1枚が (帯域ペア, PAN) の1組。
+色で出す（`plots/heatmaps_auc{,_simultaneous}/`、12枚ずつ）。1枚が (帯域ペア, PAN) の1組。
 
 色の範囲は F1 版と同じ **0.5–1.0** に揃えてあるので、2つを並べて
 「同じ濃さ＝同じ値」として読める。
@@ -228,7 +228,7 @@ idx = np.r_[np.where(np.diff(scores))[0], len(scores) - 1]
 
 ```
  +---------------------------+
- |  Own 200 kbps / Other 50 kbps  (td)
+ |  Own 200 kbps / Other 50 kbps  (sequential)
  |   TPR                     |
  |    |  5本 (自負荷20-100%) |
  |    +-- FPR                |
@@ -273,7 +273,7 @@ idx = np.r_[np.where(np.diff(scores))[0], len(scores) - 1]
 
 ## 6. 検証
 
-実データ（td/conv 各 300 セル、各セル 100+100 Seed）で以下を確認済み。
+実データ（sequential/simultaneous 各 300 セル、各セル 100+100 Seed）で以下を確認済み。
 
 | 検証項目 | 結果 |
 |---|---|
@@ -301,16 +301,16 @@ idx = np.r_[np.where(np.diff(scores))[0], len(scores) - 1]
 
 | | AUC 中央値 | F1 中央値 |
 |---|---|---|
-| conv | **0.966** | 0.912 |
-| td | **0.824** | 0.769 |
+| simultaneous | **0.966** | 0.912 |
+| sequential | **0.824** | 0.769 |
 
-conv が明確に上。時間分割（td）のコストがここに出ている。
+simultaneous が明確に上。時間分割（sequential）のコストがここに出ている。
 
 ### 自PAN負荷が上がると落ちる
 
 自PAN負荷別の AUC 中央値:
 
-| 自PAN負荷 | conv | td |
+| 自PAN負荷 | simultaneous | sequential |
 |---:|---:|---:|
 | 20% | 0.998 | 0.897 |
 | 40% | 0.996 | 0.900 |
@@ -323,14 +323,14 @@ conv が明確に上。時間分割（td）のコストがここに出ている�
 
 ### AUC < 0.5 のセル
 
-td で 6/300、conv で 1/300。**7 件すべてで相手PAN負荷が 20%** だった。
+sequential で 6/300、simultaneous で 1/300。**7 件すべてで相手PAN負荷が 20%** だった。
 
 ```
-自100kbps 相200kbps  自負荷100% 相負荷 20%  AUC 0.4705   (td)
-自200kbps 相100kbps  自負荷100% 相負荷 20%  AUC 0.4775   (td)
-自100kbps 相 50kbps  自負荷 60% 相負荷 20%  AUC 0.4797   (td)
+自100kbps 相200kbps  自負荷100% 相負荷 20%  AUC 0.4705   (sequential)
+自200kbps 相100kbps  自負荷100% 相負荷 20%  AUC 0.4775   (sequential)
+自100kbps 相 50kbps  自負荷 60% 相負荷 20%  AUC 0.4797   (sequential)
 ...
-自100kbps 相 50kbps  自負荷100% 相負荷 20%  AUC 0.4762   (conv)
+自100kbps 相 50kbps  自負荷100% 相負荷 20%  AUC 0.4762   (simultaneous)
 ```
 
 相手がほとんど送信していないので**検知すべき干渉が実質存在せず**、2 群が区別

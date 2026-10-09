@@ -49,9 +49,9 @@ fi
 # 行数は 6帯域ペア x 25負荷 x 2PAN = 300。
 EXPECTED_ROWS=300
 STATUS=0
-for SUFFIX in "" "_conv"; do
+for SUFFIX in "" "_simultaneous"; do
     CSV="$CMD_DIR/plots/interference_detection_results${SUFFIX}.csv"
-    LABEL="${SUFFIX:-_td}"
+    LABEL="${SUFFIX:-_sequential}"
     if [ ! -f "$CSV" ]; then
         echo "エラー: $CSV がありません" >&2
         STATUS=1
@@ -76,5 +76,6 @@ fi
 
 echo "========================================"
 echo "再解析が完了しました"
-echo "  plots/heatmaps/ plots/heatmaps_conv/ plots/detection_lines/"
+echo "  plots/heatmaps{,_simultaneous}/ plots/heatmaps_auc{,_simultaneous}/"
+echo "  plots/detection_lines/ plots/roc/"
 echo "========================================"

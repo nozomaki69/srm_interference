@@ -7,12 +7,12 @@
 # その必要は無い。
 #
 # 入力 (いずれも analyze_csv.py が作る):
-#   plots/interference_detection_results{,_conv}.csv   検知結果 (f1 / auc 列)
-#   plots/detection_scores{,_conv}.csv                 Seed ごとの指標 (ROC の入力)
+#   plots/interference_detection_results{,_simultaneous}.csv   検知結果 (f1 / auc 列)
+#   plots/detection_scores{,_simultaneous}.csv                 Seed ごとの指標 (ROC の入力)
 #
 # 出力:
-#   plots/heatmaps{,_conv}/        F1 ヒートマップ      12枚ずつ
-#   plots/heatmaps_auc{,_conv}/    AUC ヒートマップ     12枚ずつ
+#   plots/heatmaps{,_simultaneous}/        F1 ヒートマップ      12枚ずつ
+#   plots/heatmaps_auc{,_simultaneous}/    AUC ヒートマップ     12枚ずつ
 #   plots/detection_lines/         折れ線 f1 / auc      12枚ずつ + 描画値CSV
 #   plots/roc/                     ROC 曲線             18枚 (1条件1枚)
 #
@@ -26,8 +26,8 @@ PLOTS="$CMD_DIR/plots"
 
 # 入力が欠けたまま走らせると、途中まで作って中途半端な状態になる。先に全部見る。
 MISSING=0
-for f in "interference_detection_results.csv" "interference_detection_results_conv.csv" \
-         "detection_scores.csv" "detection_scores_conv.csv"; do
+for f in "interference_detection_results.csv" "interference_detection_results_simultaneous.csv" \
+         "detection_scores.csv" "detection_scores_simultaneous.csv"; do
     if [ ! -f "$PLOTS/$f" ]; then
         echo "エラー: 入力CSVがありません: plots/$f" >&2
         MISSING=1
@@ -49,13 +49,13 @@ run() {
 }
 
 # ヒートマップ: 測定モード x 指標
-for MODE in td conv; do
+for MODE in sequential simultaneous; do
     for METRIC in f1 auc; do
         run "$SCRIPT_DIR/create_heatmap.py" --mode "$MODE" --metric "$METRIC"
     done
 done
 
-# 折れ線は td と conv を1枚に重ねるので、モードを跨いで1回ずつ
+# 折れ線は sequential と simultaneous を1枚に重ねるので、モードを跨いで1回ずつ
 for METRIC in f1 auc; do
     run "$SCRIPT_DIR/plot_detection_lines.py" --metric "$METRIC"
 done
@@ -67,10 +67,10 @@ count() { ls "$1" 2>/dev/null | wc -l | tr -d ' '; }
 
 echo "========================================"
 echo "作図が完了しました"
-echo "  plots/heatmaps/            $(count "$PLOTS/heatmaps") 枚   (F1, td)"
-echo "  plots/heatmaps_conv/       $(count "$PLOTS/heatmaps_conv") 枚   (F1, conv)"
-echo "  plots/heatmaps_auc/        $(count "$PLOTS/heatmaps_auc") 枚   (AUC, td)"
-echo "  plots/heatmaps_auc_conv/   $(count "$PLOTS/heatmaps_auc_conv") 枚   (AUC, conv)"
+echo "  plots/heatmaps/            $(count "$PLOTS/heatmaps") 枚   (F1, sequential)"
+echo "  plots/heatmaps_simultaneous/       $(count "$PLOTS/heatmaps_simultaneous") 枚   (F1, simultaneous)"
+echo "  plots/heatmaps_auc/        $(count "$PLOTS/heatmaps_auc") 枚   (AUC, sequential)"
+echo "  plots/heatmaps_auc_simultaneous/   $(count "$PLOTS/heatmaps_auc_simultaneous") 枚   (AUC, simultaneous)"
 echo "  plots/detection_lines/     $(count "$PLOTS/detection_lines") ファイル"
 echo "  plots/roc/                 $(count "$PLOTS/roc") 枚"
 echo "========================================"

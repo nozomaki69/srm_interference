@@ -76,20 +76,22 @@ RSSI_BIN_ANCHOR_OFFSET_DBM = 3.0
 
 # --- 測定モード -------------------------------------------------------
 # create_csv.py は1つのトレースから2通りの測定結果を出している:
-#   td   : 各メトリックを自分の 200s 窓で測る (標準に忠実な時間分割測定)。既存の列名
-#   conv : 全メトリックを W0 の 200s で同時に測る (従来方式の対照)。列名 + "_conv"
+#   sequential   : 各メトリックを自分の 200s 窓で順に測る。標準に忠実。既存の列名
+#   simultaneous : 全メトリックを W0 の 200s で同時に測る。IEEE 802.15.4 では
+#                  実現できないので、時間分割のコストを測るための参照 (上界)。
+#                  列名 + "_simultaneous"
 # どちらを解析するかで参照する列の接尾辞と出力ファイル名が変わる。
-MEASUREMENT_MODE = "td"
+MEASUREMENT_MODE = "sequential"
 COLUMN_SUFFIX = ""
 
 
 def set_measurement_mode(mode):
-    """"td" か "conv" を指定して、参照する列と出力名を切り替える。"""
+    """"sequential" か "simultaneous" を指定して、参照する列と出力名を切り替える。"""
     global MEASUREMENT_MODE, COLUMN_SUFFIX
-    if mode not in ("td", "conv"):
+    if mode not in ("sequential", "simultaneous"):
         raise ValueError(f"unknown measurement mode: {mode}")
     MEASUREMENT_MODE = mode
-    COLUMN_SUFFIX = "" if mode == "td" else "_conv"
+    COLUMN_SUFFIX = "" if mode == "sequential" else "_simultaneous"
 
 
 def bin_anchor_dbm(channel):
@@ -673,9 +675,9 @@ def main():
         description="干渉検知の解析。検知結果CSVを出すだけで、図は作らない "
                     "(図は create_heatmap.py と plot_detection_lines.py の担当)。")
     parser.add_argument(
-        "--mode", choices=("td", "conv"), default="td",
-        help="td: 各メトリックを自分の200s窓で測る時間分割測定(既定) / "
-             "conv: 全メトリックを W0 の200sで同時に測る従来方式")
+        "--mode", choices=("sequential", "simultaneous"), default="sequential",
+        help="sequential: 各メトリックを自分の200s窓で順に測る時間分割測定(既定) / "
+             "simultaneous: 全メトリックを W0 の200sで同時に測る参照 (標準では不可能)")
     args = parser.parse_args()
     set_measurement_mode(args.mode)
     print(f"--- 測定モード: {MEASUREMENT_MODE} (列の接尾辞 '{COLUMN_SUFFIX}') ---")

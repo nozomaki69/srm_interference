@@ -23,13 +23,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from interference_2pan_config import (  # noqa: E402
     METRIC_WINDOW_ORDER,
     metric_window,
-    conventional_window,
+    simultaneous_window,
 )
 
 # メトリック名 -> その窓 [start, end)
 TD_WINDOWS = {m: metric_window(m) for m in METRIC_WINDOW_ORDER}
-# 従来版(全メトリックを同時測定)の対照窓
-CONV_WINDOW = conventional_window()
+# 同時測定 (simultaneous) の窓
+SIMULTANEOUS_WINDOW = simultaneous_window()
 
 
 def _in_window(t, window):
@@ -58,9 +58,9 @@ def parse_trace_file(filepath, num_device):
 
     # 従来版(W0 同時測定)の受信側カウンタ。RSSI は受信イベントに付随する値なので、
     # 時間分割版は rx_success の窓(W4)、従来版は W0 の受信から平均する。
-    c_rx_pkt_num_conv = {dev: 0 for dev in all_devices}
-    c_rssi_sum_conv = {dev: 0.0 for dev in all_devices}
-    d_rx_pkt_num_conv = {dev: 0 for dev in all_devices}
+    c_rx_pkt_num_simultaneous = {dev: 0 for dev in all_devices}
+    c_rssi_sum_simultaneous = {dev: 0.0 for dev in all_devices}
+    d_rx_pkt_num_simultaneous = {dev: 0 for dev in all_devices}
 
     # dequeueしたが最後までACKが返らなかったフレーム数 (旧PERの分子)
     c_noack_to_dev = {dev: 0 for dev in all_devices} # PC -> 各デバイス (下りリンク)
@@ -79,7 +79,7 @@ def parse_trace_file(filepath, num_device):
     # (インクリメントは :844 でコメントアウトされている) 即座にフレームを捨てるため。
     # これは「再送上限に達してACKが返ってこなかった」には当たらないので、PERの分母
     # (4変数の和) からも外す。
-    # 時間分割版 (counters) と従来版 (counters_conv) の2系統を同時に集計する。
+    # 時間分割 (counters) と同時測定 (counters_simultaneous) の2系統をまとめて集計する。
     # トレースには全区間のイベントが残っているので、同じ1ランから両方出せる。
     def _new_counters():
         return {
@@ -89,7 +89,7 @@ def parse_trace_file(filepath, num_device):
         }
 
     counters = _new_counters()        # 各メトリックを自分の窓で測る (主)
-    counters_conv = _new_counters()   # 全メトリックを W0 で同時に測る (対照)
+    counters_simultaneous = _new_counters()   # 全メトリックを W0 で同時に測る (対照)
 
     # 窓ごとの dequeue 数。5つの窓でほぼ揃っていればトラフィックが定常である
     # (= 時間分割の前提が成立している) ことの確認になる。
@@ -121,7 +121,7 @@ def parse_trace_file(filepath, num_device):
     ack_without_tx_data = 0
 
     def _count(name, kind, dev, deq_time):
-        """カテゴリ name のフレームを、時間分割版と従来版それぞれに計上する。
+        """カテゴリ name のフレームを、時間分割と同時測定のそれぞれに計上する。
 
         時間分割版は「そのカテゴリに割り当てられた窓に dequeue 時刻が入っている」
         ときだけ数える。これが実機で「その窓ではそのカウンタしか数えていない」
@@ -133,8 +133,8 @@ def parse_trace_file(filepath, num_device):
         if deq_time is not None:
             if name in TD_WINDOWS and _in_window(deq_time, TD_WINDOWS[name]):
                 counters[kind + "_" + name][dev] += 1
-            if _in_window(deq_time, CONV_WINDOW):
-                counters_conv[kind + "_" + name][dev] += 1
+            if _in_window(deq_time, SIMULTANEOUS_WINDOW):
+                counters_simultaneous[kind + "_" + name][dev] += 1
 
     def resolve_as_failure(entry, at_eof=False):
         """ACKが返らないまま確定したフレームを数える。
@@ -301,7 +301,7 @@ def parse_trace_file(filepath, num_device):
                 # 受信側のカウンタ (macRxSuccessCount 相当) と RSSI は、受信イベントの
                 # 時刻で窓に帰属させる。受信側に dequeue の概念が無いため。
                 in_td_rx = _in_window(t_sec, TD_WINDOWS["rx_success"])
-                in_conv = _in_window(t_sec, CONV_WINDOW)
+                in_simultaneous = _in_window(t_sec, SIMULTANEOUS_WINDOW)
 
                 if node_id in c_deq_pkt_num:
                     # PCが受信したデータフレーム数とRSSI
@@ -318,15 +318,15 @@ def parse_trace_file(filepath, num_device):
                                 c_rx_pkt_num_total[1] += 1
                             elif src_dev in pan2_device_set:
                                 c_rx_pkt_num_total[2] += 1
-                        if in_conv:
-                            c_rx_pkt_num_conv[src_dev] += 1
-                            c_rssi_sum_conv[src_dev] += rssi
+                        if in_simultaneous:
+                            c_rx_pkt_num_simultaneous[src_dev] += 1
+                            c_rssi_sum_simultaneous[src_dev] += rssi
                 elif node_id in d_rx_pkt_num:
                     # DeviceがPCから受信したデータフレーム数
                     if in_td_rx:
                         d_rx_pkt_num[node_id] += 1
-                    if in_conv:
-                        d_rx_pkt_num_conv[node_id] += 1
+                    if in_simultaneous:
+                        d_rx_pkt_num_simultaneous[node_id] += 1
 
     # シミュレーション終了時点でまだACK待ちだったフレーム (ノードあたり高々1通)。
     # 成否が確定していないので分子には入れず、診断値としてだけ残す。
@@ -335,16 +335,16 @@ def parse_trace_file(filepath, num_device):
 
     # 各デバイスからのRSSI平均を計算
     c_rssi_avg = {}
-    c_rssi_avg_conv = {}
+    c_rssi_avg_simultaneous = {}
     for dev in all_devices:
         if c_rx_pkt_num[dev] > 0:
             c_rssi_avg[dev] = c_rssi_sum[dev] / c_rx_pkt_num[dev]
         else:
             c_rssi_avg[dev] = 0.0 # 受信0の場合は0とする
-        if c_rx_pkt_num_conv[dev] > 0:
-            c_rssi_avg_conv[dev] = c_rssi_sum_conv[dev] / c_rx_pkt_num_conv[dev]
+        if c_rx_pkt_num_simultaneous[dev] > 0:
+            c_rssi_avg_simultaneous[dev] = c_rssi_sum_simultaneous[dev] / c_rx_pkt_num_simultaneous[dev]
         else:
-            c_rssi_avg_conv[dev] = 0.0
+            c_rssi_avg_simultaneous[dev] = 0.0
 
     # --- CSVの行データを構築 ---
     row = [pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload, seed]
@@ -404,13 +404,13 @@ def parse_trace_file(filepath, num_device):
     for devs in (pan1_devices, pan2_devices):
         for kind in ("dl", "ul"):
             for name in MAC_COUNTER_NAMES:
-                row.extend([counters_conv[kind + "_" + name][dev] for dev in devs])
-    row.extend([c_rx_pkt_num_conv[dev] for dev in pan1_devices])
-    row.extend([c_rx_pkt_num_conv[dev] for dev in pan2_devices])
-    row.extend([d_rx_pkt_num_conv[dev] for dev in pan1_devices])
-    row.extend([d_rx_pkt_num_conv[dev] for dev in pan2_devices])
-    row.extend([round(c_rssi_avg_conv[dev], 4) for dev in pan1_devices])
-    row.extend([round(c_rssi_avg_conv[dev], 4) for dev in pan2_devices])
+                row.extend([counters_simultaneous[kind + "_" + name][dev] for dev in devs])
+    row.extend([c_rx_pkt_num_simultaneous[dev] for dev in pan1_devices])
+    row.extend([c_rx_pkt_num_simultaneous[dev] for dev in pan2_devices])
+    row.extend([d_rx_pkt_num_simultaneous[dev] for dev in pan1_devices])
+    row.extend([d_rx_pkt_num_simultaneous[dev] for dev in pan2_devices])
+    row.extend([round(c_rssi_avg_simultaneous[dev], 4) for dev in pan1_devices])
+    row.extend([round(c_rssi_avg_simultaneous[dev], 4) for dev in pan2_devices])
 
     # --- 窓ごとの dequeue 数 (定常性の確認用)
     row.extend([window_deq[m] for m in METRIC_WINDOW_ORDER])
@@ -490,7 +490,7 @@ def generate_header(num_device):
     # ★NEW: 再送カウンタ側の診断値
     header.extend(["TxDataSeqMismatch", "AckWithoutTxData"])
 
-    # --- 従来版 (W0 で全メトリックを同時測定) の列。接尾辞 _conv で区別する。
+    # --- 同時測定 (simultaneous) の列。接尾辞 _simultaneous で区別する。
     # 時間分割版が既存の列名をそのまま使うので、analyze_csv.py は接尾辞を
     # 切り替えるだけで両方を解析できる。
     for pan, devs in (("PAN1", pan1_devs), ("PAN2", pan2_devs)):
@@ -498,15 +498,15 @@ def generate_header(num_device):
             for name in MAC_COUNTER_NAMES:
                 label = MAC_COUNTER_LABELS[name]
                 if kind == "dl":
-                    header.extend([f"{pan}_Co_to_Dev{dev}_{label}_conv" for dev in devs])
+                    header.extend([f"{pan}_Co_to_Dev{dev}_{label}_simultaneous" for dev in devs])
                 else:
-                    header.extend([f"{pan}_Dev{dev}_to_Co_{label}_conv" for dev in devs])
-    header.extend([f"PAN1_PC_Rx_from_Dev{dev}_conv" for dev in pan1_devs])
-    header.extend([f"PAN2_PC_Rx_from_Dev{dev}_conv" for dev in pan2_devs])
-    header.extend([f"PAN1_Dev{dev}_Rx_from_PC_conv" for dev in pan1_devs])
-    header.extend([f"PAN2_Dev{dev}_Rx_from_PC_conv" for dev in pan2_devs])
-    header.extend([f"PAN1_PC_RSSI_Avg_from_Dev{dev}_conv" for dev in pan1_devs])
-    header.extend([f"PAN2_PC_RSSI_Avg_from_Dev{dev}_conv" for dev in pan2_devs])
+                    header.extend([f"{pan}_Dev{dev}_to_Co_{label}_simultaneous" for dev in devs])
+    header.extend([f"PAN1_PC_Rx_from_Dev{dev}_simultaneous" for dev in pan1_devs])
+    header.extend([f"PAN2_PC_Rx_from_Dev{dev}_simultaneous" for dev in pan2_devs])
+    header.extend([f"PAN1_Dev{dev}_Rx_from_PC_simultaneous" for dev in pan1_devs])
+    header.extend([f"PAN2_Dev{dev}_Rx_from_PC_simultaneous" for dev in pan2_devs])
+    header.extend([f"PAN1_PC_RSSI_Avg_from_Dev{dev}_simultaneous" for dev in pan1_devs])
+    header.extend([f"PAN2_PC_RSSI_Avg_from_Dev{dev}_simultaneous" for dev in pan2_devs])
 
     # --- 窓ごとの dequeue 数 (定常性の確認用)
     header.extend([f"WindowDeq_{m}" for m in METRIC_WINDOW_ORDER])
