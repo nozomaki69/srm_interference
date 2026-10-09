@@ -53,8 +53,9 @@ BANDWIDTHS = sorted(set(A.CHANNEL_KBPS.values()))   # [50, 100, 200]
 # (スロット 1/2 は以前 CV 分布図でも同じ出典で使っていた。それを3色に延長した。)
 #
 # ただしスロット3の aqua は light 面でコントラスト 3:1 を下回るため relief rule
-# (見えるラベルか表を添える) が要る。線3本の図では右端に直接ラベルを置き、
-# 6本の図では必ず <metric>_plotted_values.csv を出すことで対応している。
+# (見えるラベルか表を添える) が要る。描画値を必ず <metric>_plotted_values.csv に
+# 出すことで対応している (以前は線の右端に直接ラベルも置いていたが、
+# 伝送速度が凡例と重複して邪魔なので外した)。
 COLOR = {50: "#2a78d6", 100: "#eb6834", 200: "#1baf7a"}
 # 色に頼らず識別できるようにするための冗長符号化
 MARKER = {50: "o", 100: "s", 200: "^"}
@@ -107,7 +108,7 @@ TICK_LABELSIZE = 20     # 目盛りの数字
 TICK_LENGTH = 10        # 目盛り線の長さ
 TICK_WIDTH = 2.0        # 目盛り線の太さ
 LEGEND_FONTSIZE = 18
-ANNOT_FONTSIZE = 15     # 参照線の注記、線の直接ラベル
+ANNOT_FONTSIZE = 15     # 参照線の注記 ("all-positive F1" / "chance")
 
 
 def style_axes(ax):
@@ -186,12 +187,11 @@ def load_series(csv_file, metric):
     return series
 
 
-def _draw_panel(ax, data, own_bw, modes, metric, direct_labels):
+def _draw_panel(ax, data, own_bw, modes, metric):
     """1つの軸に、ある自帯域についての線を引く。
 
     data: {mode: {(own_bw, other_bw): {own_load: value}}}
     modes: 描くモードのタプル。1つなら単独図、2つなら比較図。
-    direct_labels: 右端に相手帯域のラベルを直接置くか (線が3本のときだけ真)。
     """
     loads = sorted(OFFERED_LOAD_PERCENTS)
     for other_bw in BANDWIDTHS:
@@ -207,13 +207,6 @@ def _draw_panel(ax, data, own_bw, modes, metric, direct_labels):
                     color=COLOR[other_bw], linestyle=LINESTYLE[mode],
                     marker=MARKER[other_bw], markersize=6, linewidth=2.0,
                     label=label)
-            if direct_labels and xs:
-                # relief rule 対応。凡例と重複するが、色が薄いスロットでも
-                # どの線がどれか図だけで分かるようにする。
-                ax.annotate(f"{other_bw}k", xy=(xs[-1], ys[-1]),
-                            xytext=(6, 0), textcoords="offset points",
-                            color=COLOR[other_bw], fontsize=ANNOT_FONTSIZE,
-                            va="center", fontweight="bold")
 
     spec = metric_spec(metric)
     if spec["ref"] is not None:
@@ -232,9 +225,8 @@ def _draw_panel(ax, data, own_bw, modes, metric, direct_labels):
 
 def plot_single(data, own_bw, modes, metric, out_dir, tag, fmt):
     """自帯域1つ分の図を1枚描く。"""
-    direct = len(modes) == 1
     fig, ax = plt.subplots(figsize=(7.2, 5.8))
-    _draw_panel(ax, data, own_bw, modes, metric, direct)
+    _draw_panel(ax, data, own_bw, modes, metric)
     ax.legend(loc="lower left", frameon=True, fontsize=LEGEND_FONTSIZE)
     path = os.path.join(out_dir, f"{metric}_own{own_bw}_{tag}.{fmt}")
     fig.savefig(path, bbox_inches="tight")
@@ -244,10 +236,9 @@ def plot_single(data, own_bw, modes, metric, out_dir, tag, fmt):
 
 def plot_3panel(data, modes, metric, out_dir, tag, fmt):
     """自帯域3つを横並びのサブプロットにした1枚。"""
-    direct = len(modes) == 1
     fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.8), sharey=True)
     for ax, own_bw in zip(axes, BANDWIDTHS):
-        _draw_panel(ax, data, own_bw, modes, metric, direct)
+        _draw_panel(ax, data, own_bw, modes, metric)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.5),
                frameon=True, fontsize=LEGEND_FONTSIZE)
