@@ -37,16 +37,19 @@ def input_csv_path(suffix):
 #   f1  : 最良閾値 tau での性能。その tau もセルに出す
 #   auc : 閾値に依らない分離度。**AUC に閾値という概念が無いので tau は出さない**。
 #         刻みが 1e-4 (100x100 ペア) なので F1 より1桁多い3桁で出す
-# cell_w はセル1つの幅(インチ)、fontsize はセル内の文字の大きさ。
-# "AUC=0.503" は F1 の "F1: 0.95" より横に長いぶん広く取る。
-# セルの高さ (CELL_H) より幅をかなり大きく取って横長にしてある。
+# cell_w / cell_h はセル1つの幅と高さ(インチ)、fontsize はセル内の文字の大きさ。
+#
+#   f1  : セルに "Tau: 0.10 / F1: 0.92" の2行が入るので横長にする (aspect auto)。
+#   auc : セルは値だけ ("0.832") なので正方形にする。aspect="equal" にして
+#         セルを必ず正方形にし、5x5 の格子全体が正方形になるようにしてある。
+#         値だけなら "AUC=" を付けなくても列が AUC なのは自明。
 METRIC_SPEC = {
     "f1":  {"column": "f1",  "dir": "heatmaps",     "decimals": 2,
             "show_threshold": True,  "label": "F1",
-            "cell_w": 2.30, "fontsize": 17},
+            "cell_w": 2.30, "cell_h": 1.15, "aspect": "auto", "fontsize": 17},
     "auc": {"column": "auc", "dir": "heatmaps_auc", "decimals": 3,
-            "show_threshold": False, "label": "AUC",
-            "cell_w": 2.55, "fontsize": 17},
+            "show_threshold": False, "label": None,
+            "cell_w": 1.70, "cell_h": 1.70, "aspect": "equal", "fontsize": 19},
 }
 VMIN, VMAX = 0.5, 1.0
 
@@ -109,13 +112,12 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
     if th_pivot is not None:
         th_pivot = th_pivot.reindex(index=rows, columns=cols)
 
-    # セル1つの高さ(インチ)。幅 (cell_w) をこれより大きく取ることで横長にする。
-    CELL_H = 1.15
     fig_w = spec["cell_w"] * len(cols)
-    fig_h = CELL_H * len(rows)
+    fig_h = spec["cell_h"] * len(rows)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
-    im = ax.imshow(val_pivot.values, cmap="YlGnBu", vmin=VMIN, vmax=VMAX, aspect="auto")
+    im = ax.imshow(val_pivot.values, cmap="YlGnBu", vmin=VMIN, vmax=VMAX,
+                   aspect=spec["aspect"])
 
     ax.set_xticks(range(len(cols)))
     ax.set_xticklabels(cols)
@@ -142,12 +144,18 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
             text_color = "white" if val > WHITE_TEXT_FROM else "black"
             if spec["show_threshold"]:
                 text = f"Tau: {th_pivot.iloc[i, j]:.2f}\n{spec['label']}: {val:.{spec['decimals']}f}"
-            else:
+            elif spec["label"]:
                 text = f"{spec['label']}={val:.{spec['decimals']}f}"
+            else:
+                text = f"{val:.{spec['decimals']}f}"
             ax.text(j, i, text, ha="center", va="center",
                     color=text_color, fontsize=spec["fontsize"], fontweight="bold")
 
-    cbar = fig.colorbar(im, ax=ax)
+    # aspect="equal" だと軸の箱が図の中で縮むので、既定のカラーバーは
+    # ヒートマップより縦に長くなってしまう。fraction/pad で高さを合わせる。
+    cbar_kw = ({"fraction": 0.046, "pad": 0.04}
+               if spec["aspect"] == "equal" else {})
+    cbar = fig.colorbar(im, ax=ax, **cbar_kw)
     cbar.ax.tick_params(labelsize=TICK_LABELSIZE, length=TICK_LENGTH,
                         width=TICK_WIDTH)
 
