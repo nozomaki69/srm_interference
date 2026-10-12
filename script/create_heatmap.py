@@ -23,8 +23,8 @@ from plot_detection_lines import TICK_LABELSIZE, TICK_LENGTH, TICK_WIDTH  # noqa
 PLOT_BASE_DIR = os.path.join(SCRIPT_DIR, "..", "plots")
 
 # 測定モードごとに入出力を分ける。analyze_csv.py の --mode と同じ規約:
-#   sequential   : 各メトリックを自分の200s窓で順に測る (接尾辞なし)
-#   simultaneous : 全メトリックを W0 の200sで同時に測る参照 (接尾辞 _simultaneous)
+#   td   : 各メトリックを自分の200s窓で測る時間分割測定 (接尾辞なし)
+#   conv : 全メトリックを W0 の200sで同時に測る従来方式 (接尾辞 _conv)
 # 統計量は ΔPER のビン内分散ひとつ (analyze_csv.py の出力) だけ。
 def input_csv_path(suffix):
     return os.path.join(PLOT_BASE_DIR,
@@ -37,19 +37,16 @@ def input_csv_path(suffix):
 #   f1  : 最良閾値 tau での性能。その tau もセルに出す
 #   auc : 閾値に依らない分離度。**AUC に閾値という概念が無いので tau は出さない**。
 #         刻みが 1e-4 (100x100 ペア) なので F1 より1桁多い3桁で出す
-# cell_w / cell_h はセル1つの幅と高さ(インチ)、fontsize はセル内の文字の大きさ。
-#
-#   f1  : セルに "Tau: 0.10 / F1: 0.92" の2行が入るので横長にする (aspect auto)。
-#   auc : セルは値だけ ("0.832") なので正方形にする。aspect="equal" にして
-#         セルを必ず正方形にし、5x5 の格子全体が正方形になるようにしてある。
-#         値だけなら "AUC=" を付けなくても列が AUC なのは自明。
+# cell_w はセル1つの幅(インチ)、fontsize はセル内の文字の大きさ。
+# "AUC=0.503" は F1 の "F1: 0.95" より横に長いぶん広く取る。
+# セルの高さ (CELL_H) より幅をかなり大きく取って横長にしてある。
 METRIC_SPEC = {
     "f1":  {"column": "f1",  "dir": "heatmaps",     "decimals": 2,
             "show_threshold": True,  "label": "F1",
-            "cell_w": 2.30, "cell_h": 1.15, "aspect": "auto", "fontsize": 17},
+            "cell_w": 2.30, "fontsize": 17},
     "auc": {"column": "auc", "dir": "heatmaps_auc", "decimals": 3,
-            "show_threshold": False, "label": None,
-            "cell_w": 1.70, "cell_h": 1.70, "aspect": "equal", "fontsize": 19},
+            "show_threshold": False, "label": "AUC",
+            "cell_w": 2.55, "fontsize": 17},
 }
 VMIN, VMAX = 0.5, 1.0
 
@@ -79,7 +76,7 @@ def load_data(path: str) -> pd.DataFrame:
         raise FileNotFoundError(
             f"Input CSV not found: {path}\n"
             f"先に analyze_csv.py を同じモードで実行してください "
-            f"(例: python3 script/analyze_csv.py --mode simultaneous)"
+            f"(例: python3 script/analyze_csv.py --mode conv)"
         )
     df = pd.read_csv(path)
     df = df.rename(columns=COLUMN_RENAME)
@@ -112,12 +109,13 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
     if th_pivot is not None:
         th_pivot = th_pivot.reindex(index=rows, columns=cols)
 
+    # セル1つの高さ(インチ)。幅 (cell_w) をこれより大きく取ることで横長にする。
+    CELL_H = 1.15
     fig_w = spec["cell_w"] * len(cols)
-    fig_h = spec["cell_h"] * len(rows)
+    fig_h = CELL_H * len(rows)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
-    im = ax.imshow(val_pivot.values, cmap="YlGnBu", vmin=VMIN, vmax=VMAX,
-                   aspect=spec["aspect"])
+    im = ax.imshow(val_pivot.values, cmap="YlGnBu", vmin=VMIN, vmax=VMAX, aspect="auto")
 
     ax.set_xticks(range(len(cols)))
     ax.set_xticklabels(cols)
@@ -144,18 +142,12 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
             text_color = "white" if val > WHITE_TEXT_FROM else "black"
             if spec["show_threshold"]:
                 text = f"Tau: {th_pivot.iloc[i, j]:.2f}\n{spec['label']}: {val:.{spec['decimals']}f}"
-            elif spec["label"]:
-                text = f"{spec['label']}={val:.{spec['decimals']}f}"
             else:
-                text = f"{val:.{spec['decimals']}f}"
+                text = f"{spec['label']}={val:.{spec['decimals']}f}"
             ax.text(j, i, text, ha="center", va="center",
                     color=text_color, fontsize=spec["fontsize"], fontweight="bold")
 
-    # aspect="equal" だと軸の箱が図の中で縮むので、既定のカラーバーは
-    # ヒートマップより縦に長くなってしまう。fraction/pad で高さを合わせる。
-    cbar_kw = ({"fraction": 0.046, "pad": 0.04}
-               if spec["aspect"] == "equal" else {})
-    cbar = fig.colorbar(im, ax=ax, **cbar_kw)
+    cbar = fig.colorbar(im, ax=ax)
     cbar.ax.tick_params(labelsize=TICK_LABELSIZE, length=TICK_LENGTH,
                         width=TICK_WIDTH)
 
@@ -173,9 +165,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="干渉検知結果のヒートマップ。測定モードで入出力を切り替える。")
     parser.add_argument(
-        "--mode", choices=("sequential", "simultaneous"), default="sequential",
-        help="sequential: 時間分割測定の結果(既定) / "
-             "simultaneous: W0で同時測定した参照の結果")
+        "--mode", choices=("td", "conv"), default="td",
+        help="td: 時間分割測定の結果(既定) / conv: 従来方式(W0で同時測定)の結果")
     parser.add_argument(
         "--metric", choices=tuple(METRIC_SPEC), default="f1",
         help="f1: 最良閾値での F1 と tau (既定) / auc: 閾値に依らない AUC")
@@ -186,7 +177,7 @@ def main():
         "--out-dir", default=None,
         help="出力ディレクトリを直接指定する (--mode / --metric より優先)")
     args = parser.parse_args()
-    suffix = "" if args.mode == "sequential" else "_simultaneous"
+    suffix = "" if args.mode == "td" else "_conv"
 
     input_csv = args.input or input_csv_path(suffix)
     out_dir = args.out_dir or output_dir_path(suffix, args.metric)
