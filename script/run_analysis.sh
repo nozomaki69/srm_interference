@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# plots/simulation_results.csv から、td と conv の両モードについて
+# plots/simulation_results.csv から、sequential と simultaneous の両モードについて
 # 検知結果CSV -> ヒートマップ -> 折れ線グラフ を作る。
 #
 # sbatch_jobs.sh の最後と sbatch_reanalyze.sh の両方がこれを呼ぶ。
 # 手順を2箇所に書くと片方だけ直して静かにずれるので、唯一の定義元にする。
 #
 # 出力:
-#   plots/interference_detection_results{,_conv}.csv
-#   plots/heatmaps{,_conv}/ plots/heatmaps_auc{,_conv}/  12枚ずつ
+#   plots/interference_detection_results{,_simultaneous}.csv
+#   plots/heatmaps{,_simultaneous}/ plots/heatmaps_auc{,_simultaneous}/  12枚ずつ
 #   plots/detection_lines/                              f1 と auc で12枚ずつ
-#   plots/detection_scores{,_conv}.csv                  Seed ごとの干渉指標
+#   plots/detection_scores{,_simultaneous}.csv                  Seed ごとの干渉指標
 #   plots/roc/                                          ROC 曲線 6枚
 
 set -uo pipefail
@@ -28,7 +28,7 @@ fi
 cd "$CMD_DIR" || exit 1
 
 # 検知結果CSV。測定モードごとに出力名が接尾辞で分かれる。
-for MODE in td conv; do
+for MODE in sequential simultaneous; do
     echo "--- 解析 (--mode $MODE) ---"
     if ! python3 "$SCRIPT_DIR/analyze_csv.py" --mode "$MODE"; then
         echo "エラー: analyze_csv.py --mode $MODE に失敗しました" >&2
@@ -46,7 +46,7 @@ fi
 
 echo "========================================"
 echo "解析と作図が完了しました"
-echo "  plots/interference_detection_results{,_conv}.csv   検知結果"
-echo "  plots/detection_scores{,_conv}.csv                 Seed ごとの指標"
+echo "  plots/interference_detection_results{,_simultaneous}.csv   検知結果"
+echo "  plots/detection_scores{,_simultaneous}.csv                 Seed ごとの指標"
 echo "  (図の一覧は上の plot_figures.sh の出力を参照)"
 echo "========================================"

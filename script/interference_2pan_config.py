@@ -150,10 +150,12 @@ MEASURE_END_SEC = MEASURE_START_SEC + MEASURE_DURATION_SEC
 DRAIN_DURATION_SEC = 40.0
 SIM_DURATION_SEC = MEASURE_END_SEC + DRAIN_DURATION_SEC
 
-# 従来方式 (全メトリックを同じ窓で同時測定) の対照に使う窓。
+# 全メトリックを同じ窓で同時に測る方式 (simultaneous) の窓。
+# IEEE 802.15.4 の標準では5つのカウンタを同時に測れないのでこれは実現できない。
+# 時間分割 (sequential) のコストを測るための参照として置いている。
 # W0 を使うのは、現行設定の 20-220s をそのまま再現するため。1メトリックあたりの
-# 観測時間が時間分割版と等しくなるので、時間分割そのもののコストだけを分離できる。
-CONVENTIONAL_WINDOW_INDEX = 0
+# 観測時間が sequential と等しくなるので、時間分割そのもののコストだけを分離できる。
+SIMULTANEOUS_WINDOW_INDEX = 0
 
 
 def metric_window(metric):
@@ -163,9 +165,9 @@ def metric_window(metric):
     return start, start + WINDOW_DURATION_SEC
 
 
-def conventional_window():
-    """従来方式の対照窓 (全メトリックをここで同時に測る)。"""
-    start = MEASURE_START_SEC + CONVENTIONAL_WINDOW_INDEX * WINDOW_DURATION_SEC
+def simultaneous_window():
+    """simultaneous の窓 (全メトリックをここで同時に測る)。"""
+    start = MEASURE_START_SEC + SIMULTANEOUS_WINDOW_INDEX * WINDOW_DURATION_SEC
     return start, start + WINDOW_DURATION_SEC
 MY_TRACE_TAGS = ['Mac'] #MY_TRACE_TAGS = ['Application']
 

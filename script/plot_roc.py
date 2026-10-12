@@ -6,7 +6,7 @@
 いるのか、高 FPR 側でようやく稼いでいるのか」が分からない。閾値をどこに置くかの
 議論もできない。そこで曲線そのものを描く。
 
-入力は analyze_csv.py が出す plots/detection_scores{,_conv}.csv (Seed ごとの
+入力は analyze_csv.py が出す plots/detection_scores{,_simultaneous}.csv (Seed ごとの
 干渉指標)。検知結果CSVは最良閾値1点の混同行列しか持たないので、そこからは
 曲線を復元できない。
 
@@ -76,7 +76,7 @@ LEGEND_FONTSIZE = L.LEGEND_FONTSIZE
 
 
 def input_csv_path(mode):
-    suffix = "" if mode == "td" else "_conv"
+    suffix = "" if mode == "sequential" else "_simultaneous"
     return os.path.join(PLOT_BASE_DIR, f"detection_scores{suffix}.csv")
 
 
@@ -190,8 +190,8 @@ def plot_one(scores, own_bw, mode, out_dir, fmt):
 
 def main():
     p = argparse.ArgumentParser(description="干渉検知の ROC 曲線を描く")
-    p.add_argument("--td-csv", default=None, help="td の Seed 別スコア CSV")
-    p.add_argument("--conv-csv", default=None, help="conv の Seed 別スコア CSV")
+    p.add_argument("--sequential-csv", default=None, help="sequential の Seed 別スコア CSV")
+    p.add_argument("--simultaneous-csv", default=None, help="simultaneous の Seed 別スコア CSV")
     p.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
     p.add_argument("--layout", default="single", choices=("single", "panel"),
                    help="single: 1条件1枚 (既定、18枚) / "
@@ -200,8 +200,8 @@ def main():
                    help="出力形式 (既定: pdf)。目視確認には png")
     args = p.parse_args()
 
-    paths = {"td": args.td_csv or input_csv_path("td"),
-             "conv": args.conv_csv or input_csv_path("conv")}
+    paths = {m: (args.sequential_csv if m == "sequential" else args.simultaneous_csv)
+                or input_csv_path(m) for m in MODES}
 
     os.makedirs(args.out_dir, exist_ok=True)
     written = []

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """干渉検知性能を「相手PAN負荷 100%」の断面で折れ線にする。
 
-ヒートマップ (plots/heatmaps{,_conv}/) は自PAN負荷 x 相手PAN負荷の 5x5 格子で、
+ヒートマップ (plots/heatmaps{,_simultaneous}/) は自PAN負荷 x 相手PAN負荷の 5x5 格子で、
 1枚25セル x 12枚ある。一番見たい「相手が最大負荷のとき、自分の負荷を上げると
 検知性能がどう落ちるか」を読むには各枚から1行ずつ抜き出して並べ直す必要がある。
 さらに create_heatmap.py は軸を pan1/pan2 に固定しているので (create_heatmap.py:88-89)、
@@ -14,7 +14,7 @@ PAN2 の図では自分と相手が入れ替わったままラベルも無い。
   横軸: 自PAN負荷 20-100%
   縦軸: --metric で切り替え。f1 (既定) / auc。軸と参照線は METRIC_SPEC で指標ごと
   色  : 相手の帯域 (50 / 100 / 200 kbps)
-  線種: 測定モード (conv = 実線 / td = 点線)
+  線種: 測定モード (simultaneous = 実線 / sequential = 点線)
 """
 
 import os
@@ -60,10 +60,11 @@ COLOR = {50: "#2a78d6", 100: "#eb6834", 200: "#1baf7a"}
 # 色に頼らず識別できるようにするための冗長符号化
 MARKER = {50: "o", 100: "s", 200: "^"}
 
-# 測定モード -> 線種。conv が主役なので実線。
-LINESTYLE = {"conv": "-", "td": ":"}
-MODE_LABEL = {"conv": "conv", "td": "td"}
-MODES = ("conv", "td")
+# 測定モード -> 線種。simultaneous は標準では実現できない参照 (上界) で、
+# これを基準に sequential がどれだけ落ちるかを見るので、参照側を実線にする。
+LINESTYLE = {"simultaneous": "-", "sequential": ":"}
+MODE_LABEL = {"simultaneous": "simultaneous", "sequential": "sequential"}
+MODES = ("simultaneous", "sequential")
 
 # 図中のテキストは英語にする。計算機 (Linux) に日本語フォントが無いと豆腐文字に
 # なるため。コメント・argparse ヘルプ・コンソール出力は日本語のままでよい。
@@ -74,7 +75,7 @@ MODES = ("conv", "td")
 # 指標ごとの軸と参照線。y 軸を固定するのは、図をまたいで比較できることが
 # この図の目的だから (自動スケールにすると枚ごとに縮尺が変わって比較できない)。
 #
-#   f1  : 実測レンジは td 0.717-0.945 / conv 0.813-1.000 (分散統計量, 10/2 時点)。
+#   f1  : 実測レンジは sequential 0.717-0.945 / simultaneous 0.813-1.000。
 #         参照線 2/3 は全 Seed を「干渉あり」と判定したときの退化した F1
 #         (precision 0.5, recall 1.0)。これ以下は検知できていないのと同じ。
 #   auc : 参照線 0.5 はランダム判定。下限を 0.5 に置いて床を見せる。
@@ -126,7 +127,7 @@ def style_axes(ax):
 
 def input_csv_path(mode):
     """mode -> 結果 CSV。suffix の付け方は create_heatmap.py:30-36 と同じ規則。"""
-    suffix = "" if mode == "td" else "_conv"
+    suffix = "" if mode == "sequential" else "_simultaneous"
     return os.path.join(PLOT_BASE_DIR, f"interference_detection_results{suffix}.csv")
 
 
@@ -195,7 +196,7 @@ def _draw_panel(ax, data, own_bw, modes, metric):
     """
     loads = sorted(OFFERED_LOAD_PERCENTS)
     # モードを外側で回すので、凡例は「実線 50/100/200 -> 点線 50/100/200」の順に
-    # 並ぶ (MODES = conv, td で conv が実線)。帯域を外側にすると
+    # 並ぶ (MODES = simultaneous, sequential で前者が実線)。帯域を外側にすると
     # 50実線/50点線/100実線/... と交互になって読みにくい。
     for mode in modes:
         for other_bw in BANDWIDTHS:
@@ -275,15 +276,15 @@ def main():
         description="相手PAN負荷100%の断面で検知性能を折れ線にする")
     p.add_argument("--metric", default="f1",
                    help="縦軸に使う CSV の列名 (既定: f1)。auc 列が入れば auc も可")
-    p.add_argument("--td-csv", default=None, help="td の結果 CSV")
-    p.add_argument("--conv-csv", default=None, help="conv の結果 CSV")
+    p.add_argument("--sequential-csv", default=None, help="sequential の結果 CSV")
+    p.add_argument("--simultaneous-csv", default=None, help="simultaneous の結果 CSV")
     p.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
     p.add_argument("--format", default="pdf", choices=("pdf", "png"),
                    help="出力形式 (既定: pdf)。目視確認には png")
     args = p.parse_args()
 
-    paths = {"td": args.td_csv or input_csv_path("td"),
-             "conv": args.conv_csv or input_csv_path("conv")}
+    paths = {m: (args.sequential_csv if m == "sequential" else args.simultaneous_csv)
+                or input_csv_path(m) for m in MODES}
 
     data = {}
     for mode in MODES:
@@ -311,7 +312,9 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     fmt = args.format
     written = []
-    for tag, modes in (("conv", ("conv",)), ("td", ("td",)), ("compare", MODES)):
+    for tag, modes in (("simultaneous", ("simultaneous",)),
+                       ("sequential", ("sequential",)),
+                       ("compare", MODES)):
         for own_bw in BANDWIDTHS:
             written.append(plot_single(data, own_bw, modes, args.metric,
                                        args.out_dir, tag, fmt))
