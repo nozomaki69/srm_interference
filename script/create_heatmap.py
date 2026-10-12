@@ -43,19 +43,19 @@ def input_csv_path(suffix):
 #   auc : セルは値だけ ("0.832") なので正方形にする。aspect="equal" にして
 #         セルを必ず正方形にし、5x5 の格子全体が正方形になるようにしてある。
 #         値だけなら "AUC=" を付けなくても列が AUC なのは自明。
-#         カラーバーも出さない (colorbar=False)。全セルに値が書いてあるので
-#         冗長なうえ、横に付くとページ全体が 1.19:1 になって正方形にならない。
-#         外すと 8.4 x 8.2 インチ (1.03:1) でほぼ正方形になる。
-#         色のスケールが 0.5-1.0 であることは図のキャプションで補う。
+#         ページ全体も正方形にする (square=True)。tight_layout + bbox="tight" に
+#         任せるとカラーバーのぶん横に伸びて 1.19:1 になってしまうので、
+#         正方形の figure に軸とカラーバーを手で配置し、bbox_inches を使わずに
+#         保存する。こうすると出力が指定どおりちょうど正方形になる。
 METRIC_SPEC = {
     "f1":  {"column": "f1",  "dir": "heatmaps",     "decimals": 2,
             "show_threshold": True,  "label": "F1",
             "cell_w": 2.30, "cell_h": 1.15, "aspect": "auto", "fontsize": 17,
-            "colorbar": True},
+            "square": False},
     "auc": {"column": "auc", "dir": "heatmaps_auc", "decimals": 3,
             "show_threshold": False, "label": None,
             "cell_w": 1.70, "cell_h": 1.70, "aspect": "equal", "fontsize": 19,
-            "colorbar": False},
+            "square": True},
 }
 VMIN, VMAX = 0.5, 1.0
 
@@ -118,9 +118,20 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
     if th_pivot is not None:
         th_pivot = th_pivot.reindex(index=rows, columns=cols)
 
-    fig_w = spec["cell_w"] * len(cols)
-    fig_h = spec["cell_h"] * len(rows)
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    if spec["square"]:
+        # 正方形に収めるため軸を手で置く。figure を正方形にし、軸の箱も
+        # figure 座標で正方形に取る (figure が正方形なので同じ割合 = 正方形)。
+        # 目盛りの文字とカラーバーのぶんを余白で確保する。
+        side = spec["cell_w"] * len(cols)
+        fig = plt.figure(figsize=(side, side))
+        # 軸の箱は figure 座標で正方形 (0.72 x 0.72)。カラーバーが横幅を食うぶん
+        # 縦に余りが出るので、上下の余白が均等になる位置に置く。
+        ax = fig.add_axes([0.115, 0.125, 0.72, 0.72])
+        cax = fig.add_axes([0.865, 0.125, 0.035, 0.72])
+    else:
+        fig, ax = plt.subplots(figsize=(spec["cell_w"] * len(cols),
+                                        spec["cell_h"] * len(rows)))
+        cax = None
 
     im = ax.imshow(val_pivot.values, cmap="YlGnBu", vmin=VMIN, vmax=VMAX,
                    aspect=spec["aspect"])
@@ -157,17 +168,21 @@ def make_heatmap(df: pd.DataFrame, band_pair: str, distance, subject: str, out_d
             ax.text(j, i, text, ha="center", va="center",
                     color=text_color, fontsize=spec["fontsize"], fontweight="bold")
 
-    if spec["colorbar"]:
-        cbar = fig.colorbar(im, ax=ax)
-        cbar.ax.tick_params(labelsize=TICK_LABELSIZE, length=TICK_LENGTH,
-                            width=TICK_WIDTH)
+    cbar = (fig.colorbar(im, cax=cax) if cax is not None
+            else fig.colorbar(im, ax=ax))
+    cbar.ax.tick_params(labelsize=TICK_LABELSIZE, length=TICK_LENGTH,
+                        width=TICK_WIDTH)
 
-    fig.tight_layout()
     os.makedirs(out_dir, exist_ok=True)
     safe_band = str(band_pair).replace("/", "-")
     fname = f"heatmap_{safe_band}_{distance}_{subject}.pdf"
     fpath = os.path.join(out_dir, fname)
-    fig.savefig(fpath, format="pdf", bbox_inches="tight")
+    if spec["square"]:
+        # bbox_inches="tight" は余白を刈り込んで正方形を崩すので使わない
+        fig.savefig(fpath, format="pdf")
+    else:
+        fig.tight_layout()
+        fig.savefig(fpath, format="pdf", bbox_inches="tight")
     plt.close(fig)
     return fpath
 
