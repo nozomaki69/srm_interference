@@ -109,7 +109,9 @@ GRID_KW = dict(color="0.85", linestyle="--", linewidth=0.8)
 TICK_LABELSIZE = 20     # 目盛りの数字
 TICK_LENGTH = 10        # 目盛り線の長さ
 TICK_WIDTH = 2.0        # 目盛り線の太さ
-LEGEND_FONTSIZE = 18
+# 凡例は目盛りの数字より一段小さくする。同じ大きさだと凡例の箱がプロット領域を
+# 占めすぎて、線の立ち上がりが隠れる (特に compare 図は6項目あるため)。
+LEGEND_FONTSIZE = 16
 ANNOT_FONTSIZE = 15     # 参照線の注記 ("all-positive F1" / "chance")
 
 
