@@ -78,13 +78,14 @@ MODES = ("simultaneous", "sequential")
 #   f1  : 実測レンジは sequential 0.717-0.945 / simultaneous 0.813-1.000。
 #         参照線 2/3 は全 Seed を「干渉あり」と判定したときの退化した F1
 #         (precision 0.5, recall 1.0)。これ以下は検知できていないのと同じ。
-#   auc : 参照線 0.5 はランダム判定。下限を 0.5 に置いて床を見せる。
-#         実データを見てから詰めてよい。
+#   auc : 下限 0.5 がランダム判定の水準。軸そのものが床を示すので参照線は引かない。
 METRIC_SPEC = {
     "f1":  {"label": "F1 score", "ylim": (0.65, 1.0),
             "ref": 2.0 / 3.0, "ref_label": "all-positive F1"},
+    # auc は参照線を引かない。y軸の下端がちょうど 0.5 (ランダム判定) なので、
+    # 線を引くと軸と重なって冗長なうえ、"chance" の注記だけが浮いて見える。
     "auc": {"label": "AUC", "ylim": (0.50, 1.0),
-            "ref": 0.5, "ref_label": "chance"},
+            "ref": None, "ref_label": None},
 }
 
 # 未知の指標でも落とさず描く。縮尺の根拠も参照線の意味も決められないので、
