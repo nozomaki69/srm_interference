@@ -1,23 +1,25 @@
-# `save` ブランチ
+# `icc` ブランチ
 
 2つの PAN が隣接したとき、自分の PAN 側の観測だけから相手の干渉を検知できるか ――
-という実験の、**整理済みの最小構成**。`cv` ブランチまでに試した推定量のうち
-採用したものだけを残し、それ以外を削った。
+という実験の、**判定手法を3つ並べて比べる構成**。`save` ブランチ (提案手法1つを
+F1 と AUC の両方で、sequential/simultaneous 両モードについて評価する) から、
+比較の軸を「評価指標 × 測定モード」から「**判定手法**」に組み替えた。
 
 ## 1. 何をするブランチか
 
-- **判定方法**: ΔPER の RSSI ビン内分散を閾値と比較する（1つだけ）
-- **測定モード**: sequential と simultaneous の両方
-- **出力**: ヒートマップ・折れ線グラフ・ROC 曲線
+- **判定手法**: 3つ ―― 提案手法 / ΔPER のみ / RSSI のみ (§4)
+- **評価指標**: AUC だけ (F1 は出さない)
+- **測定モード**: simultaneous だけ (§2)
+- **出力**: 折れ線グラフ (detection line) だけ。ヒートマップと ROC は出さない
 - **実行**: `./script/sbatch_jobs.sh` 1本で、シミュレーションから図まで通る
 
-`cv` ブランチにあった変動係数 CV・正規化分散 nvar・CV 分布図・配置図・
-条件別の箱ひげ図は入っていない。`auc` ブランチ系統の旧ツールチェーンも無い。
+`save` にあった F1・ヒートマップ・ROC 曲線・sequential 側の解析は入っていない。
+削った理由は §8。
 
-## 2. 測定モード
+## 2. 測定モード ―― simultaneous に固定する
 
 IEEE 802.15.4 の標準では、PER の計算に要る5つの MAC カウンタを**同時に測定できない**。
-そこで1メトリックあたり 200 s の窓を順に割り当てる。これが **`sequential`**。
+そこで1メトリックあたり 200 s の窓を順に割り当てるのが **`sequential`**。
 
 ```
     0 –   20       ウォームアップ（送信なし）
@@ -29,26 +31,25 @@ IEEE 802.15.4 の標準では、PER の計算に要る5つの MAC カウンタ�
  1020 – 1060       ドレイン
 ```
 
-参照が **`simultaneous`** で、**全メトリックを W0 の 200 s で同時に測る**。
-1メトリックあたりの観測時間が両モードで等しい（200 s）ので、時間分割そのものの
-コストだけを分離できる。
+**`simultaneous`** は全メトリックを W0 の 200 s で同時に測る。1メトリックあたりの
+観測時間が両モードで等しい (200 s) ので、時間分割そのもののコストだけを分離できる。
+`simultaneous` は標準では実現できない測り方であり、実機では到達できない
+**上界 (参照)** であって「従来方式」ではない。
 
-**`simultaneous` は標準では実現できない測り方である。** 冒頭のとおり 5 つの
-カウンタは同時に測れないので、これは実機では到達できない **上界（参照）** であって
-「従来方式」ではない。`sequential` との差は「標準の制約に従うことで失う性能」と読む。
+**このブランチは simultaneous だけを解析する。** 見たいのが「時間分割のコスト」では
+なく「判定手法の差」だからである。測定モードと手法を同時に振ると、折れ線の線種が
+2つの軸に取られて図が読めなくなる。測定側の劣化が無い状態に条件を固定して、
+手法だけを比べる。
 
-### 名前について
-
-以前は `sequential` を `td`、`simultaneous` を `conv` と呼んでいたが、
-`conv` が convolution と、`td` が TDD / TDMA と紛らわしく、さらに `conv` を
-「従来方式」と説明していたのが内容に合っていなかったので書き下した。
-略して `seq` / `sim` にはしない ―― **`sim` はシミュレータ本体（`./sim`）と衝突する**。
+`create_csv.py` は1本のトレースから両モードを変わらず集計する (simultaneous 側の
+列には接尾辞 `_simultaneous`、sequential 側は接尾辞なし)。
+**窓の定義にもシミュレーション側にも手を入れていない** ―― 窓を1つに縮めれば
+30,000 ランの実時間は縮むが、シミュレーション条件そのものが `save` と変わって
+過去の結果と比較できなくなるため。`analyze_csv.py` が sequential 側の列を
+読まないだけである (`COLUMN_SUFFIX = "_simultaneous"` 固定)。
 
 窓の定義は `script/interference_2pan_config.py` の `METRIC_WINDOW_ORDER` /
 `metric_window()` / `simultaneous_window()` が唯一の定義元。
-`script/create_csv.py` は1本のトレースから両モードを同時に集計し、simultaneous 側の列には
-接尾辞 `_simultaneous` を付ける（`sequential` 側は接尾辞なし）。**ゲーティングはトレースのタイムスタンプを見た後処理なので、
-driot にも base_simulator にも変更は入っていない。**
 
 ## 3. PER の定義
 
@@ -59,6 +60,7 @@ PER = 1 − (受信側が実際に受信したデータフレーム数)
 
 分子は**受信側**の受信数、分母は**送信側**の MAC 再送カウンタ4種の和。
 値は `[0, 1]` にクリップする。実装は `script/analyze_csv.py::_one_side_per()`。
+`save` から変えていない。
 
 | 方向 | 分子 | 分母の接頭辞 |
 |---|---|---|
@@ -83,35 +85,64 @@ W0 内の1ノード・1方向について、`N = S+R+M+F` を分母、`a` を `F
 n_rx = N − a + c        PER = (a − c) / N
 ```
 
-となり、`c > a` のとき負になる。実測のクリップ率は **sequential 9.50% / simultaneous 0.278%**。
-simultaneous は分母に `macCsmaFailCount` を足すとクリップが**厳密に 0 件**になる
-（`c ≤ C` なので `a − c + C ≥ 0` が常に成立する）。sequential は分子 `Rx(W4)` と分母
-`S(W0)+R(W1)+M(W2)+F(W3)` が互いに素なフレーム集合で包含関係の根拠自体が無く、
-窓間のサンプリング雑音が主因（クリップが低負荷ほど多い ―― 20% で 17.4%、
-100% で 4.9% ―― という負荷依存がその裏付け）。
+となり、`c > a` のとき負になる。simultaneous の実測クリップ率は **0.278%**
+（分母に `macCsmaFailCount` を足せば `c ≤ C` より `a − c + C ≥ 0` が常に成立し、
+クリップは厳密に 0 件になる）。
 
-**この挙動は把握した上でそのままにしてある。** 直すなら `_one_side_per()` の分母に
+**この挙動は把握した上でそのままにしてある。** 3手法とも同じ PER を使うので、
+手法間の比較には影響しない。直すなら `_one_side_per()` の分母に
 `macCsmaFailCount` を1項足すところから。
 
-## 4. 検知の統計量
+## 4. 判定の統計量 ―― 3手法
 
-各 Seed について、
+どれも Seed ごとに1つのスカラー (干渉指標) を出し、「値が大きいほど干渉あり」の
+向きに揃える。対象は `RSSI != 0` の端末 (= 1フレームも受信できなかった端末を除く)
+で3手法とも共通。絞り込みは `analyze_csv.py::_iter_seeds()` に集約してある。
 
-1. デバイスごとに `ΔPER = PER_DL − PER_UL` を取る
-2. RSSI でビン分けする。ビンの起点は**チャネル固有の固定値**
-   `RX_SENSITIVITY_DBM[ch] + 3.0 dBm`、幅 10 dBm（`analyze_csv.py` の
-   `RSSI_BIN_ANCHOR_OFFSET_DBM` / `RSSI_BIN_SIZE_DBM`）
-3. ビンごとに ΔPER の分散を取り、**その Seed 内での最大値**を干渉指標とする
+| 手法 | キー | 指標 | 使う量 |
+|---|---|---|---|
+| 提案手法 | `proposed` | RSSIビンごとの ΔPER 分散の、そのSeed内での**最大値** | ΔPER + RSSI |
+| ΔPER のみ | `dper` | 全端末の ΔPER の分散（ビン分けしない） | ΔPER |
+| RSSI のみ | `rssi` | 全端末の**平均 RSSI** | RSSI |
+
+`ΔPER_d = PER_DL(d) − PER_UL(d)`。定義元は `analyze_csv.py` の
+`DETECTION_METHODS` / `_score_proposed()` / `_score_dper()` / `_score_rssi()`。
+
+**ベースラインは提案手法から材料を1つずつ抜いたものである。** `dper` は提案手法から
+`select_bins()` を外しただけなので、提案手法との差がそのまま**RSSI ビン分割の寄与**に
+なる。`rssi` は ΔPER を一切使わない。この2つを下に敷くことで、提案手法の性能が
+「ΔPER を見ているから」なのか「RSSI でビン分けしているから」なのかを分けて読める。
+
+### 提案手法のビン
+
+RSSI でビン分けする。ビンの起点は**チャネル固有の固定値**
+`RX_SENSITIVITY_DBM[ch] + 3.0 dBm`、幅 10 dBm（`analyze_csv.py` の
+`RSSI_BIN_ANCHOR_OFFSET_DBM` / `RSSI_BIN_SIZE_DBM`）。端末が2個未満のビンは使わない。
 
 起点を固定値にしているのは、以前の「そのSeedの実測RSSI最小値 + 5dBm」だと基準が
 データ依存で、負荷や帯域でRSSI分布がずれるだけでビン境界と端末の切れ方が変わり、
 「同じリングの端末どうしを比べる」という前提がぶれていたため。最弱端を落とす理由
-自体は変わらず、セル端は PER が 0.5 付近で二項ノイズ `p(1-p)/n` が最大になり、
+自体は変わらず、セル端は PER が 0.5 付近になり二項ノイズ `p(1-p)/n` が最大になるので、
 干渉が無くても端末間のばらつきが大きく出て誤検知の床を決めてしまうからである。
 
-この指標を閾値と比較して干渉あり/なしを判定し、F1 が最大になる閾値を探す
-(`evaluate_interference_detection()`)。あわせて閾値に依らない分離度として
-順位ベースの AUC も出す (`_rank_auc()`)。
+### 向きの扱い
+
+3手法とも `METHOD_SIGN` が `+1`、つまり「大きいほど干渉あり」で片側固定。
+`rssi` を `+1` に置いているのは、干渉で弱い端末のフレームが落ちるぶん、受信できた
+フレームの平均RSSIが上振れするという想定による。
+
+**AUC の向きは補正しない** (`max(auc, 1-auc)` のような処理を入れない)。
+想定が外れていれば AUC が 0.5 を下回る形で現れるが、それは「指標が干渉の有無と
+逆相関している」という情報そのものである。向きを変えたくなったら `METHOD_SIGN` の
+1行だけを `-1` にする。詳細は `docs/auc.md`。
+
+### スコアを作れなかった Seed
+
+`proposed` は有効ビンが1つも作れなかったとき、`dper` は端末が2台未満のときに
+スコアを作れない。そのときは `METHOD_DEGENERATE_SCORE`（干渉の証拠が最も弱い側の端）を
+入れ、件数を検知結果CSVの `n_degenerate_*` 列に残す。`rssi` だけは平均RSSIが dBm で
+下限を持たないので `0.0` ではなく `-inf` を入れる（`0.0` は実測値 -60 dBm 前後より
+遥かに大きく、最強の陽性証拠に化けてしまう）。`save` の実データでは縮退は 0 件だった。
 
 ## 5. 実行
 
@@ -119,8 +150,8 @@ simultaneous は分母に `macCsmaFailCount` を足すとクリップが**厳密
 ./script/sbatch_jobs.sh
 ```
 
-これ1本で、config 生成 → シミュレーション → トレース解析 → sequential/simultaneous 両モードの
-解析 → ヒートマップ → 折れ線グラフ → ROC 曲線 まで通る。
+これ1本で、config 生成 → シミュレーション → トレース解析 → 3手法の解析 →
+折れ線グラフ まで通る。
 
 パイプラインの形:
 
@@ -133,11 +164,8 @@ simultaneous は分母に `macCsmaFailCount` を足すとクリップが**厳密
    バッチの集計が済んだ時点でまとめて削除する。`.trace` が巨大なのが主な理由だが、
    `.pos` も 30,000 ラン分で約 187MB 溜まる。
    いずれもシミュレーション中にしか読まれないので、バッチ完了後は残す必要がない
-   （`.pos` を読むのはシミュレータだけ ―― `TEMPLATE.config.j2` の
-   `mobility-trace-file`）
-4. `analyze_csv.py --mode {sequential,simultaneous}` が検知結果 CSV と Seed 別スコア CSV を出す
-5. `create_heatmap.py --mode {sequential,simultaneous}` / `plot_detection_lines.py` /
-   `plot_roc.py` が図を出す（手順は `run_analysis.sh` にまとめてある）
+4. `analyze_csv.py` が3手法ぶんの検知結果 CSV と Seed 別スコア CSV を出す
+5. `plot_detection_lines.py` が折れ線を出す（手順は `run_analysis.sh` にまとめてある）
 
 解析だけやり直すときは `./script/sbatch_reanalyze.sh`（再シミュレーション不要。
 `plots/simulation_results.csv` だけあればよい）。
@@ -157,58 +185,30 @@ simultaneous は分母に `macCsmaFailCount` を足すとクリップが**厳密
 | パス | 内容 |
 |---|---|
 | `plots/simulation_results.csv` | トレースの集約（gitignore。巨大） |
-| `plots/interference_detection_results.csv` | 検知結果 sequential |
-| `plots/interference_detection_results_simultaneous.csv` | 検知結果 simultaneous |
-| `plots/heatmaps{,_simultaneous}/` | F1 ヒートマップ（6帯域ペア × 2 PAN = 12枚ずつ） |
-| `plots/heatmaps_auc{,_simultaneous}/` | AUC ヒートマップ（12枚ずつ） |
-| `plots/detection_lines/` | 折れ線グラフ（F1・AUC で12枚ずつ + 描画値の CSV） |
-| `plots/detection_scores{,_simultaneous}.csv` | Seed ごとの干渉指標。ROC の入力 |
-| `plots/roc/` | ROC 曲線（6枚） |
+| `plots/interference_detection_results_simultaneous.csv` | 検知結果。**900行** = 6帯域ペア × 25負荷 × 2PAN × 3手法 |
+| `plots/detection_scores_simultaneous.csv` | Seed ごとの干渉指標。180,000行 |
+| `plots/detection_lines/` | 折れ線 16枚 + 描画値の CSV |
 
-### ヒートマップ
+### 検知結果 CSV の列
 
-PAN1 負荷（縦）× PAN2 負荷（横）の 5×5 格子に指標を色で出す。
-1枚が (帯域ペア, PAN) の1組で、`--metric` で F1 版と AUC 版を切り替える。
+```
+bandwidth, distance, pan1_offload, pan2_offload, pan, method, auc,
+n_interf_seeds, n_no_interf_seeds, n_degenerate_interf, n_degenerate_no_interf
+```
 
-| `--metric` | セルの文字 | 出力先 |
-|---|---|---|
-| `f1`（既定） | `Tau: x.xx` / `F1: x.xx` | `plots/heatmaps{,_simultaneous}/` |
-| `auc` | `x.xxx`（値だけ） | `plots/heatmaps_auc{,_simultaneous}/` |
-
-色の範囲は両方 **0.5–1.0** に揃えてあるので、F1 版と AUC 版を並べて
-「同じ濃さ＝同じ値」として読める。
-
-セルの文字色は **0.84 を境**に黒／白を切り替える。`YlGnBu` 上で白文字と黒文字の
-WCAG コントラストが入れ替わるのが値 0.838 のところだからで、以前 0.80 を境に
-していたときは 0.80〜0.84 の帯が「白文字だが黒のほうが読みやすい」状態だった。
-
-**AUC 版には閾値を出さない。** AUC は閾値の選び方に依らない指標で、
-τ という概念自体が無いため。AUC は刻みが 1e-4 なので F1 より1桁多い3桁で出す。
-
-形も違う。F1 版はセルに2行入るので横長（`aspect="auto"`）、
-**AUC 版は値だけなので正方形**（`aspect="equal"` でセルを正方形にする）。
-列が AUC なのは自明なので `AUC=` も付けない。
-
-正方形にするのは**格子**であって、ページ全体ではない。カラーバーが横幅を
-食うぶんページは 0.99:1 になるが、余白を作ってまでページを正方形に揃えることは
-しない（一度やったら上下に無駄な余白が出た）。`tight_layout` +
-`bbox_inches="tight"` に任せて余白を刈り込んでいる。カラーバーは付いたまま。
-
-なおこの図の軸は `pan1_offload` / `pan2_offload` そのもので、
-**自分 / 相手への読み替えはしていない**。`PAN2` の図では縦が相手、横が自分になる。
-読み替えた断面が見たいときは折れ線グラフのほう。
+`method` 列が `proposed` / `dper` / `rssi` のどれか。`save` にあった
+`best_threshold` / `TP` / `FP` / `FN` / `TN` / `precision` / `recall` / `fpr` / `f1` は
+無い（§8）。
 
 ### 折れ線グラフ
 
 **相手PAN負荷 = 100% の1行だけを切り出した断面**。横軸が自PAN負荷 20–100%、
-縦軸が F1 または AUC、色が相手の帯域、線種が測定モード（simultaneous 実線 / sequential 点線）。
+縦軸が AUC、色が相手の帯域、**線種が判定手法**（proposed 実線 / dper 破線 / rssi 点線）。
 
-ヒートマップは 25 セル × 12 枚あり、「相手が最大負荷のとき自分の負荷を上げると
-検知性能がどう落ちるか」という一番見たい断面が読み取れない。さらに
-`create_heatmap.py` は軸を `pan1`/`pan2` に固定しているので PAN2 の図では
-自分と相手が入れ替わる。折れ線側は**自分 / 相手に明示的に読み替えている**。
+断面を相手負荷 100% に固定するのは、一番見たいのが「相手が最大負荷のとき自分の
+負荷を上げると検知性能がどう落ちるか」だから。
 
-読み替えの規則:
+自分 / 相手の読み替え規則:
 
 ```
 A, B       = bandwidth.split("vs")        # A = PAN1 の kbps, B = PAN2 の kbps
@@ -219,38 +219,31 @@ other_load = pan2_offload if pan == "PAN1" else pan1_offload
 
 `"AvsB"` を PAN1=A と読める根拠は、ラベルを作る `get_bandwidth_label()` が
 ソートする一方で `TARGET_BANDWIDTH_PATTERNS` が常に `kbps(PAN1) ≤ kbps(PAN2)` を
-満たすため、そのソートが恒等写像になること。
+満たすため、そのソートが恒等写像になること。実装は
+`plot_detection_lines.py::own_other()` が唯一の定義元。
 
 対称ペア（50vs50 / 100vs100 / 200vs200）は PAN1/PAN2 の両方が「自分」に該当するが、
 **PAN1 のみを採る**。非対称ペアは片方の PAN しか該当しないので、全線を 1 PAN 分
 (100+100 Seed) に揃えてノイズ水準を均一にするため。
 
-### ROC 曲線
+#### 枚数と凡例
 
-`auc` 列は面積の数値でしかないので、「低 FPR 側で素直に立ち上がっているのか、
-高 FPR 側でようやく稼いでいるのか」が分からない。閾値をどこに置くかの議論も
-できない。そこで曲線そのものを描く。
+`tag` が `proposed` / `dper` / `rssi` / `compare` の4種、それぞれ自帯域3枚 +
+3パネル1枚で**計16枚**。`compare` が3手法の重ね描き。
 
-断面は折れ線グラフと揃えてあり、相手PAN負荷 = 100% に固定。
-1枚 = 自帯域 × 測定モードで 6 枚、1枚に 3 パネル（相手帯域）、
-1パネルに 5 本（自PAN負荷 20–100%）、凡例に AUC を併記する。
-色は順序のある量なので単一色相の濃淡（dataviz の blue ランプ 250→700）で、
-負荷が上がる＝検知が難しくなる方向を濃くしている。
+凡例は**符号化の軸ごとに1ブロック**出す ―― 色 (帯域) 3項目 + 線種 (手法) 3項目。
+3手法 × 3帯域を総当たりで出すと9項目になり、どれが色の違いでどれが線種の違いなのかが
+読み取れなくなるため。手法1つの図では線種の軸が無いので帯域のブロックだけを出す。
 
-**ROC を引くには Seed ごとのスコアが要る。** 検知結果 CSV は最良閾値 1 点の
-混同行列しか持たず、そこからは曲線を復元できない。そこで `analyze_csv.py` が
-`plots/detection_scores{,_simultaneous}.csv` にスコアを書き出す（300セル × 200 Seed）。
-これを残しておけば、155MB の `simulation_results.csv` を再解析しなくても
-曲線を引き直せるし、閾値の置き方を後から検討することもできる。
+#### y 軸
 
-曲線の計算で注意している点が 1 つある。**同じスコアの点は 1 点にまとめる。**
-同値を境に TP と FP が同時に増えるので、1 件ずつ点を打つと「先に TP だけ
-増えた」ように見えて階段が嘘になる。こうして引いた曲線の台形則面積は
-`_rank_auc()` が返す値と機械精度（2.2e-16）で一致することを実データ 600 セルで
-検証してある。つまり**図に描いてある曲線の面積が、CSV の `auc` 列そのもの**である。
+`save` は AUC を `(0.50, 1.0)` に固定していた。0.5 がランダム判定の水準で、軸の
+下端がそのまま床を示すからである。だが**ベースラインは 0.5 を下回り得る**ので、
+下回った点が枠外に消えると図が嘘になる。そこで全描画値の最小値を先に見て、
+`0.5` 未満があるときだけ 0.1 刻みで切り下げる。
 
-AUC と ROC の詳細（定義・実装・τ の動かし方・検証結果・実データの読み方）は
-`docs/auc.md` にまとめてある。
+**枚ごとには変えない。** 図をまたいで比較できることがこの図の目的なので、
+1つ決めて全図に同じ値を当てる。選ばれた下端は実行時に標準出力に出る。
 
 ## 7. ファイル構成
 
@@ -259,32 +252,29 @@ script/
   interference_2pan_config.py   config/pos/statconfig の生成。窓の定義元
   sim_worker_slurm.sh           1ランを走らせる SLURM ワーカー
   create_csv.py                 .trace -> simulation_results.csv (sequential/simultaneous 同時)
-  analyze_csv.py                PER・RSSIビン・分散統計量・検知結果 CSV
-  create_heatmap.py             ヒートマップ
+  analyze_csv.py                PER・3手法の統計量・AUC・検知結果 CSV
   plot_detection_lines.py       折れ線グラフ。own/other の読み替え規則の定義元
-  plot_roc.py                   ROC 曲線
   plot_figures.sh               図だけ作り直す (解析は走らせない)
   run_analysis.sh               解析から作図まで。下の2つから呼ばれる
   sbatch_jobs.sh                全体の driver
   sbatch_reanalyze.sh           解析と作図だけやり直す
 template/                       Jinja2 テンプレート
 docs/README.md                  このファイル
-docs/auc.md                     AUC と ROC 曲線の詳細
+docs/auc.md                     AUC の詳細
 ```
 
-`analyze_csv.py` は CSV を作るだけで、図は出さない。
-図は `create_heatmap.py` / `plot_detection_lines.py` / `plot_roc.py` の担当。
-
-自分 / 相手の読み替え規則は `plot_detection_lines.py::own_other()` が唯一の
-定義元で、`plot_roc.py` はそれを import して使う。2箇所に書くと片方だけ直して
-静かにずれるため。
+`analyze_csv.py` は CSV を作るだけで、図は出さない。図は `plot_detection_lines.py` の担当。
 
 ## 8. ここで意図的にやっていないこと
 
-- **変動係数 CV / 正規化分散 nvar による判定**。`cv` ブランチにある。
-  分散を閾値と比べる判定は統計的に弱いという問題意識から試したもので、
-  このブランチには持ち込んでいない
-- **条件別の箱ひげ図・距離-PER のエラーバー図・ノード配置図**。
-  ヒートマップ・折れ線・ROC だけという方針のため
-- **PER のクリップの修正**。§3 のとおり把握しているが未修正
+- **F1 スコア**。閾値を1点に決めたときの性能で、しかも干渉の有無を知った上で
+  最適化した値なので楽観側に偏る。それ以上に、3手法のスコアは分散 (proposed/dper) と
+  dBm (rssi) で単位も値域も違い、**共通の閾値グリッドが引けない**。AUC は順位しか
+  見ないので単調変換に不変で、この比較が成立する。`save` に実装がある
+- **ヒートマップ**（負荷 5×5 の格子）と **ROC 曲線**。手法3つを重ねられるのが
+  折れ線だけだから。どちらも `save` に実装がある
+- **sequential モードの解析**。§2 のとおり
+- **変動係数 CV / 正規化分散 nvar による判定**。`cv` ブランチにある
+- **PER のクリップの修正**。§3 のとおり把握しているが未修正。3手法に等しく効くので
+  手法間の比較には影響しない
 - `base_simulator`（`source/simulator/`）の変更。ライセンス上の制約で触らない

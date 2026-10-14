@@ -283,8 +283,8 @@ STAT_TEMPLATE = "TEMPLATE.statconfig.j2"
 # 副次的な効果として、全ての条件が load <= 100 になるので、オファードロード換算の
 # ratio 判定(過飽和側を除外していた)が全行に適用されるようになる。
 #
-# 注意: このグリッドを変えたら create_heatmap.py の LOAD_RANGE / max_load も
-# 追随する必要がある。二重管理を避けるため、あちらはこの定数を import している。
+# 注意: 作図側 (plot_detection_lines.py) は横軸の目盛りをこの定数から取る。
+# 二重管理を避けるため、あちらは直値を書かずにこれを import している。
 OFFERED_LOAD_PERCENTS = list(range(20, 101, 20))   # 20,40,60,80,100 [% of saturation]
 
 # --- 全パラメータの組み合わせを事前に確定させておく ---

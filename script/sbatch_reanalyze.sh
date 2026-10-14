@@ -46,28 +46,40 @@ fi
 
 # --- 結果の検証 ---------------------------------------------------------
 # ジョブが成功で終わっても、出力が期待どおりとは限らない。中身を確かめる。
-# 行数は 6帯域ペア x 25負荷 x 2PAN = 300。
-EXPECTED_ROWS=300
+# 行数は 6帯域ペア x 25負荷 x 2PAN x 3手法 = 900。
+# (手法を増減したらここも直すこと。手法の定義元は analyze_csv.py の
+#  DETECTION_METHODS で、3 はそこから来ている)
+EXPECTED_ROWS=900
+EXPECTED_METHODS=3
 STATUS=0
-for SUFFIX in "" "_simultaneous"; do
-    CSV="$CMD_DIR/plots/interference_detection_results${SUFFIX}.csv"
-    LABEL="${SUFFIX:-_sequential}"
-    if [ ! -f "$CSV" ]; then
-        echo "エラー: $CSV がありません" >&2
-        STATUS=1
-        continue
-    fi
+CSV="$CMD_DIR/plots/interference_detection_results_simultaneous.csv"
+if [ ! -f "$CSV" ]; then
+    echo "エラー: $CSV がありません" >&2
+    STATUS=1
+else
     ROWS=$(($(wc -l < "$CSV") - 1))
-    if ! head -1 "$CSV" | tr ',' '\n' | grep -qx "auc"; then
-        echo "エラー: ${LABEL}: auc 列がありません (古い analyze_csv.py が走った可能性)" >&2
-        STATUS=1
-    fi
+    for COL in method auc; do
+        if ! head -1 "$CSV" | tr ',' '\n' | grep -qx "$COL"; then
+            echo "エラー: $COL 列がありません (古い analyze_csv.py が走った可能性)" >&2
+            STATUS=1
+        fi
+    done
     if [ "$ROWS" -ne "$EXPECTED_ROWS" ]; then
-        echo "エラー: ${LABEL}: 行数が $ROWS です (期待 $EXPECTED_ROWS)" >&2
+        echo "エラー: 行数が $ROWS です (期待 $EXPECTED_ROWS)" >&2
         STATUS=1
     fi
-    [ "$STATUS" -eq 0 ] && echo "  ${LABEL}: $ROWS 行、auc 列あり"
-done
+    # 列があっても手法が1つしか入っていなければ比較にならない。実際に数える。
+    if [ "$STATUS" -eq 0 ]; then
+        METHOD_COL=$(head -1 "$CSV" | tr ',' '\n' | grep -nx "method" | cut -d: -f1)
+        NUM_METHODS=$(tail -n +2 "$CSV" | cut -d, -f"$METHOD_COL" | sort -u | wc -l | tr -d ' ')
+        if [ "$NUM_METHODS" -ne "$EXPECTED_METHODS" ]; then
+            echo "エラー: 手法が $NUM_METHODS 種類です (期待 $EXPECTED_METHODS)" >&2
+            STATUS=1
+        else
+            echo "  $ROWS 行、$NUM_METHODS 手法: $(tail -n +2 "$CSV" | cut -d, -f"$METHOD_COL" | sort -u | tr '\n' ' ')"
+        fi
+    fi
+fi
 
 if [ "$STATUS" -ne 0 ]; then
     echo "検証に失敗しました。" >&2
@@ -76,6 +88,5 @@ fi
 
 echo "========================================"
 echo "再解析が完了しました"
-echo "  plots/heatmaps{,_simultaneous}/ plots/heatmaps_auc{,_simultaneous}/"
-echo "  plots/detection_lines/ plots/roc/"
+echo "  plots/detection_lines/"
 echo "========================================"

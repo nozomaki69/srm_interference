@@ -19,8 +19,8 @@ PARSE_PARALLEL=50
 # configファイル生成スクリプト (ファイル名が違う場合はここを変更してください)
 GEN_CONFIG_SCRIPT="$SCRIPT_DIR/interference_2pan_config.py"
 
-# 全バッチ終了後に実行する解析。sequential/simultaneous 両モードの検知結果CSV・ヒートマップ・
-# 折れ線グラフをまとめて作る (手順の定義元は run_analysis.sh 側に置く)。
+# 全バッチ終了後に実行する解析。3手法の検知結果CSVと折れ線グラフを作る
+# (手順の定義元は run_analysis.sh 側に置く)。
 ANALYSIS_SCRIPT="$SCRIPT_DIR/run_analysis.sh"
 
 cd "$CMD_DIR" || exit

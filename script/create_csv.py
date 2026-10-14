@@ -18,7 +18,7 @@ MAX_FRAME_RETRIES = 3
 
 # --- メトリックの時間分割測定 ---
 # 窓の定義は生成側 (interference_2pan_config) を唯一の定義元にする。ここに直値を
-# 書くと時間軸を変えたときに片方だけ取り残される (create_heatmap.py と同じ方針)。
+# 書くと時間軸を変えたときに片方だけ取り残される (解析側も同じ方針で import する)。
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from interference_2pan_config import (  # noqa: E402
     METRIC_WINDOW_ORDER,

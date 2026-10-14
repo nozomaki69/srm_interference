@@ -31,9 +31,9 @@ CHANNEL_FREQ_MHZ = {0: 920, 1: 920, 2: 920, 3: 921, 4: 921, 5: 921}
 
 # チャネル番号 -> 受信感度(dBm)。RSSIビンの起点に使う。
 # CHANNEL_KBPS / CHANNEL_FREQ_MHZ はローカルに複製しているが、こちらは生成側から
-# import して唯一の定義元に揃える。create_heatmap.py が OFFERED_LOAD_PERCENTS で
-# 同じことをしており、そこのコメントどおり直値を書くと生成側を変えたときに
-# 片方だけ取り残されて静かに壊れる。
+# import して唯一の定義元に揃える。直値を書くと生成側を変えたときに片方だけ
+# 取り残されて静かに壊れる (plot_detection_lines.py も同じ理由で
+# OFFERED_LOAD_PERCENTS を生成側から取っている)。
 sys.path.insert(0, SCRIPT_DIR)
 from interference_2pan_config import CHANNELS as _CHANNELS  # noqa: E402
 
@@ -42,8 +42,8 @@ RX_SENSITIVITY_DBM = {c["id"]: c["rx_sensitivity_dbm"] for c in _CHANNELS}
 # --- RSSIビン設定 -----------------------------------------------------
 # RSSIビンの幅(dBm)。★ここを変更するだけで、以下の解析すべてのビン幅が
 # 一括で変わる★:
-#   - select_bins                 (干渉検知に使うRSSIビン)
-#   - compute_seed_max_variance   (Seedごとの干渉指標)
+#   - select_bins       (干渉検知に使うRSSIビン)
+#   - _score_proposed   (提案手法のSeedごとの干渉指標)
 RSSI_BIN_SIZE_DBM = 10
 
 # ビンの起点を受信感度から何dBm上に置くか。
@@ -76,22 +76,18 @@ RSSI_BIN_ANCHOR_OFFSET_DBM = 3.0
 
 # --- 測定モード -------------------------------------------------------
 # create_csv.py は1つのトレースから2通りの測定結果を出している:
-#   sequential   : 各メトリックを自分の 200s 窓で順に測る。標準に忠実。既存の列名
-#   simultaneous : 全メトリックを W0 の 200s で同時に測る。IEEE 802.15.4 では
-#                  実現できないので、時間分割のコストを測るための参照 (上界)。
-#                  列名 + "_simultaneous"
-# どちらを解析するかで参照する列の接尾辞と出力ファイル名が変わる。
-MEASUREMENT_MODE = "sequential"
-COLUMN_SUFFIX = ""
-
-
-def set_measurement_mode(mode):
-    """"sequential" か "simultaneous" を指定して、参照する列と出力名を切り替える。"""
-    global MEASUREMENT_MODE, COLUMN_SUFFIX
-    if mode not in ("sequential", "simultaneous"):
-        raise ValueError(f"unknown measurement mode: {mode}")
-    MEASUREMENT_MODE = mode
-    COLUMN_SUFFIX = "" if mode == "sequential" else "_simultaneous"
+#   sequential   : 各メトリックを自分の 200s 窓で順に測る。標準に忠実。接尾辞なし
+#   simultaneous : 全メトリックを W0 の 200s で同時に測る。接尾辞 "_simultaneous"
+#
+# ★このブランチ (icc) は simultaneous だけを読む★
+#
+# 見たいのが「時間分割のコスト」ではなく「干渉判定の手法間の差」だから。
+# 測定モードと手法を同時に振ると、折れ線の線種が2つの軸に取られて図が読めなくなる。
+# メトリックを同時測定した場合 = 測定側の劣化が無い状態に条件を固定して、
+# 手法だけを比べる。sequential 側の列は create_csv.py が出し続けるが読まない
+# (窓の定義に手を入れるとシミュレーションの意味自体が変わるので触らない)。
+MEASUREMENT_MODE = "simultaneous"
+COLUMN_SUFFIX = "_simultaneous"
 
 
 def bin_anchor_dbm(channel):
@@ -399,30 +395,59 @@ def load_and_aggregate(csv_file):
 # bin_anchor_dbm(ch) が返すチャネル固有の固定値なので、ビン境界は
 # Seed にも負荷にも依存しない。
 
-# 分散のしきい値の探索範囲。ΔPERは[-1, 1]なので分散の理論上限は1だが、
-# 実データではもっと小さい値になるはず。0〜1を0.001刻みで細かく探索する。
-VARIANCE_THRESHOLDS = np.round(np.arange(0.0, 1.001, 0.001), 4)
+# ============================================================
+# 干渉判定の手法
+# ============================================================
+# 提案手法 (RSSIビン内ΔPER分散) を、ΔPERだけ / RSSIだけ の2つのベースラインと
+# 比べる。ベースラインは提案手法から材料を1つずつ抜いたものなので、差分が
+# 「何が効いているか」をそのまま表す。
+#
+#   proposed : RSSIビンごとに ΔPER の分散を取り、そのSeed内の最大値
+#              -> ΔPER と RSSI の両方を使う
+#   dper     : 全端末の ΔPER の分散 (ビン分けしない)
+#              -> proposed から select_bins() を抜いただけ。差 = ビン分割の寄与
+#   rssi     : 全端末の平均RSSI。ΔPER を一切使わない
+#
+# 並び順はこのタプルが定義元で、CSV の行順も図の凡例順もこれに従う。
+DETECTION_METHODS = ("proposed", "dper", "rssi")
+
+# 図中の表示名。plot_detection_lines.py が import する。
+# 図のテキストは英語にする (計算機に日本語フォントが無いと豆腐文字になる)。
+# ΔPER は matplotlib の mathtext で出す。
+METHOD_LABEL = {
+    "proposed": "Proposed",
+    "dper": r"$\Delta$PER only",
+    "rssi": "RSSI only",
+}
+
+# スコアの向き。+1 なら「値が大きいほど干渉あり」。
+# rssi を +1 に置いているのは、干渉で弱い端末のフレームが落ちるぶん、受信できた
+# フレームの平均RSSIが上振れするという想定による。この想定が外れたら AUC が
+# 0.5 を下回る形で現れる。_rank_auc() は向きを補正しない (0.5割れ自体が結果) ので、
+# 向きを変えたくなったらここだけを -1 にする。
+METHOD_SIGN = {"proposed": 1.0, "dper": 1.0, "rssi": 1.0}
+
+# スコアを作れなかったSeedに入れる値。「干渉の証拠が最も弱い」側の端に置く。
+#   proposed/dper: 分散の下限は 0。
+#   rssi        : 平均RSSI は dBm なので下限が無い。0.0 を入れると実測値
+#                 (-60 dBm 前後) より遥かに大きくなり、最強の陽性証拠に化ける。
+# 実データでは proposed の縮退が 0 件なので (docs/auc.md)、どれも出ない想定。
+METHOD_DEGENERATE_SCORE = {"proposed": 0.0, "dper": 0.0, "rssi": float("-inf")}
 
 
-def compute_seed_max_variance(delta_per, rssi_list, num_devices, anchor_dbm,
-                              stats_key=None):
-    """
+def _iter_seeds(delta_per, rssi_list, num_devices):
+    """Seedごとに (RSSI, ΔPER) を切り出し、RSSI==0 の端末を落として yield する。
+
     delta_per, rssi_list: Seedごとに num_devices 個ずつ連続して並んだ1次元配列。
-    各SeedについてRSSIを select_bins() が返すビンに分け、ビンごとのΔPER分散を
-    計算し、そのSeed内での最大分散値を「干渉指標」として返す。
-    どのビンを使うかは select_bins() が決める(起点 anchor_dbm 以下の端末は入らない)。
 
-    stats_key を渡すと、ビン内端末数と「有効ビン0のSeed数」を診断用に集計する。
-
-    戻り値: (各Seedの最大分散値のリスト, 有効ビンが1つも無かったSeed数)。
-    有効なビン（データ点2個以上）が1つも無いSeedの指標は 0.0 とする。
+    RSSI==0 は「1フレームも受信できなかった端末」の印 (create_csv.py が受信0のとき
+    平均RSSIを 0.0 にする)。dBm の実測値がちょうど 0 になることはないので番兵に使える。
+    3手法が同じ端末集合を見るように、この絞り込みをここ1箇所に集める。
     """
     rssi_list = np.asarray(rssi_list, dtype=float)
     delta_per = np.asarray(delta_per, dtype=float)
     num_seeds = len(rssi_list) // num_devices
 
-    seed_max_variances = []
-    n_degenerate = 0
     for s in range(num_seeds):
         start = s * num_devices
         end = (s + 1) * num_devices
@@ -430,65 +455,102 @@ def compute_seed_max_variance(delta_per, rssi_list, num_devices, anchor_dbm,
         delta_seed = delta_per[start:end]
 
         valid = rssi_seed != 0
-        r_v = rssi_seed[valid]
-        d_v = delta_seed[valid]
+        yield rssi_seed[valid], delta_seed[valid]
 
-        max_var = 0.0
-        n_used = 0
-        # 起点は固定だが、上端(最大RSSI)と端末の入り方はSeedごとに違うので
-        # ビンの本数と中身はSeedごとに変わる。
-        for upper, lower in select_bins(r_v, anchor_dbm):
-            mask = (r_v > lower) & (r_v <= upper)
-            bin_values = d_v[mask]
-            if len(bin_values) > 1:
-                n_used += 1
-                if stats_key is not None:
-                    BIN_OCCUPANCY[stats_key].append(len(bin_values))
-                var_val = np.var(bin_values)
-                if var_val > max_var:
-                    max_var = var_val
 
-        if n_used == 0:
-            n_degenerate += 1
+def _score_proposed(r_v, d_v, anchor_dbm, stats_key):
+    """提案手法: RSSIビンごとのΔPER分散の、そのSeed内での最大値。
+
+    どのビンを使うかは select_bins() が決める (起点 anchor_dbm 以下の端末は入らない)。
+    stats_key を渡すと、ビン内端末数を診断用に集計する。
+    有効なビン (データ点2個以上) が1つも無ければ (0.0, False) を返す。
+    """
+    max_var = 0.0
+    n_used = 0
+    # 起点は固定だが、上端(最大RSSI)と端末の入り方はSeedごとに違うので
+    # ビンの本数と中身はSeedごとに変わる。
+    for upper, lower in select_bins(r_v, anchor_dbm):
+        mask = (r_v > lower) & (r_v <= upper)
+        bin_values = d_v[mask]
+        if len(bin_values) > 1:
+            n_used += 1
             if stats_key is not None:
-                DEGENERATE_SEEDS[stats_key] += 1
+                BIN_OCCUPANCY[stats_key].append(len(bin_values))
+            var_val = np.var(bin_values)
+            if var_val > max_var:
+                max_var = var_val
 
-        seed_max_variances.append(max_var)
-
-    return seed_max_variances, n_degenerate
+    return max_var, n_used > 0
 
 
-def evaluate_interference_detection(interf_values, no_interf_values):
+def _score_dper(r_v, d_v, anchor_dbm, stats_key):
+    """ベースライン1: 全端末のΔPERの分散。
+
+    proposed から select_bins() を抜いただけなので、proposed との差が
+    そのまま「RSSIビン分割の寄与」になる。RSSI は _iter_seeds() の
+    「受信できたか」の判定にしか使っていない。
+    端末が2台未満だと分散が定義できないので (0.0, False)。
     """
-    interf_values / no_interf_values: 干渉あり/なしシナリオでの、各Seedの
-    干渉指標（compute_seed_max_variance の出力）。
-    分散のしきい値を振り、F1が最大となるしきい値と、その時の
-    TP/FP/FN/TN・Precision/Recall/FPR/F1 を返す。
+    if d_v.size < 2:
+        return 0.0, False
+    return float(np.var(d_v)), True
+
+
+def _score_rssi(r_v, d_v, anchor_dbm, stats_key):
+    """ベースライン2: 全端末の平均RSSI。ΔPER を一切使わない。
+
+    干渉で弱い端末のフレームが落ちるぶん、受信できたフレームの平均RSSIが
+    上振れする、という想定の統計量。向きの扱いは METHOD_SIGN を参照。
+    ビンは使わないので anchor_dbm も見ない。
     """
-    n_pos = len(interf_values)
-    n_neg = len(no_interf_values)
+    if r_v.size == 0:
+        return 0.0, False
+    return float(np.mean(r_v)), True
 
-    best = None
-    for th in VARIANCE_THRESHOLDS:
-        tp = sum(1 for v in interf_values if v >= th)
-        fp = sum(1 for v in no_interf_values if v >= th)
-        fn = n_pos - tp
-        tn = n_neg - fp
 
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+_METHOD_SCORERS = {
+    "proposed": _score_proposed,
+    "dper": _score_dper,
+    "rssi": _score_rssi,
+}
 
-        if best is None or f1 > best["f1"]:
-            best = {
-                "threshold": th, "tp": tp, "fp": fp, "fn": fn, "tn": tn,
-                "precision": precision, "recall": recall, "fpr": fpr, "f1": f1,
-            }
 
-    best["n_interf_seeds"] = n_pos
-    best["n_no_interf_seeds"] = n_neg
-    return best
+def compute_seed_scores(method, delta_per, rssi_list, num_devices, anchor_dbm,
+                        stats_key=None):
+    """Seedごとの干渉指標を返す。
+
+    method: DETECTION_METHODS のいずれか。
+    delta_per, rssi_list: Seedごとに num_devices 個ずつ連続して並んだ1次元配列。
+
+    戻り値: (各Seedのスコアのリスト, スコアを作れなかったSeed数)。
+    作れなかったSeedには METHOD_DEGENERATE_SCORE を入れる (干渉の証拠が最も弱い側の端)。
+    縮退は同値を作るが、AUC では rankdata の midrank により 0.5 として
+    正しく数えられる (_rank_auc() 参照)。
+
+    stats_key はビン構成の診断用で、ビンを使う proposed のときだけ効く。
+    他の手法で呼んでも BIN_OCCUPANCY / DEGENERATE_SEEDS は更新しない
+    (3手法ぶん回すので、素通しだと同じSeedを3回数えてしまう)。
+    """
+    if method not in _METHOD_SCORERS:
+        raise ValueError(f"unknown detection method: {method}")
+    scorer = _METHOD_SCORERS[method]
+    sign = METHOD_SIGN[method]
+    degenerate_score = METHOD_DEGENERATE_SCORE[method]
+    use_stats = stats_key if method == "proposed" else None
+
+    scores = []
+    n_degenerate = 0
+    for r_v, d_v in _iter_seeds(delta_per, rssi_list, num_devices):
+        score, ok = scorer(r_v, d_v, anchor_dbm, use_stats)
+        if not ok:
+            n_degenerate += 1
+            if use_stats is not None:
+                DEGENERATE_SEEDS[use_stats] += 1
+            scores.append(degenerate_score)
+            continue
+        scores.append(sign * score)
+
+    return scores, n_degenerate
 
 
 def _rank_auc(interf_values, no_interf_values):
@@ -496,27 +558,22 @@ def _rank_auc(interf_values, no_interf_values):
 
         AUC = P(指標_interf > 指標_no_interf) + 0.5 * P(同値)
 
-    F1 が「最良の1点」での性能なのに対し、AUC は閾値の選び方に依らない分離度を
-    表すので、両方を並べて見るために出す。
+    閾値を1点に決めずにスコアの分離度そのものを測るので、**スケールの違う
+    統計量どうしを同じ土俵で比べられる**。3手法のスコアは分散 (proposed/dper) と
+    dBm (rssi) で単位も値域も違い、共通の閾値グリッドは引けない。AUC は順位しか
+    見ないので単調変換に不変であり、この比較が成立する。
 
-    閾値グリッド上の台形則にしないのは、VARIANCE_THRESHOLDS が 0.001 刻みの
-    固定グリッドで、指標の実測レンジに対して粗いから。実データの best_threshold は
-    0〜0.143 に収まっており、候補が実質 143 通りしかない。順位ベースなら刻み幅にも
-    グリッドの定義にも依存しない。
-    (なお指標は ΔPER in [-1,1] の分散なので理論上限が 1.0 であり、グリッドの
-     上端 1.000 が効く場面は無い。上限ではなく刻みが理由。)
+    順位ベースにしていて閾値グリッド上の台形則にしないのも同じ理由。グリッドは
+    刻みを決めた時点で指標の実測レンジを仮定してしまう。
 
-    向きは補正しない。evaluate_interference_detection() の判定が `>= th` の
-    片側固定なので AUC の向きも一意に決まる。0.5 を下回ったら「指標が干渉の
-    有無と逆相関している」という情報そのもので、max(auc, 1 - auc) にすると
-    それが潰れる。
+    向きは補正しない。「値が大きいほど干渉あり」で片側固定 (METHOD_SIGN) なので
+    AUC の向きも一意に決まる。0.5 を下回ったら「指標が干渉の有無と逆相関している」
+    という情報そのもので、max(auc, 1 - auc) にするとそれが潰れる。ベースラインが
+    0.5 を割ることは十分あり得るが、それは結果であって不具合ではない。
 
-    rankdata は同順位に midrank を与える。有効ビンが1つも作れなかった Seed は
-    compute_seed_max_variance() が max_var の初期値 0.0 をそのまま返すので
-    同値が溜まり得るが、midrank によりその組は正しく 0.5 として数えられる。
-
-    曲線そのものを見たいときは plot_roc.py。同じスコアから ROC を引くので、
-    その台形則面積はここで返す値と一致する。
+    rankdata は同順位に midrank を与える。スコアを作れなかった Seed は
+    compute_seed_scores() が METHOD_DEGENERATE_SCORE を入れるので同値が
+    溜まり得るが、midrank によりその組は正しく 0.5 として数えられる。
     """
     n_pos = len(interf_values)
     n_neg = len(no_interf_values)
@@ -529,9 +586,9 @@ def _rank_auc(interf_values, no_interf_values):
 
 def run_interference_detection(data):
     """
-    帯域幅の組み合わせ（例: 50vs50）ごとに、干渉あり/なしシナリオの
-    ΔPER分散（RSSIビンごとの最大値, Seed単位）を比較し、干渉検知の
-    最適しきい値とその性能指標を求める。PAN1・PAN2それぞれについて行う。
+    帯域幅の組み合わせ（例: 50vs50）ごとに、干渉あり/なしシナリオの干渉指標を
+    Seed 単位で比較し、閾値に依らない分離度 (AUC) を求める。
+    PAN1・PAN2 それぞれについて、DETECTION_METHODS の3手法ぶん行う。
     """
     # (bandwidth_label, distance, pan1_offload, pan2_offload) -> {'interf': key, 'no_interf': key}
     groups = defaultdict(dict)
@@ -573,77 +630,74 @@ def run_interference_detection(data):
                     f"({anchor} vs {anchor_no_interf})。対比較が成立しません。"
                 )
 
+            # ΔPER と RSSI の配列は3手法で共通なので、ここで1度だけ作って回す。
+            # (手法ごとに load_and_aggregate からやり直すと3倍読むことになる)
             interf_delta = np.array(interf_entry[dl_key]) - np.array(interf_entry[ul_key])
             no_interf_delta = np.array(no_interf_entry[dl_key]) - np.array(no_interf_entry[ul_key])
 
-            interf_values, interf_degen = compute_seed_max_variance(
-                interf_delta, interf_entry[rssi_key], NUM_DEVICE, anchor,
-                (pan_name, interf_ch[pan_name]))
-            no_interf_values, no_interf_degen = compute_seed_max_variance(
-                no_interf_delta, no_interf_entry[rssi_key], NUM_DEVICE, anchor,
-                (pan_name, no_interf_ch[pan_name]))
+            for method in DETECTION_METHODS:
+                interf_values, interf_degen = compute_seed_scores(
+                    method, interf_delta, interf_entry[rssi_key], NUM_DEVICE, anchor,
+                    (pan_name, interf_ch[pan_name]))
+                no_interf_values, no_interf_degen = compute_seed_scores(
+                    method, no_interf_delta, no_interf_entry[rssi_key], NUM_DEVICE,
+                    anchor, (pan_name, no_interf_ch[pan_name]))
 
-            if len(interf_values) == 0 or len(no_interf_values) == 0:
-                print(f"Warning: no seed data for {bw_label} {distance}m pan1_{pan1_offload}_pan2_{pan2_offload} ({pan_name}) - skipping")
-                continue
+                if len(interf_values) == 0 or len(no_interf_values) == 0:
+                    print(f"Warning: no seed data for {bw_label} {distance}m "
+                          f"pan1_{pan1_offload}_pan2_{pan2_offload} "
+                          f"({pan_name}, {method}) - skipping")
+                    continue
 
-            result = evaluate_interference_detection(interf_values, no_interf_values)
+                # compute_seed_scores は Seed 順に返すので、添字が
+                # simulation_results.csv の Seed 番号と一致する。
+                for klass, values in (("interf", interf_values),
+                                      ("no_interf", no_interf_values)):
+                    for seed, score in enumerate(values):
+                        score_rows.append({
+                            "bandwidth": bw_label,
+                            "distance": distance,
+                            "pan1_offload": pan1_offload,
+                            "pan2_offload": pan2_offload,
+                            "pan": pan_name,
+                            "method": method,
+                            "klass": klass,
+                            "seed": seed,
+                            "score": f"{score:.9g}",
+                        })
 
-            # compute_seed_max_variance は Seed 順に返すので、添字が
-            # simulation_results.csv の Seed 番号と一致する。
-            for klass, values in (("interf", interf_values),
-                                  ("no_interf", no_interf_values)):
-                for seed, score in enumerate(values):
-                    score_rows.append({
-                        "bandwidth": bw_label,
-                        "distance": distance,
-                        "pan1_offload": pan1_offload,
-                        "pan2_offload": pan2_offload,
-                        "pan": pan_name,
-                        "klass": klass,
-                        "seed": seed,
-                        "score": f"{score:.9g}",
-                    })
-
-            rows.append({
-                "bandwidth": bw_label,
-                "distance": distance,
-                "pan1_offload": pan1_offload,
-                "pan2_offload": pan2_offload,
-                "pan": pan_name,
-                "best_threshold": result["threshold"],
-                "TP": result["tp"],
-                "FP": result["fp"],
-                "FN": result["fn"],
-                "TN": result["tn"],
-                "precision": round(result["precision"], 3),
-                "recall": round(result["recall"], 3),
-                "fpr": round(result["fpr"], 3),
-                "f1": round(result["f1"], 3),
-                # 閾値の選び方に依らない分離度。定義は _rank_auc() を参照。
-                # 100x100 ペアなので刻みが 1e-4。他の指標より1桁多く残す。
-                "auc": round(_rank_auc(interf_values, no_interf_values), 4),
-                "n_interf_seeds": result["n_interf_seeds"],
-                "n_no_interf_seeds": result["n_no_interf_seeds"],
-                # 有効ビンが1つも作れず干渉指標が 0.0 に縮退したSeed数。
-                # 0 でない場合、その条件の検知性能はビンの起点が高すぎることに
-                # 引きずられている。
-                "n_degenerate_interf": interf_degen,
-                "n_degenerate_no_interf": no_interf_degen,
-            })
+                rows.append({
+                    "bandwidth": bw_label,
+                    "distance": distance,
+                    "pan1_offload": pan1_offload,
+                    "pan2_offload": pan2_offload,
+                    "pan": pan_name,
+                    "method": method,
+                    # 閾値の選び方に依らない分離度。定義は _rank_auc() を参照。
+                    # 100x100 ペアなので刻みが 1e-4。4桁残す。
+                    "auc": round(_rank_auc(interf_values, no_interf_values), 4),
+                    "n_interf_seeds": len(interf_values),
+                    "n_no_interf_seeds": len(no_interf_values),
+                    # スコアを作れず METHOD_DEGENERATE_SCORE に縮退したSeed数。
+                    # proposed では「有効ビンが1つも作れなかった」を意味し、
+                    # 0 でなければその条件の性能はビンの起点が高すぎることに
+                    # 引きずられている。
+                    "n_degenerate_interf": interf_degen,
+                    "n_degenerate_no_interf": no_interf_degen,
+                })
 
     return rows, score_rows
 
 
 def save_detection_scores_csv(rows, output_path):
-    """Seed ごとの干渉指標を書き出す。ROC 曲線 (plot_roc.py) の入力。
+    """Seed ごとの干渉指標を手法別に書き出す。
 
-    検知結果CSVは最良閾値1点の混同行列しか持たないので、そこからは ROC を
-    復元できない。ここでスコアそのものを残しておけば、155MB の
-    simulation_results.csv を再解析しなくても曲線を引き直せる。
+    検知結果CSVは手法ごとに AUC という1つの要約しか持たない。スコアそのものを
+    残しておけば、155MB の simulation_results.csv を再解析しなくても
+    分布を見直したり閾値の置き方を後から検討したりできる。
     """
     fieldnames = ["bandwidth", "distance", "pan1_offload", "pan2_offload",
-                  "pan", "klass", "seed", "score"]
+                  "pan", "method", "klass", "seed", "score"]
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -654,8 +708,7 @@ def save_detection_scores_csv(rows, output_path):
 def save_interference_detection_csv(rows, output_path):
     fieldnames = [
         "bandwidth", "distance", "pan1_offload", "pan2_offload", "pan",
-        "best_threshold", "TP", "FP", "FN", "TN",
-        "precision", "recall", "fpr", "f1", "auc",
+        "method", "auc",
         "n_interf_seeds", "n_no_interf_seeds",
         "n_degenerate_interf", "n_degenerate_no_interf",
     ]
@@ -672,15 +725,11 @@ def save_interference_detection_csv(rows, output_path):
 # ============================================================
 def main():
     parser = argparse.ArgumentParser(
-        description="干渉検知の解析。検知結果CSVを出すだけで、図は作らない "
-                    "(図は create_heatmap.py と plot_detection_lines.py の担当)。")
-    parser.add_argument(
-        "--mode", choices=("sequential", "simultaneous"), default="sequential",
-        help="sequential: 各メトリックを自分の200s窓で順に測る時間分割測定(既定) / "
-             "simultaneous: 全メトリックを W0 の200sで同時に測る参照 (標準では不可能)")
-    args = parser.parse_args()
-    set_measurement_mode(args.mode)
+        description="干渉判定3手法の解析。検知結果CSVを出すだけで、図は作らない "
+                    "(図は plot_detection_lines.py の担当)。")
+    parser.parse_args()   # 引数は取らない。--help と誤入力の検出のためだけに呼ぶ
     print(f"--- 測定モード: {MEASUREMENT_MODE} (列の接尾辞 '{COLUMN_SUFFIX}') ---")
+    print(f"--- 手法: {', '.join(DETECTION_METHODS)} ---")
 
     if not os.path.isfile(CSV_FILE):
         raise FileNotFoundError(f"CSV file not found: {CSV_FILE}")
@@ -690,7 +739,8 @@ def main():
     print(f"--- Loaded {len(data)} conditions ---")
 
     # --- 干渉検知（帯域幅ペアごとに interf/no_interf を比較） ---
-    print("--- Running interference detection analysis ---")
+    print(f"--- Running interference detection analysis "
+          f"({len(DETECTION_METHODS)} methods) ---")
     interference_rows, score_rows = run_interference_detection(data)
     interference_csv_path = os.path.join(
         PLOT_BASE_DIR, f"interference_detection_results{COLUMN_SUFFIX}.csv")

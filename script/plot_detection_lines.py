@@ -1,25 +1,30 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""干渉検知性能を「相手PAN負荷 100%」の断面で折れ線にする。
+"""干渉判定3手法の AUC を「相手PAN負荷 100%」の断面で折れ線にする。
 
-ヒートマップ (plots/heatmaps{,_simultaneous}/) は自PAN負荷 x 相手PAN負荷の 5x5 格子で、
-1枚25セル x 12枚ある。一番見たい「相手が最大負荷のとき、自分の負荷を上げると
-検知性能がどう落ちるか」を読むには各枚から1行ずつ抜き出して並べ直す必要がある。
-さらに create_heatmap.py は軸を pan1/pan2 に固定しているので (create_heatmap.py:88-89)、
-PAN2 の図では自分と相手が入れ替わったままラベルも無い。
+このブランチ (icc) の図はこれ1種類だけ。提案手法 (RSSIビン内ΔPER分散) が
+2つのベースライン (ΔPERのみ / RSSIのみ) に対してどれだけ分離できているかを、
+閾値の選び方に依らない AUC で比べる。手法の定義は analyze_csv.py の
+DETECTION_METHODS / METHOD_LABEL が唯一の定義元。
 
-ここでは相手負荷 = 100% の1行だけを切り出し、自分 / 相手を明示的に読み替えて
-折れ線にする。設計と図の読み方は docs/README.md を参照。
+断面を相手負荷 100% に固定するのは、一番見たいのが「相手が最大負荷のとき、
+自分の負荷を上げると検知性能がどう落ちるか」だから。設計と図の読み方は
+docs/README.md を参照。
 
   横軸: 自PAN負荷 20-100%
-  縦軸: --metric で切り替え。f1 (既定) / auc。軸と参照線は METRIC_SPEC で指標ごと
+  縦軸: AUC (下限 0.5 がランダム判定の水準)
   色  : 相手の帯域 (50 / 100 / 200 kbps)
-  線種: 測定モード (simultaneous = 実線 / sequential = 点線)
+  線種: 判定手法 (proposed 実線 / dper 破線 / rssi 点線)
+
+測定モードは simultaneous (メトリックの同時測定) 固定。理由は analyze_csv.py の
+「測定モード」節を参照 ―― 測定モードと手法を同時に振ると線種が2つの軸に
+取られて図が読めなくなる。
 """
 
 import os
 import sys
 import csv
+import math
 import argparse
 import datetime
 from collections import defaultdict
@@ -27,18 +32,21 @@ from collections import defaultdict
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
 
-# 負荷グリッド・帯域・CSV パスは生成側/解析側から import する。
-# create_heatmap.py:14-18 と analyze_csv.py:45-50 に「定数をハードコードせず
-# 生成側から取れ」という規則があり、破ったときの不具合が記録されている。
+# 負荷グリッド・帯域・手法・CSV パスは生成側/解析側から import する。
+# 定数をハードコードすると、生成側を変えたときに片方だけ取り残されて静かに壊れる。
 import analyze_csv as A  # noqa: E402
 from interference_2pan_config import OFFERED_LOAD_PERCENTS  # noqa: E402
 
 PLOT_BASE_DIR = A.PLOT_BASE_DIR
 DEFAULT_OUT_DIR = os.path.join(PLOT_BASE_DIR, "detection_lines")
+
+# 縦軸に使う列。このブランチは AUC だけを見る (F1 は出さない)。
+METRIC = "auc"
 
 # 相手PAN の負荷をこの値に固定した断面を描く
 OTHER_LOAD_PERCENT = 100
@@ -46,71 +54,41 @@ OTHER_LOAD_PERCENT = 100
 # 自分 / 相手として取り得る帯域 (kbps)。CHANNEL_KBPS の値域と一致させる。
 BANDWIDTHS = sorted(set(A.CHANNEL_KBPS.values()))   # [50, 100, 200]
 
+# 判定手法。並び順も表示名も analyze_csv.py が定義元。
+METHODS = A.DETECTION_METHODS                       # ("proposed", "dper", "rssi")
+METHOD_LABEL = A.METHOD_LABEL
+
 # --- 配色 -------------------------------------------------------------
 # dataviz のカテゴリカル枠スロット 1-3。この3スロットは全ペア (all-pairs) で
 # light/dark 両モードのゲートを通ることが配色定義側に明記されている
 # (最悪ペアで CVD dE 9.2 light / 9.4 dark、通常視 dE 24.0 light / 20.9 dark)。
-# (スロット 1/2 は以前 CV 分布図でも同じ出典で使っていた。それを3色に延長した。)
 #
 # ただしスロット3の aqua は light 面でコントラスト 3:1 を下回るため relief rule
-# (見えるラベルか表を添える) が要る。描画値を必ず <metric>_plotted_values.csv に
-# 出すことで対応している (以前は線の右端に直接ラベルも置いていたが、
-# 伝送速度が凡例と重複して邪魔なので外した)。
+# (見えるラベルか表を添える) が要る。描画値を必ず auc_plotted_values.csv に
+# 出すことで対応している。
 COLOR = {50: "#2a78d6", 100: "#eb6834", 200: "#1baf7a"}
 # 色に頼らず識別できるようにするための冗長符号化
 MARKER = {50: "o", 100: "s", 200: "^"}
 
-# 測定モード -> 線種。simultaneous は標準では実現できない参照 (上界) で、
-# これを基準に sequential がどれだけ落ちるかを見るので、参照側を実線にする。
-LINESTYLE = {"simultaneous": "-", "sequential": ":"}
-MODE_LABEL = {"simultaneous": "simultaneous", "sequential": "sequential"}
-MODES = ("simultaneous", "sequential")
+# 手法 -> 線種。提案手法を実線にして、ベースラインを破線・点線で下に敷く。
+# 以前はこの軸が測定モード (simultaneous 実線 / sequential 点線) だった。
+LINESTYLE = {"proposed": "-", "dper": "--", "rssi": ":"}
 
 # 図中のテキストは英語にする。計算機 (Linux) に日本語フォントが無いと豆腐文字に
 # なるため。コメント・argparse ヘルプ・コンソール出力は日本語のままでよい。
 #
-# 軸ラベルとタイトルは入れない (横軸 = 自PAN負荷 [%]、縦軸 = 指標)。
+# 軸ラベルとタイトルは入れない (横軸 = 自PAN負荷 [%]、縦軸 = AUC)。
 # 図のキャプションで説明する前提。
-
-# 指標ごとの軸と参照線。y 軸を固定するのは、図をまたいで比較できることが
-# この図の目的だから (自動スケールにすると枚ごとに縮尺が変わって比較できない)。
-#
-#   f1  : 実測レンジは sequential 0.717-0.945 / simultaneous 0.813-1.000。
-#         参照線 2/3 は全 Seed を「干渉あり」と判定したときの退化した F1
-#         (precision 0.5, recall 1.0)。これ以下は検知できていないのと同じ。
-#   auc : 下限 0.5 がランダム判定の水準。軸そのものが床を示すので参照線は引かない。
-METRIC_SPEC = {
-    "f1":  {"label": "F1 score", "ylim": (0.65, 1.0),
-            "ref": 2.0 / 3.0, "ref_label": "all-positive F1"},
-    # auc は参照線を引かない。y軸の下端がちょうど 0.5 (ランダム判定) なので、
-    # 線を引くと軸と重なって冗長なうえ、"chance" の注記だけが浮いて見える。
-    "auc": {"label": "AUC", "ylim": (0.50, 1.0),
-            "ref": None, "ref_label": None},
-}
-
-# 未知の指標でも落とさず描く。縮尺の根拠も参照線の意味も決められないので、
-# 自動スケールにして参照線は引かない。
-DEFAULT_SPEC = {"label": None, "ylim": None, "ref": None, "ref_label": None}
-
-
-def metric_spec(metric):
-    spec = dict(DEFAULT_SPEC, **METRIC_SPEC.get(metric, {}))
-    if spec["label"] is None:
-        spec["label"] = metric
-    return spec
-
 
 GRID_KW = dict(color="0.85", linestyle="--", linewidth=0.8)
 
 # --- 論文向けの体裁 -----------------------------------------------------
 # タイトルと軸ラベルは入れない (図のキャプションで説明する前提)。そのぶん
 # 目盛りの数字・目盛り線・凡例を大きくして、縮小しても読めるようにする。
-# plot_roc.py もここから import して同じ体裁にする。
 TICK_LABELSIZE = 20     # 目盛りの数字
 TICK_LENGTH = 10        # 目盛り線の長さ
 TICK_WIDTH = 2.0        # 目盛り線の太さ
 LEGEND_FONTSIZE = 18
-ANNOT_FONTSIZE = 15     # 参照線の注記 ("all-positive F1" / "chance")
 
 
 def style_axes(ax):
@@ -126,14 +104,14 @@ def style_axes(ax):
                    length=TICK_LENGTH, width=TICK_WIDTH)
 
 
-def input_csv_path(mode):
-    """mode -> 結果 CSV。suffix の付け方は create_heatmap.py:30-36 と同じ規則。"""
-    suffix = "" if mode == "sequential" else "_simultaneous"
-    return os.path.join(PLOT_BASE_DIR, f"interference_detection_results{suffix}.csv")
+def input_csv_path():
+    """検知結果 CSV。測定モードは simultaneous 固定なので接尾辞も固定。"""
+    return os.path.join(
+        PLOT_BASE_DIR, f"interference_detection_results{A.COLUMN_SUFFIX}.csv")
 
 
 def own_other(row):
-    """結果CSVの1行を「自分 / 相手」に読み替える。plot_roc.py と共有する。
+    """結果CSVの1行を「自分 / 相手」に読み替える。
 
     検知を行っている側 (pan 列) が「自分」。bandwidth "AvsB" は PAN1=A kbps /
     PAN2=B kbps と読んでよい ――ラベルを作る get_bandwidth_label() はソートする
@@ -163,8 +141,8 @@ def own_other(row):
     return {"own_bw": own_bw, "other_bw": other_bw, "own_load": own_load}
 
 
-def load_series(csv_file, metric):
-    """CSV を読み、{(own_bw, other_bw): {own_load: value}} を返す。
+def load_series(csv_file):
+    """CSV を読み、{method: {(own_bw, other_bw): {own_load: auc}}} を返す。
 
     自分 / 相手の読み替えと断面の絞り込みは own_other() が担当する。
     """
@@ -172,101 +150,147 @@ def load_series(csv_file, metric):
         rows = list(csv.DictReader(f))
     if not rows:
         raise ValueError(f"{csv_file}: データ行がありません")
-    if metric not in rows[0]:
-        raise KeyError(
-            f"{csv_file} に列 '{metric}' がありません。\n"
-            f"  利用できる列: {', '.join(rows[0].keys())}\n"
-            f"  auc が無い場合は CSV が古いので、./script/sbatch_reanalyze.sh で\n"
-            f"  解析をやり直してください。"
-        )
+    for col in ("method", METRIC):
+        if col not in rows[0]:
+            raise KeyError(
+                f"{csv_file} に列 '{col}' がありません。\n"
+                f"  利用できる列: {', '.join(rows[0].keys())}\n"
+                f"  CSV が古いので、./script/sbatch_reanalyze.sh で\n"
+                f"  解析をやり直してください。"
+            )
 
-    series = defaultdict(dict)
+    series = {m: defaultdict(dict) for m in METHODS}
+    unknown = set()
     for r in rows:
+        method = r["method"]
+        if method not in series:
+            unknown.add(method)
+            continue
         own = own_other(r)
         if own is None:
             continue
-        series[(own["own_bw"], own["other_bw"])][own["own_load"]] = float(r[metric])
+        series[method][(own["own_bw"], own["other_bw"])][own["own_load"]] = \
+            float(r[METRIC])
+
+    if unknown:
+        # 黙って捨てると「描いたつもりの手法が図に無い」事故になる
+        print(f"    Warning: 未知の手法を無視しました: {sorted(unknown)}")
     return series
 
 
-def _draw_panel(ax, data, own_bw, modes, metric):
+def choose_ylim(data):
+    """全図で共通に使う y 軸の範囲を決める。
+
+    save ブランチは AUC を (0.50, 1.0) に固定していた。0.5 がランダム判定の
+    水準で、軸の下端がそのまま床を示すからである。だが**ベースラインは 0.5 を
+    下回り得る** (指標が干渉の有無と逆相関する条件が実在する。docs/auc.md 参照)。
+    下回った点が枠外に消えると図が嘘になるので、必要なときだけ下げる。
+
+    枚ごとに変えてはいけない。図をまたいで比較できることがこの図の目的なので、
+    全描画値の最小値から1つだけ決めて全図に同じ値を当てる。
+    """
+    values = [v
+              for per_method in data.values()
+              for pts in per_method.values()
+              for v in pts.values()]
+    if not values:
+        return (0.50, 1.0)
+    lo = min(values)
+    if lo >= 0.5:
+        return (0.50, 1.0)
+    # 0.1 刻みで切り下げる。目盛りが半端な位置に来ないようにするため。
+    return (math.floor(lo * 10.0) / 10.0, 1.0)
+
+
+def _draw_panel(ax, data, own_bw, methods, ylim):
     """1つの軸に、ある自帯域についての線を引く。
 
-    data: {mode: {(own_bw, other_bw): {own_load: value}}}
-    modes: 描くモードのタプル。1つなら単独図、2つなら比較図。
+    data: {method: {(own_bw, other_bw): {own_load: auc}}}
+    methods: 描く手法のタプル。1つなら単独図、3つなら比較図。
     """
     loads = sorted(OFFERED_LOAD_PERCENTS)
-    # モードを外側で回すので、凡例は「実線 50/100/200 -> 点線 50/100/200」の順に
-    # 並ぶ (MODES = simultaneous, sequential で前者が実線)。帯域を外側にすると
-    # 50実線/50点線/100実線/... と交互になって読みにくい。
-    for mode in modes:
+    # 手法を外側で回すので、凡例は「実線 50/100/200 -> 破線 50/100/200 -> ...」の
+    # 順に並ぶ。帯域を外側にすると 50実線/50破線/50点線/100実線/... と交互になって
+    # 読みにくい。
+    for method in methods:
         for other_bw in BANDWIDTHS:
-            pts = data[mode].get((own_bw, other_bw))
+            pts = data[method].get((own_bw, other_bw))
             if not pts:
                 continue
             xs = [l for l in loads if l in pts]
             ys = [pts[l] for l in xs]
-            label = (f"{other_bw} kbps" if len(modes) == 1
-                     else f"{other_bw} kbps ({MODE_LABEL[mode]})")
             ax.plot(xs, ys,
-                    color=COLOR[other_bw], linestyle=LINESTYLE[mode],
+                    color=COLOR[other_bw], linestyle=LINESTYLE[method],
                     marker=MARKER[other_bw], markersize=6, linewidth=2.0,
-                    label=label)
+                    label=f"{other_bw} kbps")
 
-    spec = metric_spec(metric)
-    if spec["ref"] is not None:
-        ax.axhline(spec["ref"], color="0.6", linewidth=1.0, linestyle="-",
-                   zorder=0)
-        # 無印の水平線だと何の線か分からないので必ず注記する
-        ax.annotate(spec["ref_label"], xy=(max(loads), spec["ref"]),
-                    xytext=(0, 4), textcoords="offset points",
-                    color="0.45", fontsize=ANNOT_FONTSIZE, ha="right", va="bottom")
     ax.set_xticks(loads)
     ax.set_xlim(min(loads) - 5, max(loads) + 12)
-    if spec["ylim"] is not None:
-        ax.set_ylim(*spec["ylim"])
+    ax.set_ylim(*ylim)
     style_axes(ax)
 
 
-def plot_single(data, own_bw, modes, metric, out_dir, tag, fmt):
+def legend_handles(methods):
+    """凡例の手。色 (帯域) と線種 (手法) を分けて並べる。
+
+    3手法 x 3帯域を総当たりで出すと 9 項目になり、どれが色の違いでどれが線種の
+    違いなのかが読み取れない。符号化の軸ごとに1ブロックずつ出せば 3+3 で済む。
+    手法が1つだけの図では線種の軸が無いので、帯域のブロックだけを出す。
+    """
+    handles = [Line2D([], [], color=COLOR[bw], marker=MARKER[bw],
+                      linestyle="-" if len(methods) == 1 else LINESTYLE[methods[0]],
+                      markersize=6, linewidth=2.0, label=f"{bw} kbps")
+               for bw in BANDWIDTHS]
+    if len(methods) == 1:
+        return handles
+    # 線種の凡例は色を持たせない (色は帯域の軸なので、混ぜると意味が二重になる)
+    handles += [Line2D([], [], color="0.35", linestyle=LINESTYLE[m],
+                       linewidth=2.0, label=METHOD_LABEL[m])
+                for m in methods]
+    return handles
+
+
+def plot_single(data, own_bw, methods, out_dir, tag, fmt, ylim):
     """自帯域1つ分の図を1枚描く。"""
     fig, ax = plt.subplots(figsize=(7.2, 5.8))
-    _draw_panel(ax, data, own_bw, modes, metric)
-    ax.legend(loc="lower left", frameon=True, fontsize=LEGEND_FONTSIZE)
-    path = os.path.join(out_dir, f"{metric}_own{own_bw}_{tag}.{fmt}")
+    _draw_panel(ax, data, own_bw, methods, ylim)
+    handles = legend_handles(methods)
+    ax.legend(handles=handles, loc="lower left", frameon=True,
+              fontsize=LEGEND_FONTSIZE)
+    path = os.path.join(out_dir, f"{METRIC}_own{own_bw}_{tag}.{fmt}")
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     return path
 
 
-def plot_3panel(data, modes, metric, out_dir, tag, fmt):
+def plot_3panel(data, methods, out_dir, tag, fmt, ylim):
     """自帯域3つを横並びのサブプロットにした1枚。"""
     fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.8), sharey=True)
     for ax, own_bw in zip(axes, BANDWIDTHS):
-        _draw_panel(ax, data, own_bw, modes, metric)
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.5),
+        _draw_panel(ax, data, own_bw, methods, ylim)
+    handles = legend_handles(methods)
+    fig.legend(handles=handles, loc="center left", bbox_to_anchor=(1.0, 0.5),
                frameon=True, fontsize=LEGEND_FONTSIZE)
     fig.tight_layout()
-    path = os.path.join(out_dir, f"{metric}_3panel_{tag}.{fmt}")
+    path = os.path.join(out_dir, f"{METRIC}_3panel_{tag}.{fmt}")
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     return path
 
 
-def dump_values(data, metric, out_dir):
+def dump_values(data, out_dir):
     """描画に使った値を CSV に出す。数値確認用と relief rule への対応を兼ねる。"""
-    path = os.path.join(out_dir, f"{metric}_plotted_values.csv")
+    path = os.path.join(out_dir, f"{METRIC}_plotted_values.csv")
     with open(path, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["mode", "own_bw_kbps", "other_bw_kbps",
-                    "other_load_percent", "own_load_percent", metric])
-        for mode in MODES:
+        w.writerow(["method", "own_bw_kbps", "other_bw_kbps",
+                    "other_load_percent", "own_load_percent", METRIC])
+        for method in METHODS:
             for own_bw in BANDWIDTHS:
                 for other_bw in BANDWIDTHS:
-                    pts = data[mode].get((own_bw, other_bw), {})
+                    pts = data[method].get((own_bw, other_bw), {})
                     for load in sorted(pts):
-                        w.writerow([mode, own_bw, other_bw,
+                        w.writerow([method, own_bw, other_bw,
                                     OTHER_LOAD_PERCENT, load,
                                     f"{pts[load]:.6g}"])
     return path
@@ -274,54 +298,50 @@ def dump_values(data, metric, out_dir):
 
 def main():
     p = argparse.ArgumentParser(
-        description="相手PAN負荷100%の断面で検知性能を折れ線にする")
-    p.add_argument("--metric", default="f1",
-                   help="縦軸に使う CSV の列名 (既定: f1)。auc 列が入れば auc も可")
-    p.add_argument("--sequential-csv", default=None, help="sequential の結果 CSV")
-    p.add_argument("--simultaneous-csv", default=None, help="simultaneous の結果 CSV")
+        description="相手PAN負荷100%の断面で、干渉判定3手法の AUC を折れ線にする")
+    p.add_argument("--csv", default=None,
+                   help=f"検知結果 CSV (既定: {input_csv_path()})")
     p.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
     p.add_argument("--format", default="pdf", choices=("pdf", "png"),
                    help="出力形式 (既定: pdf)。目視確認には png")
     args = p.parse_args()
 
-    paths = {m: (args.sequential_csv if m == "sequential" else args.simultaneous_csv)
-                or input_csv_path(m) for m in MODES}
-
-    data = {}
-    for mode in MODES:
-        path = paths[mode]
-        if not os.path.isfile(path):
-            raise FileNotFoundError(f"CSV file not found: {path}")
-        mtime = datetime.datetime.fromtimestamp(
-            os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M")
-        # 解析コードより CSV が古いことがあるので更新時刻を必ず出す
-        print(f"--- {mode:>4}: {path} (更新 {mtime}) ---")
-        data[mode] = load_series(path, args.metric)
+    path = args.csv or input_csv_path()
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"CSV file not found: {path}")
+    mtime = datetime.datetime.fromtimestamp(
+        os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M")
+    # 解析コードより CSV が古いことがあるので更新時刻を必ず出す
+    print(f"--- {path} (更新 {mtime}) ---")
+    data = load_series(path)
 
     # 期待する系列数の確認。欠けたまま静かに描くと図が嘘になる。
     expected = len(BANDWIDTHS) ** 2
-    for mode in MODES:
-        got = len(data[mode])
-        n_pts = {k: len(v) for k, v in data[mode].items()}
-        print(f"    {mode}: 系列 {got}/{expected}, "
+    for method in METHODS:
+        got = len(data[method])
+        n_pts = {k: len(v) for k, v in data[method].items()}
+        print(f"    {method:>8}: 系列 {got}/{expected}, "
               f"1系列あたりの点数 {sorted(set(n_pts.values()))}")
         if got != expected:
             missing = [k for k in ((o, t) for o in BANDWIDTHS for t in BANDWIDTHS)
-                       if k not in data[mode]]
+                       if k not in data[method]]
             print(f"    Warning: 欠けている (own, other) = {missing}")
+
+    ylim = choose_ylim(data)
+    print(f"--- y軸: {ylim[0]:.2f} - {ylim[1]:.2f} "
+          f"(全図共通。0.5 を下回る値があるときだけ下げる) ---")
 
     os.makedirs(args.out_dir, exist_ok=True)
     fmt = args.format
     written = []
-    for tag, modes in (("simultaneous", ("simultaneous",)),
-                       ("sequential", ("sequential",)),
-                       ("compare", MODES)):
+    # 手法ごとの単独図と、3手法を重ねた比較図
+    tags = [(m, (m,)) for m in METHODS] + [("compare", tuple(METHODS))]
+    for tag, methods in tags:
         for own_bw in BANDWIDTHS:
-            written.append(plot_single(data, own_bw, modes, args.metric,
-                                       args.out_dir, tag, fmt))
-        written.append(plot_3panel(data, modes, args.metric,
-                                   args.out_dir, tag, fmt))
-    written.append(dump_values(data, args.metric, args.out_dir))
+            written.append(plot_single(data, own_bw, methods,
+                                       args.out_dir, tag, fmt, ylim))
+        written.append(plot_3panel(data, methods, args.out_dir, tag, fmt, ylim))
+    written.append(dump_values(data, args.out_dir))
 
     print(f"\n--- {args.out_dir} に {len(written)} ファイル出力 ---")
     for path in written:
