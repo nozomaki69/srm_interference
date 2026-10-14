@@ -114,7 +114,7 @@ GRID_KW = dict(color="0.85", linestyle="--", linewidth=0.8)
 TICK_LABELSIZE = 20     # 目盛りの数字
 TICK_LENGTH = 10        # 目盛り線の長さ
 TICK_WIDTH = 2.0        # 目盛り線の太さ
-LEGEND_FONTSIZE = 20    # 目盛りの数字と同じ
+LEGEND_FONTSIZE = 18    # 目盛りの数字 (20) より一段小さい
 ANNOT_FONTSIZE = 15     # 参照線の注記 ("all-positive F1" / "chance")
 
 
