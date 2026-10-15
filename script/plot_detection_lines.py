@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""干渉判定3手法の AUC を「相手PAN負荷 100%」の断面で折れ線にする。
+"""干渉判定3手法の AUC を「相手PAN負荷 100% / 200%」の断面で折れ線にする。
 
 このブランチ (icc) の図はこれ1種類だけ。提案手法 (RSSIビン内ΔPER分散) が
 2つのベースライン (ΔPERのみ / RSSIのみ) に対してどれだけ分離できているかを、
 閾値の選び方に依らない AUC で比べる。手法の定義は analyze_csv.py の
 DETECTION_METHODS / METHOD_LABEL が唯一の定義元。
 
-断面を相手負荷 100% に固定するのは、一番見たいのが「相手が最大負荷のとき、
-自分の負荷を上げると検知性能がどう落ちるか」だから。設計と図の読み方は
-docs/README.md を参照。
+断面を相手負荷で固定するのは、一番見たいのが「相手が重いとき、自分の負荷を
+上げると検知性能がどう落ちるか」だから。icc_load200 ブランチは負荷を 200% まで
+広げたので、icc と同じ 100% の断面と、新しい最大負荷 200% の断面の2つを出す
+(docs/load200.md)。設計と図の読み方は docs/README.md を参照。
 
-  横軸: 自PAN負荷 20-100%
+  横軸: 自PAN負荷 20-200%
   縦軸: AUC (下限 0.5 がランダム判定の水準)
   色  : 相手の帯域 (50 / 100 / 200 kbps)
   線種: 判定手法 (proposed 実線 / dper 破線 / rssi 点線)
@@ -43,13 +44,17 @@ import analyze_csv as A  # noqa: E402
 from interference_2pan_config import OFFERED_LOAD_PERCENTS  # noqa: E402
 
 PLOT_BASE_DIR = A.PLOT_BASE_DIR
-DEFAULT_OUT_DIR = os.path.join(PLOT_BASE_DIR, "detection_lines")
+# icc の 20-100% の結果 (detection_lines/) と混ざらないよう別の場所に出す。
+# 断面ごとに other100/ other200/ のサブディレクトリを切る。
+DEFAULT_OUT_DIR = os.path.join(PLOT_BASE_DIR, "detection_lines_more")
 
 # 縦軸に使う列。このブランチは AUC だけを見る (F1 は出さない)。
 METRIC = "auc"
 
-# 相手PAN の負荷をこの値に固定した断面を描く
-OTHER_LOAD_PERCENT = 100
+# 相手PAN の負荷をこれらの値に固定した断面を、それぞれ描く。
+# 100 は icc と同じ断面 (横軸を 200% まで伸ばしたものとして直接比べられる)、
+# 200 は新しい最大負荷。
+OTHER_LOAD_PERCENTS = (100, 200)
 
 # 自分 / 相手として取り得る帯域 (kbps)。CHANNEL_KBPS の値域と一致させる。
 BANDWIDTHS = sorted(set(A.CHANNEL_KBPS.values()))   # [50, 100, 200]
@@ -110,15 +115,15 @@ def input_csv_path():
         PLOT_BASE_DIR, f"interference_detection_results{A.COLUMN_SUFFIX}.csv")
 
 
-def own_other(row):
-    """結果CSVの1行を「自分 / 相手」に読み替える。
+def own_other(row, other_load_percent):
+    """結果CSVの1行を、断面 other_load_percent における「自分 / 相手」に読み替える。
 
     検知を行っている側 (pan 列) が「自分」。bandwidth "AvsB" は PAN1=A kbps /
     PAN2=B kbps と読んでよい ――ラベルを作る get_bandwidth_label() はソートする
     が、TARGET_BANDWIDTH_PATTERNS が常に kbps(PAN1) <= kbps(PAN2) を満たすので
     そのソートは恒等写像になる。導出根拠は docs/README.md の「折れ線グラフ」節。
 
-    この断面に入らない行 (相手負荷が OTHER_LOAD_PERCENT でない、対称ペアの
+    この断面に入らない行 (相手負荷が other_load_percent でない、対称ペアの
     PAN2 側) は None を返す。対称ペアで PAN1 だけを採るのは、非対称ペアは
     片方の PAN しか該当しないので、全系列を 1 PAN 分 (100+100 Seed) に揃えて
     ノイズ水準を均一にするため。
@@ -134,7 +139,7 @@ def own_other(row):
         own_bw, other_bw = b, a
         own_load, other_load = int(row["pan2_offload"]), int(row["pan1_offload"])
 
-    if other_load != OTHER_LOAD_PERCENT:
+    if other_load != other_load_percent:
         return None
     if a == b and pan != "PAN1":
         return None
@@ -142,7 +147,8 @@ def own_other(row):
 
 
 def load_series(csv_file):
-    """CSV を読み、{method: {(own_bw, other_bw): {own_load: auc}}} を返す。
+    """CSV を読み、断面ごとに
+    {other_load: {method: {(own_bw, other_bw): {own_load: auc}}}} を返す。
 
     自分 / 相手の読み替えと断面の絞り込みは own_other() が担当する。
     """
@@ -159,18 +165,20 @@ def load_series(csv_file):
                 f"  解析をやり直してください。"
             )
 
-    series = {m: defaultdict(dict) for m in METHODS}
+    series = {ol: {m: defaultdict(dict) for m in METHODS}
+              for ol in OTHER_LOAD_PERCENTS}
     unknown = set()
     for r in rows:
         method = r["method"]
-        if method not in series:
+        if method not in METHODS:
             unknown.add(method)
             continue
-        own = own_other(r)
-        if own is None:
-            continue
-        series[method][(own["own_bw"], own["other_bw"])][own["own_load"]] = \
-            float(r[METRIC])
+        for other_load in OTHER_LOAD_PERCENTS:
+            own = own_other(r, other_load)
+            if own is None:
+                continue
+            series[other_load][method][(own["own_bw"], own["other_bw"])][
+                own["own_load"]] = float(r[METRIC])
 
     if unknown:
         # 黙って捨てると「描いたつもりの手法が図に無い」事故になる
@@ -178,8 +186,11 @@ def load_series(csv_file):
     return series
 
 
-def choose_ylim(data):
+def choose_ylim(sections):
     """全図で共通に使う y 軸の範囲を決める。
+
+    sections: {other_load: data}。2つの断面をまたいで1つだけ決める
+    (断面ごとに変えると、100% と 200% の図を並べたときに比較が崩れる)。
 
     save ブランチは AUC を (0.50, 1.0) に固定していた。0.5 がランダム判定の
     水準で、軸の下端がそのまま床を示すからである。だが**ベースラインは 0.5 を
@@ -190,6 +201,7 @@ def choose_ylim(data):
     全描画値の最小値から1つだけ決めて全図に同じ値を当てる。
     """
     values = [v
+              for data in sections.values()
               for per_method in data.values()
               for pts in per_method.values()
               for v in pts.values()]
@@ -252,7 +264,8 @@ def legend_handles(methods):
 
 def plot_single(data, own_bw, methods, out_dir, tag, fmt, ylim):
     """自帯域1つ分の図を1枚描く。"""
-    fig, ax = plt.subplots(figsize=(7.2, 5.8))
+    # 横軸の目盛りが 10 個 (20-200%) あるので icc (7.2) より横に広げる
+    fig, ax = plt.subplots(figsize=(10.0, 5.8))
     _draw_panel(ax, data, own_bw, methods, ylim)
     handles = legend_handles(methods)
     ax.legend(handles=handles, loc="lower left", frameon=True,
@@ -265,7 +278,7 @@ def plot_single(data, own_bw, methods, out_dir, tag, fmt, ylim):
 
 def plot_3panel(data, methods, out_dir, tag, fmt, ylim):
     """自帯域3つを横並びのサブプロットにした1枚。"""
-    fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.8), sharey=True)
+    fig, axes = plt.subplots(1, 3, figsize=(27.0, 5.8), sharey=True)
     for ax, own_bw in zip(axes, BANDWIDTHS):
         _draw_panel(ax, data, own_bw, methods, ylim)
     handles = legend_handles(methods)
@@ -278,27 +291,31 @@ def plot_3panel(data, methods, out_dir, tag, fmt, ylim):
     return path
 
 
-def dump_values(data, out_dir):
-    """描画に使った値を CSV に出す。数値確認用と relief rule への対応を兼ねる。"""
+def dump_values(sections, out_dir):
+    """描画に使った値を CSV に出す。数値確認用と relief rule への対応を兼ねる。
+
+    両断面を1本にまとめ、other_load_percent 列で区別する。
+    """
     path = os.path.join(out_dir, f"{METRIC}_plotted_values.csv")
     with open(path, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(["method", "own_bw_kbps", "other_bw_kbps",
                     "other_load_percent", "own_load_percent", METRIC])
-        for method in METHODS:
-            for own_bw in BANDWIDTHS:
-                for other_bw in BANDWIDTHS:
-                    pts = data[method].get((own_bw, other_bw), {})
-                    for load in sorted(pts):
-                        w.writerow([method, own_bw, other_bw,
-                                    OTHER_LOAD_PERCENT, load,
-                                    f"{pts[load]:.6g}"])
+        for other_load, data in sections.items():
+            for method in METHODS:
+                for own_bw in BANDWIDTHS:
+                    for other_bw in BANDWIDTHS:
+                        pts = data[method].get((own_bw, other_bw), {})
+                        for load in sorted(pts):
+                            w.writerow([method, own_bw, other_bw,
+                                        other_load, load,
+                                        f"{pts[load]:.6g}"])
     return path
 
 
 def main():
     p = argparse.ArgumentParser(
-        description="相手PAN負荷100%の断面で、干渉判定3手法の AUC を折れ線にする")
+        description="相手PAN負荷100%/200%の断面で、干渉判定3手法の AUC を折れ線にする")
     p.add_argument("--csv", default=None,
                    help=f"検知結果 CSV (既定: {input_csv_path()})")
     p.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
@@ -313,39 +330,45 @@ def main():
         os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M")
     # 解析コードより CSV が古いことがあるので更新時刻を必ず出す
     print(f"--- {path} (更新 {mtime}) ---")
-    data = load_series(path)
+    sections = load_series(path)
 
-    # 期待する系列数の確認。欠けたまま静かに描くと図が嘘になる。
+    # 期待する系列数と点数の確認。欠けたまま静かに描くと図が嘘になる。
     expected = len(BANDWIDTHS) ** 2
-    for method in METHODS:
-        got = len(data[method])
-        n_pts = {k: len(v) for k, v in data[method].items()}
-        print(f"    {method:>8}: 系列 {got}/{expected}, "
-              f"1系列あたりの点数 {sorted(set(n_pts.values()))}")
-        if got != expected:
-            missing = [k for k in ((o, t) for o in BANDWIDTHS for t in BANDWIDTHS)
-                       if k not in data[method]]
-            print(f"    Warning: 欠けている (own, other) = {missing}")
+    n_loads = len(OFFERED_LOAD_PERCENTS)
+    for other_load, data in sections.items():
+        print(f"  相手負荷 {other_load}%:")
+        for method in METHODS:
+            got = len(data[method])
+            n_pts = {k: len(v) for k, v in data[method].items()}
+            print(f"    {method:>8}: 系列 {got}/{expected}, "
+                  f"1系列あたりの点数 {sorted(set(n_pts.values()))} (期待 {n_loads})")
+            if got != expected:
+                missing = [k for k in ((o, t) for o in BANDWIDTHS for t in BANDWIDTHS)
+                           if k not in data[method]]
+                print(f"    Warning: 欠けている (own, other) = {missing}")
 
-    ylim = choose_ylim(data)
+    ylim = choose_ylim(sections)
     print(f"--- y軸: {ylim[0]:.2f} - {ylim[1]:.2f} "
           f"(全図共通。0.5 を下回る値があるときだけ下げる) ---")
 
     os.makedirs(args.out_dir, exist_ok=True)
     fmt = args.format
     written = []
-    # 手法ごとの単独図と、3手法を重ねた比較図
+    # 断面ごとに、手法ごとの単独図と3手法を重ねた比較図
     tags = [(m, (m,)) for m in METHODS] + [("compare", tuple(METHODS))]
-    for tag, methods in tags:
-        for own_bw in BANDWIDTHS:
-            written.append(plot_single(data, own_bw, methods,
-                                       args.out_dir, tag, fmt, ylim))
-        written.append(plot_3panel(data, methods, args.out_dir, tag, fmt, ylim))
-    written.append(dump_values(data, args.out_dir))
+    for other_load, data in sections.items():
+        sub_dir = os.path.join(args.out_dir, f"other{other_load}")
+        os.makedirs(sub_dir, exist_ok=True)
+        for tag, methods in tags:
+            for own_bw in BANDWIDTHS:
+                written.append(plot_single(data, own_bw, methods,
+                                           sub_dir, tag, fmt, ylim))
+            written.append(plot_3panel(data, methods, sub_dir, tag, fmt, ylim))
+    written.append(dump_values(sections, args.out_dir))
 
     print(f"\n--- {args.out_dir} に {len(written)} ファイル出力 ---")
     for path in written:
-        print(f"    {os.path.basename(path)}")
+        print(f"    {os.path.relpath(path, args.out_dir)}")
 
 
 if __name__ == "__main__":

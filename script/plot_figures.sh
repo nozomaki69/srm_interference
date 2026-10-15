@@ -10,7 +10,8 @@
 #   plots/interference_detection_results_simultaneous.csv   検知結果 (method / auc 列)
 #
 # 出力:
-#   plots/detection_lines/   折れ線 16枚 (手法3 + 比較1) x (自帯域3 + 3パネル1)
+#   plots/detection_lines_more/other{100,200}/   断面ごとに折れ線 16枚
+#                            (手法3 + 比較1) x (自帯域3 + 3パネル1)
 #                            + auc_plotted_values.csv
 #
 # 解析からやり直したいときは ./script/sbatch_reanalyze.sh (こちらも最後にこれを呼ぶ)。
@@ -45,5 +46,6 @@ count() { ls "$1" 2>/dev/null | wc -l | tr -d ' '; }
 
 echo "========================================"
 echo "作図が完了しました"
-echo "  plots/detection_lines/     $(count "$PLOTS/detection_lines") ファイル"
+echo "  plots/detection_lines_more/other100/  $(count "$PLOTS/detection_lines_more/other100") ファイル"
+echo "  plots/detection_lines_more/other200/  $(count "$PLOTS/detection_lines_more/other200") ファイル"
 echo "========================================"

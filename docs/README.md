@@ -1,5 +1,10 @@
 # `icc` ブランチ
 
+> **`icc_load200` ブランチでは負荷グリッドを 20〜200%（10値）に広げている。**
+> 違い（ラン数 120,000、検知結果 3,600 行、折れ線の断面 100%/200%、出力先
+> `plots/detection_lines_more/`）は `docs/load200.md` を参照。以下の本文は `icc` の
+> 20〜100% の構成についての記述で、負荷以外はこのブランチにもそのまま当てはまる。
+
 2つの PAN が隣接したとき、自分の PAN 側の観測だけから相手の干渉を検知できるか ――
 という実験の、**判定手法を3つ並べて比べる構成**。`save` ブランチ (提案手法1つを
 F1 と AUC の両方で、sequential/simultaneous 両モードについて評価する) から、
@@ -261,6 +266,7 @@ script/
 template/                       Jinja2 テンプレート
 docs/README.md                  このファイル
 docs/auc.md                     AUC の詳細
+docs/load200.md                 icc_load200 (負荷 20〜200%) の差分
 ```
 
 `analyze_csv.py` は CSV を作るだけで、図は出さない。図は `plot_detection_lines.py` の担当。

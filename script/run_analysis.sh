@@ -8,9 +8,9 @@
 # 測定モードは simultaneous 固定 (analyze_csv.py の「測定モード」節を参照)。
 #
 # 出力:
-#   plots/interference_detection_results_simultaneous.csv   検知結果 (900行)
+#   plots/interference_detection_results_simultaneous.csv   検知結果 (3600行)
 #   plots/detection_scores_simultaneous.csv                 Seed ごとの干渉指標
-#   plots/detection_lines/                                  折れ線 16枚 + 描画値CSV
+#   plots/detection_lines_more/                             折れ線 16枚 x 断面2 (other100/ other200/) + 描画値CSV
 
 set -uo pipefail
 

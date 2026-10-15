@@ -31,8 +31,8 @@ MANIFEST_DIR="$CMD_DIR/plots/manifests"
 LOG_DIR="$CMD_DIR/plots/logs"
 mkdir -p "$MANIFEST_DIR" "$LOG_DIR"
 
-# SLURM のシミュレーションジョブは 30,000 件走るので、ログを全部残すと
-# .out/.err で 60,000 ファイルになる。書式を確認できるよう**一番最初に投入した
+# SLURM のシミュレーションジョブは 120,000 件走るので、ログを全部残すと
+# .out/.err で 240,000 ファイルになる。書式を確認できるよう**一番最初に投入した
 # ジョブの分だけ**を残し、残りは削除する。
 # FIRST_SIM_JOB_ID は最初のバッチの1件目を投入した時点で一度だけ記録する。
 FIRST_SIM_JOB_ID=""

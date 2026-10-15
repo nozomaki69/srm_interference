@@ -46,10 +46,11 @@ fi
 
 # --- 結果の検証 ---------------------------------------------------------
 # ジョブが成功で終わっても、出力が期待どおりとは限らない。中身を確かめる。
-# 行数は 6帯域ペア x 25負荷 x 2PAN x 3手法 = 900。
+# 行数は 6帯域ペア x 100負荷 (10x10) x 2PAN x 3手法 = 3600。
+# (負荷グリッドは interference_2pan_config.py の OFFERED_LOAD_PERCENTS)
 # (手法を増減したらここも直すこと。手法の定義元は analyze_csv.py の
 #  DETECTION_METHODS で、3 はそこから来ている)
-EXPECTED_ROWS=900
+EXPECTED_ROWS=3600
 EXPECTED_METHODS=3
 STATUS=0
 CSV="$CMD_DIR/plots/interference_detection_results_simultaneous.csv"
@@ -88,5 +89,5 @@ fi
 
 echo "========================================"
 echo "再解析が完了しました"
-echo "  plots/detection_lines/"
+echo "  plots/detection_lines_more/"
 echo "========================================"
