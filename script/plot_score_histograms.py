@@ -63,8 +63,10 @@ X_LABEL = {
     "rssi": "Mean RSSI [dBm]",
 }
 
-# 両群に共通のビンの本数 (両群を合わせた範囲を等分する)
-NUM_BINS = 20
+# ビンの本数。1行 (= 1手法) の全負荷・両群を合わせた範囲を等分し、その行の
+# 全パネルで同じビンと同じ横軸を使う。負荷をまたいで山の位置を直接比べるため。
+# 範囲が全負荷ぶんに広がるので、1パネルの山が数本の棒につぶれないよう多めに取る。
+NUM_BINS = 40
 
 
 def scores_csv_path():
@@ -106,20 +108,31 @@ def load_reference_auc(path):
     return ref
 
 
-def _draw_hist(ax, groups):
-    """1パネル分。両群に共通のビンで重ねて描き、(AUC, 除外件数) を返す。"""
-    finite = {k: np.asarray([v for v in vals if math.isfinite(v)], dtype=float)
-              for k, vals in groups.items()}
-    n_dropped = sum(len(groups[k]) - len(finite[k]) for k in groups)
+def _finite(vals):
+    return np.asarray([v for v in vals if math.isfinite(v)], dtype=float)
 
-    both = np.concatenate([finite["interf"], finite["no_interf"]])
+
+def row_edges(per_load):
+    """1行 (1手法) の全負荷・両群を合わせた範囲から、共通のビン境界を作る。
+
+    per_load: {own_load: {"interf": [...], "no_interf": [...]}}
+    有限値が1つも無ければ None。
+    """
+    vals = [_finite(g[k]) for g in per_load.values() for k in ("interf", "no_interf")]
+    both = np.concatenate(vals) if vals else np.array([])
     if both.size == 0:
-        return float("nan"), n_dropped
+        return None
     lo, hi = float(both.min()), float(both.max())
     if hi <= lo:  # 全部同じ値のときも棒が見えるように幅を持たせる
         pad = abs(lo) * 0.05 or 1e-6
         lo, hi = lo - pad, hi + pad
-    edges = np.linspace(lo, hi, NUM_BINS + 1)
+    return np.linspace(lo, hi, NUM_BINS + 1)
+
+
+def _draw_hist(ax, groups, edges):
+    """1パネル分。行で共通のビン edges で両群を重ねて描き、(AUC, 除外件数) を返す。"""
+    finite = {k: _finite(vals) for k, vals in groups.items()}
+    n_dropped = sum(len(groups[k]) - len(finite[k]) for k in groups)
 
     # 干渉なし (青) を先に描き、干渉あり (赤) を上に重ねる
     for klass in ("no_interf", "interf"):
@@ -139,15 +152,19 @@ def plot_pair(other_load, own_bw, other_bw, per_method, loads, out_dir, fmt,
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.3 * n_cols, 3.0 * n_rows),
                              squeeze=False)
     for i, method in enumerate(METHODS):
+        # 横軸とビンはこの行 (手法) の全負荷で共通にする
+        edges = row_edges(per_method[method])
         for j, load in enumerate(loads):
             ax = axes[i][j]
             groups = per_method[method].get(load)
-            if not groups or not groups["interf"] or not groups["no_interf"]:
+            if (edges is None or not groups
+                    or not groups["interf"] or not groups["no_interf"]):
                 ax.text(0.5, 0.5, "no data", ha="center", va="center",
                         transform=ax.transAxes, color="0.5")
                 ax.set_xticks([]); ax.set_yticks([])
                 continue
-            auc, n_dropped = _draw_hist(ax, groups)
+            auc, n_dropped = _draw_hist(ax, groups, edges)
+            ax.set_xlim(edges[0], edges[-1])
 
             note = f"AUC {auc:.3f}"
             if n_dropped:
