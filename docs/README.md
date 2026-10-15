@@ -305,9 +305,12 @@ script/
   run_analysis.sh               解析から作図まで。下の2つから呼ばれる
   sbatch_jobs.sh                全体の driver
   sbatch_reanalyze.sh           解析と作図だけやり直す
+  bin_width_sensitivity.py      RSSIビン幅 1〜20 dBm の感度分析 (docs/bin_width.md)
+  sbatch_bin_width.sh           上を SLURM で回す (再シミュレーション不要)
 template/                       Jinja2 テンプレート
 docs/README.md                  このファイル
 docs/auc.md                     AUC の詳細
+docs/bin_width.md               RSSIビン幅の感度分析
 ```
 
 `analyze_csv.py` は CSV を作るだけで、図は出さない。図は `plot_detection_lines.py` の担当。
