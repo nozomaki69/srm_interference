@@ -63,12 +63,9 @@ MARKER = {50: "o", 100: "s", 200: "^"}
 # 測定モード -> 線種。simultaneous は標準では実現できない参照 (上界) で、
 # これを基準に sequential がどれだけ落ちるかを見るので、参照側を実線にする。
 LINESTYLE = {"simultaneous": "-", "sequential": ":"}
-# 凡例に出す名前。compare 図は1項目が "200 kbps (simultaneous)" と長くなり、
-# 凡例の箱がプロット領域を食うので縮める。元の語の頭を取るだけにして、
-# simul/sequen のどちらも同じ長さに揃える (seq/sim まで詰めない ―― `sim` は
-# シミュレータ本体 ./sim と紛らわしい。docs/README.md の「名前について」の方針)。
-# キー側 (データの識別子) は縮めない。縮めるのは図に出す文字だけ。
-MODE_LABEL = {"simultaneous": "simul", "sequential": "sequen"}
+# 凡例に出す名前。以前は凡例の箱を小さくするため simul/sequen に縮めていたが、
+# 読み手に通じにくいので書き下す (compare 図は "200 kbps (simultaneous)" になる)。
+MODE_LABEL = {"simultaneous": "simultaneous", "sequential": "sequential"}
 MODES = ("simultaneous", "sequential")
 
 # 図中のテキストは英語にする。計算機 (Linux) に日本語フォントが無いと豆腐文字に
