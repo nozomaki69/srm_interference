@@ -37,6 +37,9 @@ LOAD_PERCENT = C.OFFERED_LOAD_PERCENTS[0]
 OWN_COLOR = "blue"
 NEIGHBOR_COLOR = "red"
 
+# 目盛り・軸タイトル・凡例の文字サイズ (すべて揃える)
+FONT_SIZE = 25
+
 
 def range_km(ch):
     """生成側と同じく 0.1 km に丸めた通信範囲 [km]"""
@@ -91,15 +94,17 @@ def plot_positions(positions, pattern, seed, interf_label, out_dir):
             markersize=8, alpha=0.5, label="Neighboring-PAN end device", linestyle="")
 
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("x [km]", fontsize=25)
-    ax.set_ylabel("y [km]", fontsize=25)
-    ax.tick_params(axis="both", labelsize=25, width=3.0, which="major", length=20)
+    ax.set_xlabel("x [km]", fontsize=FONT_SIZE)
+    ax.set_ylabel("y [km]", fontsize=FONT_SIZE)
+    ax.tick_params(axis="both", labelsize=FONT_SIZE, width=3.0, which="major", length=20)
     ax.set_xlim(-2, 3.5)
     ax.set_ylim(-1.5, 1.5)
-    # 凡例は枠の外 (上) に出す。枠内だと端末に重なって隠れるため
-    leg = ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=2, fontsize=16)
+    # 凡例は枠の外 (右横) に 4行1列で出す。枠内だと端末に重なって隠れるため
+    leg = ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), ncol=1,
+                    fontsize=FONT_SIZE)
     leg.get_frame().set_linewidth(1.8)
-    fig.tight_layout()
+    # tight_layout() は枠外の凡例のぶん軸を縮めてしまうので使わず、
+    # savefig の bbox_inches="tight" で凡例ごと切り出す
 
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{interf_label}_ch{pan1_ch}vs{pan2_ch}_seed{seed}.pdf")
