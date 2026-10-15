@@ -193,6 +193,7 @@ RSSI でビン分けする。ビンの起点は**チャネル固有の固定値*
 | `plots/interference_detection_results_simultaneous.csv` | 検知結果。**900行** = 6帯域ペア × 25負荷 × 2PAN × 3手法 |
 | `plots/detection_scores_simultaneous.csv` | Seed ごとの干渉指標。180,000行 |
 | `plots/detection_lines/` | 折れ線 16枚 + 描画値の CSV |
+| `plots/score_histograms/` | 干渉あり/なしのスコア分布 9枚 |
 
 ### 検知結果 CSV の列
 
@@ -250,6 +251,32 @@ other_load = pan2_offload if pan == "PAN1" else pan1_offload
 **枚ごとには変えない。** 図をまたいで比較できることがこの図の目的なので、
 1つ決めて全図に同じ値を当てる。選ばれた下端は実行時に標準出力に出る。
 
+### スコア分布のヒストグラム（山）
+
+AUC は「干渉ありのスコアの山」と「干渉なしのスコアの山」の離れ具合を、閾値を
+ずらしながら測ったもの。数字だけでなく山そのものを見て、どう分離しているか
+（あるいは重なっているか）を確かめるための図。実装は `script/plot_score_histograms.py`。
+
+- **対象は折れ線と同じ断面**：相手PAN負荷 100%、自帯域 × 相手帯域の 9 通り、
+  対称ペアは PAN1 側だけ。読み替えは `plot_detection_lines.py::own_other()` を
+  そのまま使う（規則を2箇所に書かない）
+- **1枚 = 帯域の組1つ**。行が手法（proposed / dper / rssi）、列が自PAN負荷 20–100%
+- 横軸：proposed は RSSIビン内 ΔPER 分散の最大値、dper は全端末の ΔPER 分散、
+  rssi は全端末の平均RSSI [dBm]。つまり各手法の Seed ごとのスコアそのもの
+- 縦軸：シナリオ数（Seed 数。干渉あり・なし各 100）
+- **干渉ありが赤、干渉なしが青**。両群に共通のビン（両群を合わせた範囲を 20 等分）で
+  半透明に重ねる
+- 横軸の範囲はパネルごとに決める。負荷で分散の桁が変わるので、共有すると低負荷側の
+  山がつぶれる。パネル間で横軸の位置を比べるときは目盛りを読むこと
+- 各パネルにそのセルの AUC を書く（`analyze_csv._rank_auc()` で再計算。折れ線の値と
+  一致することを実行時に突き合わせる）
+- スコアを作れなかった Seed（有限でない値。rssi の `-inf`）はヒストグラムに入れず、
+  件数があればパネルに注記する
+- 入力は `plots/detection_scores_simultaneous.csv`。出力は
+  `plots/score_histograms/hist_own{自帯域}_other{相手帯域}.pdf` の 9 枚
+- `plot_figures.sh` から呼ばれるので、`run_analysis.sh` / `sbatch_reanalyze.sh` でも
+  自動で作られる
+
 ## 7. ファイル構成
 
 ```
@@ -259,6 +286,7 @@ script/
   create_csv.py                 .trace -> simulation_results.csv (sequential/simultaneous 同時)
   analyze_csv.py                PER・3手法の統計量・AUC・検知結果 CSV
   plot_detection_lines.py       折れ線グラフ。own/other の読み替え規則の定義元
+  plot_score_histograms.py      干渉あり/なしのスコア分布 (山) のヒストグラム
   plot_figures.sh               図だけ作り直す (解析は走らせない)
   run_analysis.sh               解析から作図まで。下の2つから呼ばれる
   sbatch_jobs.sh                全体の driver

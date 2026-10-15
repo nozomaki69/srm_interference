@@ -42,10 +42,16 @@ run() {
 # 折れ線は3手法を1枚に重ねるので、手法を跨いで1回で済む
 run "$SCRIPT_DIR/plot_detection_lines.py"
 
+# 干渉あり(赤)/なし(青)のスコア分布 (山)。折れ線と同じ断面を、自PAN負荷ごとに
+# 描く。AUC の照合に折れ線の描画値を読むので、折れ線の後に回す。
+run "$SCRIPT_DIR/plot_score_histograms.py"
+
 count() { ls "$1" 2>/dev/null | wc -l | tr -d ' '; }
 
 echo "========================================"
 echo "作図が完了しました"
 echo "  plots/detection_lines_more/other100/  $(count "$PLOTS/detection_lines_more/other100") ファイル"
 echo "  plots/detection_lines_more/other200/  $(count "$PLOTS/detection_lines_more/other200") ファイル"
+echo "  plots/score_histograms_more/other100/ $(count "$PLOTS/score_histograms_more/other100") ファイル"
+echo "  plots/score_histograms_more/other200/ $(count "$PLOTS/score_histograms_more/other200") ファイル"
 echo "========================================"
