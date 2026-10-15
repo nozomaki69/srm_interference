@@ -189,6 +189,7 @@ RSSI でビン分けする。ビンの起点は**チャネル固有の固定値*
 | `plots/detection_scores_simultaneous.csv` | Seed ごとの干渉指標。180,000行 |
 | `plots/detection_lines/` | 折れ線 16枚 + 描画値の CSV |
 | `plots/score_histograms/` | 干渉あり/なしのスコア分布 9枚 |
+| `plots/position_plots/` | ノード配置図 12枚（Seed 1つ） |
 
 ### 検知結果 CSV の列
 
@@ -271,6 +272,24 @@ AUC は「干渉ありのスコアの山」と「干渉なしのスコアの山�
 - `plot_figures.sh` から呼ばれるので、`run_analysis.sh` / `sbatch_reanalyze.sh` でも
   自動で作られる
 
+### ノード配置図
+
+シナリオのノード配置を確かめるための図。実装は `script/pos.py`
+（`save` 以前にあったものを、このブランチ向けに作り直した）。
+
+- **.pos は読まない**。スイープの .pos はバッチ完了時に消えるので手元に残らない。
+  代わりに `interference_2pan_config.generate_batch()` をそのまま呼んで一時ディレクトリに
+  .pos を作り、それを読む。座標の生成規則（`np.random.seed(seed)` → 一様円配置、
+  PAN間距離 = 通信範囲の大きい方 + 100 m）を2箇所に書かないため
+- 座標は負荷に依存しないので、負荷は1組（20% / 20%）だけ生成する
+- **Seed は1つ**（既定 0。`--seed` で変更可）。1枚 = 帯域パターン1つで計 12 枚
+- 自PAN = PAN1、隣接PAN = PAN2。凡例は `Own-PAN Coordinator` /
+  `Neighboring-PAN Coordinator` / `Own-PAN end device` / `Neighboring-PAN end device`（端末に重ならないよう枠の上に置く）。
+  色は自PAN = 青、隣接PAN = 赤。コーディネータは四角、端末は丸、
+  円は各PANの通信範囲（`MAXIMUM_COMMUNICATION_RANGE` を生成と同じく 0.1 km に丸めた値）
+- 出力は `plots/position_plots/{interf|no_interf}_ch{PAN1}vs{PAN2}_seed{seed}.pdf`。
+  `plot_figures.sh` からは呼ばない（解析結果に依存しない図なので、必要なときに単独で回す）
+
 ## 7. ファイル構成
 
 ```
@@ -281,6 +300,7 @@ script/
   analyze_csv.py                PER・3手法の統計量・AUC・検知結果 CSV
   plot_detection_lines.py       折れ線グラフ。own/other の読み替え規則の定義元
   plot_score_histograms.py      干渉あり/なしのスコア分布 (山) のヒストグラム
+  pos.py                        ノード配置図 (Seed 1つ)
   plot_figures.sh               図だけ作り直す (解析は走らせない)
   run_analysis.sh               解析から作図まで。下の2つから呼ばれる
   sbatch_jobs.sh                全体の driver
