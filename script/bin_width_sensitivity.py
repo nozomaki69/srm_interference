@@ -55,6 +55,12 @@ def compute_rows(csv_file):
     print(f"--- Loading {csv_file} ---")
     data = A.load_and_aggregate(csv_file)
     print(f"--- Loaded {len(data)} conditions ---")
+    # 入力が icc の全ランぶん揃っているかを見るための内訳。
+    # condition_key = (pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload)
+    pairs = sorted({(k[0], k[1]) for k in data})
+    loads = sorted({k[3] for k in data} | {k[4] for k in data})
+    print(f"    チャネルの組 ({len(pairs)}): {pairs}")
+    print(f"    負荷 [%]: {loads}")
 
     rows = []
     # 幅に依存しない手法は1回だけ (bin_width は空欄)
@@ -69,6 +75,15 @@ def compute_rows(csv_file):
             rows.append({**r, "bin_width": w})
         mean = np.mean([r["auc"] for r in res]) if res else float("nan")
         print(f"    bin width {w:>2} dBm: {len(res)} 条件, 平均 AUC {mean:.4f}")
+    if not any(r["method"] == "proposed" for r in rows):
+        # 干渉あり (同一周波数) と干渉なし (別周波数) の組が1つも揃わないと
+        # AUC が1つも出ない。入力が icc の完全な結果でないときに起きる。
+        raise SystemExit(
+            "エラー: 干渉あり/なしの対になる条件が1つもありません。\n"
+            "       simulation_results.csv が icc の 30,000 ランぶん揃っていない"
+            "可能性があります (上のチャネルの組と負荷を確認してください)。\n"
+            "       icc は 12 組 (干渉あり ch0-2 同士の6組 + 干渉なし ch3-5 を含む6組)、"
+            "負荷 [20, 40, 60, 80, 100] が揃っているはずです。")
     return rows
 
 
