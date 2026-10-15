@@ -63,6 +63,13 @@
 自分 / 相手の読み替え規則（`own_other()`）は変えない。断面の値を引数に取るように
 するだけ。
 
+### スコア分布のヒストグラム
+
+`script/plot_score_histograms.py`（設計は `docs/README.md` の「スコア分布の
+ヒストグラム」節）も同じ2断面に対応させ、`plots/score_histograms_more/other{100,200}/`
+に 9 枚ずつ出す。列（自PAN負荷）は 10 個になる。`plots/score_histograms/` は
+`icc` の 20〜100% の結果として残す。
+
 ## 4. 実行
 
 計算機で:

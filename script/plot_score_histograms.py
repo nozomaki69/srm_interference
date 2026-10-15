@@ -5,7 +5,8 @@
 AUC は「干渉ありの山」と「干渉なしの山」の離れ具合を、閾値をずらしながら測った
 ものである。その山そのものを見て、どう分離しているか (重なっているか) を確かめる。
 
-対象は折れ線 (plot_detection_lines.py) と同じ断面: 相手PAN負荷 100%、
+対象は折れ線 (plot_detection_lines.py) と同じ断面: 相手PAN負荷 100% と 200%
+(icc_load200。断面ごとに other100/ other200/ へ出す)、
 自帯域 x 相手帯域の 9 通り、対称ペアは PAN1 側だけ。読み替え規則は
 plot_detection_lines.own_other() をそのまま使う (2箇所に書くと静かにずれる)。
 
@@ -43,7 +44,8 @@ import analyze_csv as A  # noqa: E402
 import plot_detection_lines as L  # noqa: E402
 from interference_2pan_config import OFFERED_LOAD_PERCENTS  # noqa: E402
 
-DEFAULT_OUT_DIR = os.path.join(A.PLOT_BASE_DIR, "score_histograms")
+# icc の 20-100% の結果 (score_histograms/) と混ざらないよう別の場所に出す。
+DEFAULT_OUT_DIR = os.path.join(A.PLOT_BASE_DIR, "score_histograms_more")
 
 METHODS = A.DETECTION_METHODS
 BANDWIDTHS = L.BANDWIDTHS
@@ -70,21 +72,24 @@ def scores_csv_path():
 
 
 def load_scores(csv_file):
-    """スコアCSVを読み、
-    {(own_bw, other_bw): {method: {own_load: {"interf": [...], "no_interf": [...]}}}}
+    """スコアCSVを読み、断面ごとに
+    {other_load: {(own_bw, other_bw): {method: {own_load: {"interf": [...], "no_interf": [...]}}}}}
     を返す。断面の絞り込みと自分 / 相手の読み替えは own_other() に任せる。
     """
-    data = defaultdict(lambda: {m: defaultdict(lambda: {"interf": [], "no_interf": []})
-                                for m in METHODS})
+    def _per_pair():
+        return {m: defaultdict(lambda: {"interf": [], "no_interf": []}) for m in METHODS}
+
+    data = {ol: defaultdict(_per_pair) for ol in L.OTHER_LOAD_PERCENTS}
     with open(csv_file, "r", encoding="utf-8", newline="") as f:
         for r in csv.DictReader(f):
             if r["method"] not in METHODS:
                 continue
-            own = L.own_other(r)
-            if own is None:
-                continue
-            data[(own["own_bw"], own["other_bw"])][r["method"]][own["own_load"]][
-                r["klass"]].append(float(r["score"]))
+            for other_load in L.OTHER_LOAD_PERCENTS:
+                own = L.own_other(r, other_load)
+                if own is None:
+                    continue
+                data[other_load][(own["own_bw"], own["other_bw"])][r["method"]][
+                    own["own_load"]][r["klass"]].append(float(r["score"]))
     return data
 
 
@@ -95,8 +100,8 @@ def load_reference_auc(path):
         return ref
     with open(path, "r", encoding="utf-8", newline="") as f:
         for r in csv.DictReader(f):
-            key = (r["method"], int(r["own_bw_kbps"]), int(r["other_bw_kbps"]),
-                   int(r["own_load_percent"]))
+            key = (int(r["other_load_percent"]), r["method"], int(r["own_bw_kbps"]),
+                   int(r["other_bw_kbps"]), int(r["own_load_percent"]))
             ref[key] = float(r["auc"])
     return ref
 
@@ -127,10 +132,11 @@ def _draw_hist(ax, groups):
     return auc, n_dropped
 
 
-def plot_pair(own_bw, other_bw, per_method, loads, out_dir, fmt, ref_auc, mismatches):
+def plot_pair(other_load, own_bw, other_bw, per_method, loads, out_dir, fmt,
+              ref_auc, mismatches):
     """帯域の組1つ分の 3行 x 負荷数 列の図を描く。"""
     n_rows, n_cols = len(METHODS), len(loads)
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.6 * n_cols, 3.0 * n_rows),
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.3 * n_cols, 3.0 * n_rows),
                              squeeze=False)
     for i, method in enumerate(METHODS):
         for j, load in enumerate(loads):
@@ -150,9 +156,9 @@ def plot_pair(own_bw, other_bw, per_method, loads, out_dir, fmt, ref_auc, mismat
                     fontsize=10, bbox=dict(facecolor="white", edgecolor="0.8",
                                            boxstyle="round,pad=0.25", alpha=0.85))
 
-            ref = ref_auc.get((method, own_bw, other_bw, load))
+            ref = ref_auc.get((other_load, method, own_bw, other_bw, load))
             if ref is not None and abs(ref - auc) > 1e-4:
-                mismatches.append((method, own_bw, other_bw, load, auc, ref))
+                mismatches.append((other_load, method, own_bw, other_bw, load, auc, ref))
 
             ax.grid(True, color="0.88", linestyle="--", linewidth=0.6)
             ax.set_axisbelow(True)
@@ -174,7 +180,7 @@ def plot_pair(own_bw, other_bw, per_method, loads, out_dir, fmt, ref_auc, mismat
     fig.legend(handles=handles, loc="upper center", ncol=2, frameon=False,
                fontsize=12, bbox_to_anchor=(0.5, 1.0))
     fig.suptitle(f"Own {own_bw} kbps / Other {other_bw} kbps "
-                 f"(other load {L.OTHER_LOAD_PERCENT}%)", fontsize=13, y=1.035)
+                 f"(other load {other_load}%)", fontsize=13, y=1.035)
     fig.tight_layout(rect=(0, 0, 1, 0.97))
     path = os.path.join(out_dir, f"hist_own{own_bw}_other{other_bw}.{fmt}")
     fig.savefig(path, bbox_inches="tight")
@@ -184,7 +190,7 @@ def plot_pair(own_bw, other_bw, per_method, loads, out_dir, fmt, ref_auc, mismat
 
 def main():
     p = argparse.ArgumentParser(
-        description="相手PAN負荷100%の断面で、干渉あり(赤)/なし(青)のスコア分布を"
+        description="相手PAN負荷100%/200%の断面で、干渉あり(赤)/なし(青)のスコア分布を"
                     "自PAN負荷ごとにヒストグラムにする")
     p.add_argument("--csv", default=None,
                    help=f"Seed 別スコア CSV (既定: {scores_csv_path()})")
@@ -205,21 +211,25 @@ def main():
 
     os.makedirs(args.out_dir, exist_ok=True)
     written, mismatches = [], []
-    for own_bw in BANDWIDTHS:
-        for other_bw in BANDWIDTHS:
-            per_method = data.get((own_bw, other_bw))
-            if per_method is None:
-                print(f"    Warning: (own {own_bw}, other {other_bw}) のデータがありません")
-                continue
-            written.append(plot_pair(own_bw, other_bw, per_method, loads,
-                                     args.out_dir, args.format, ref_auc, mismatches))
+    for other_load, section in data.items():
+        sub_dir = os.path.join(args.out_dir, f"other{other_load}")
+        os.makedirs(sub_dir, exist_ok=True)
+        for own_bw in BANDWIDTHS:
+            for other_bw in BANDWIDTHS:
+                per_method = section.get((own_bw, other_bw))
+                if per_method is None:
+                    print(f"    Warning: other{other_load} (own {own_bw}, other {other_bw})"
+                          " のデータがありません")
+                    continue
+                written.append(plot_pair(other_load, own_bw, other_bw, per_method, loads,
+                                         sub_dir, args.format, ref_auc, mismatches))
 
     if ref_auc:
         if mismatches:
             print(f"    Warning: 折れ線の AUC と一致しないパネルが {len(mismatches)} 件あります")
             for m in mismatches[:10]:
-                print(f"      {m[0]} own{m[1]} other{m[2]} load{m[3]}: "
-                      f"{m[4]:.4f} (折れ線 {m[5]:.4f})")
+                print(f"      other{m[0]}% {m[1]} own{m[2]} other{m[3]} load{m[4]}: "
+                      f"{m[5]:.4f} (折れ線 {m[6]:.4f})")
         else:
             print(f"--- AUC: 全パネルが折れ線の描画値 ({os.path.basename(ref_path)}) と一致 ---")
     else:
@@ -227,7 +237,7 @@ def main():
 
     print(f"\n--- {args.out_dir} に {len(written)} ファイル出力 ---")
     for w in written:
-        print(f"    {os.path.basename(w)}")
+        print(f"    {os.path.relpath(w, args.out_dir)}")
 
 
 if __name__ == "__main__":
