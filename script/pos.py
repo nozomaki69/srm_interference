@@ -85,11 +85,11 @@ def plot_positions(positions, pattern, seed, interf_label, out_dir):
                         alpha=0.05, fill=True))
 
     ax.plot(*positions[1], "s", color=OWN_COLOR, markersize=12,
-            label="Own-PAN Coordinator", linestyle="")
+            label="Home-PAN Coordinator", linestyle="")
     ax.plot(*positions[2], "s", color=NEIGHBOR_COLOR, markersize=12,
             label="Neighboring-PAN Coordinator", linestyle="")
     ax.plot([p[0] for p in own_dev], [p[1] for p in own_dev], "o", color=OWN_COLOR,
-            markersize=8, alpha=0.5, label="Own-PAN end device", linestyle="")
+            markersize=8, alpha=0.5, label="Home-PAN end device", linestyle="")
     ax.plot([p[0] for p in nb_dev], [p[1] for p in nb_dev], "o", color=NEIGHBOR_COLOR,
             markersize=8, alpha=0.5, label="Neighboring-PAN end device", linestyle="")
 

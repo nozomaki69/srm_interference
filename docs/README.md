@@ -283,8 +283,8 @@ AUC は「干渉ありのスコアの山」と「干渉なしのスコアの山�
   PAN間距離 = 通信範囲の大きい方 + 100 m）を2箇所に書かないため
 - 座標は負荷に依存しないので、負荷は1組（20% / 20%）だけ生成する
 - **Seed は1つ**（既定 0。`--seed` で変更可）。1枚 = 帯域パターン1つで計 12 枚
-- 自PAN = PAN1、隣接PAN = PAN2。凡例は `Own-PAN Coordinator` /
-  `Neighboring-PAN Coordinator` / `Own-PAN end device` / `Neighboring-PAN end device`（端末に重ならないよう枠の右横に 4行1列で置く。文字サイズは目盛り・軸タイトルと同じ 25）。
+- 自PAN = PAN1、隣接PAN = PAN2。凡例は `Home-PAN Coordinator` /
+  `Neighboring-PAN Coordinator` / `Home-PAN end device` / `Neighboring-PAN end device`（端末に重ならないよう枠の右横に 4行1列で置く。文字サイズは目盛り・軸タイトルと同じ 25）。
   色は自PAN = 青、隣接PAN = 赤。コーディネータは四角、端末は丸、
   円は各PANの通信範囲（`MAXIMUM_COMMUNICATION_RANGE` を生成と同じく 0.1 km に丸めた値）
 - 出力は `plots/position_plots/{interf|no_interf}_ch{PAN1}vs{PAN2}_seed{seed}.pdf`。
