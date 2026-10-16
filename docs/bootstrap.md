@@ -42,14 +42,15 @@ AUC を計算し直すと、検知結果 CSV の `auc` と 2モード × 300 条
 列は `bandwidth, distance, pan1_offload, pan2_offload, pan, auc, auc_boot_mean, auc_ci_low, auc_ci_high, n_boot`。
 
 AUC の折れ線（`plot_detection_lines.py --metric auc`）は、この CSV があれば各線の
-95% 区間を同じ色の半透明の帯で重ねる。`auc_plotted_values.csv` にも
+95% 区間を同じ色の髭（エラーバー）で重ねる。同じ負荷の髭が真上に重ならないよう、
+系列ごとに横へ少し（1.5% 刻み）ずらして描く。目盛りは本来の負荷の位置のまま。`auc_plotted_values.csv` にも
 `auc_ci_low` / `auc_ci_high` 列が付く。F1 の図は変えない。
 
 ## 実行
 
 ```sh
 python3 script/bootstrap_auc.py                       # 数十秒
-python3 script/plot_detection_lines.py --metric auc   # 帯付きの折れ線
+python3 script/plot_detection_lines.py --metric auc   # 髭 (エラーバー) 付きの折れ線
 ```
 
 `script/plot_figures.sh` が折れ線の前に `bootstrap_auc.py` を呼ぶので、

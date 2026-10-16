@@ -231,7 +231,7 @@ other_load = pan2_offload if pan == "PAN1" else pan1_offload
 **PAN1 のみを採る**。非対称ペアは片方の PAN しか該当しないので、全線を 1 PAN 分
 (100+100 Seed) に揃えてノイズ水準を均一にするため。
 
-AUC の図には、ブートストラップ（1000回）による 95% 信頼区間を同じ色の半透明の帯で
+AUC の図には、ブートストラップ（1000回）による 95% 信頼区間を同じ色の髭（エラーバー）で
 重ねる（`plots/auc_bootstrap{,_simultaneous}.csv` があるとき）。詳細は `docs/bootstrap.md`。
 
 ### ROC 曲線

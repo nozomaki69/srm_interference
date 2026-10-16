@@ -173,8 +173,12 @@ def ci_csv_path(mode):
     return os.path.join(PLOT_BASE_DIR, f"auc_bootstrap{suffix}.csv")
 
 
-# 信頼区間の帯の濃さ。compare 図は6本の帯が重なるので薄めにする
-CI_ALPHA = 0.15
+# 信頼区間の髭 (エラーバー) の体裁。帯は重なって読みにくかったので髭にした。
+CI_CAPSIZE = 4        # 髭の端の横棒の長さ [pt]
+CI_LINEWIDTH = 1.2
+# 髭を描くときは、同じ負荷の点が真上に重ならないよう系列ごとに横へずらす
+# (dodge)。系列間の間隔 [負荷 %]。負荷の刻み (20%) に対して十分小さく取る。
+CI_DODGE = 1.5
 
 
 def load_ci(csv_file):
@@ -226,30 +230,37 @@ def _draw_panel(ax, data, own_bw, modes, metric, ci=None):
     data: {mode: {(own_bw, other_bw): {own_load: value}}}
     modes: 描くモードのタプル。1つなら単独図、2つなら比較図。
     ci: {mode: {(own_bw, other_bw): {own_load: (lo, hi)}}}。あれば線と同じ色の
-        半透明の帯で 95% 信頼区間を重ねる (AUC のときだけ渡される)。
+        髭 (エラーバー) で 95% 信頼区間を重ねる (AUC のときだけ渡される)。
     """
     loads = sorted(OFFERED_LOAD_PERCENTS)
     # モードを外側で回すので、凡例は「実線 50/100/200 -> 点線 50/100/200」の順に
     # 並ぶ (MODES = simultaneous, sequential で前者が実線)。帯域を外側にすると
     # 50実線/50点線/100実線/... と交互になって読みにくい。
-    for mode in modes:
-        for other_bw in BANDWIDTHS:
-            pts = data[mode].get((own_bw, other_bw))
-            if not pts:
-                continue
-            xs = [l for l in loads if l in pts]
-            ys = [pts[l] for l in xs]
-            label = (f"{other_bw} kbps" if len(modes) == 1
-                     else f"{other_bw} kbps ({MODE_LABEL[mode]})")
-            ax.plot(xs, ys,
-                    color=COLOR[other_bw], linestyle=LINESTYLE[mode],
-                    marker=MARKER[other_bw], markersize=6, linewidth=2.0,
-                    label=label)
-            band = (ci or {}).get(mode, {}).get((own_bw, other_bw), {})
-            bx = [l for l in xs if l in band]
-            if bx:
-                ax.fill_between(bx, [band[l][0] for l in bx], [band[l][1] for l in bx],
-                                color=COLOR[other_bw], alpha=CI_ALPHA, linewidth=0)
+    series = [(mode, other_bw) for mode in modes for other_bw in BANDWIDTHS]
+    for k, (mode, other_bw) in enumerate(series):
+        pts = data[mode].get((own_bw, other_bw))
+        if not pts:
+            continue
+        xs = [l for l in loads if l in pts]
+        ys = [pts[l] for l in xs]
+        # 髭があるときだけ横にずらす。目盛りは本来の負荷の位置のまま。
+        dx = (k - (len(series) - 1) / 2.0) * CI_DODGE if ci else 0.0
+        label = (f"{other_bw} kbps" if len(modes) == 1
+                 else f"{other_bw} kbps ({MODE_LABEL[mode]})")
+        ax.plot([x + dx for x in xs], ys,
+                color=COLOR[other_bw], linestyle=LINESTYLE[mode],
+                marker=MARKER[other_bw], markersize=6, linewidth=2.0,
+                label=label)
+        band = (ci or {}).get(mode, {}).get((own_bw, other_bw), {})
+        bx = [l for l in xs if l in band]
+        if bx:
+            # 髭は点推定からの上下の距離で渡す (errorbar の yerr の形式)
+            by = [pts[l] for l in bx]
+            yerr = [[max(y - band[l][0], 0.0) for l, y in zip(bx, by)],
+                    [max(band[l][1] - y, 0.0) for l, y in zip(bx, by)]]
+            ax.errorbar([x + dx for x in bx], by, yerr=yerr, fmt="none", ecolor=COLOR[other_bw],
+                        elinewidth=CI_LINEWIDTH, capsize=CI_CAPSIZE,
+                        capthick=CI_LINEWIDTH)
 
     spec = metric_spec(metric)
     if spec["ref"] is not None:
