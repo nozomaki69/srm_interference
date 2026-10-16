@@ -169,6 +169,7 @@ simultaneous は分母に `macCsmaFailCount` を足すとクリップが**厳密
 | `plots/detection_lines/` | 折れ線グラフ（F1・AUC で12枚ずつ + 描画値の CSV） |
 | `plots/detection_scores{,_simultaneous}.csv` | Seed ごとの干渉指標。ROC の入力 |
 | `plots/roc/` | ROC 曲線（6枚） |
+| `plots/auc_bootstrap{,_simultaneous}.csv` | AUC のブートストラップ 95% 信頼区間（1000回。`docs/bootstrap.md`） |
 
 ### ヒートマップ
 
@@ -230,6 +231,9 @@ other_load = pan2_offload if pan == "PAN1" else pan1_offload
 **PAN1 のみを採る**。非対称ペアは片方の PAN しか該当しないので、全線を 1 PAN 分
 (100+100 Seed) に揃えてノイズ水準を均一にするため。
 
+AUC の図には、ブートストラップ（1000回）による 95% 信頼区間を同じ色の半透明の帯で
+重ねる（`plots/auc_bootstrap{,_simultaneous}.csv` があるとき）。詳細は `docs/bootstrap.md`。
+
 ### ROC 曲線
 
 `auc` 列は面積の数値でしかないので、「低 FPR 側で素直に立ち上がっているのか、
@@ -268,6 +272,7 @@ script/
   create_heatmap.py             ヒートマップ
   plot_detection_lines.py       折れ線グラフ。own/other の読み替え規則の定義元
   plot_roc.py                   ROC 曲線
+  bootstrap_auc.py              AUC のブートストラップ 95% 信頼区間 (docs/bootstrap.md)
   plot_figures.sh               図だけ作り直す (解析は走らせない)
   run_analysis.sh               解析から作図まで。下の2つから呼ばれる
   sbatch_jobs.sh                全体の driver
@@ -275,6 +280,7 @@ script/
 template/                       Jinja2 テンプレート
 docs/README.md                  このファイル
 docs/auc.md                     AUC と ROC 曲線の詳細
+docs/bootstrap.md               AUC のブートストラップ信頼区間
 ```
 
 `analyze_csv.py` は CSV を作るだけで、図は出さない。

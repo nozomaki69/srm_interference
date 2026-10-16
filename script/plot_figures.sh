@@ -55,6 +55,10 @@ for MODE in sequential simultaneous; do
     done
 done
 
+# AUC のブートストラップ 95% 信頼区間 (Seed 別スコアCSVから)。
+# 折れ線の AUC 図が帯として重ねるので、折れ線より先に回す。
+run "$SCRIPT_DIR/bootstrap_auc.py"
+
 # 折れ線は sequential と simultaneous を1枚に重ねるので、モードを跨いで1回ずつ
 for METRIC in f1 auc; do
     run "$SCRIPT_DIR/plot_detection_lines.py" --metric "$METRIC"

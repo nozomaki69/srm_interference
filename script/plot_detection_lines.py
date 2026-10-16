@@ -167,6 +167,33 @@ def own_other(row):
     return {"own_bw": own_bw, "other_bw": other_bw, "own_load": own_load}
 
 
+def ci_csv_path(mode):
+    """mode -> AUC のブートストラップ信頼区間 CSV (bootstrap_auc.py が作る)。"""
+    suffix = "" if mode == "sequential" else "_simultaneous"
+    return os.path.join(PLOT_BASE_DIR, f"auc_bootstrap{suffix}.csv")
+
+
+# 信頼区間の帯の濃さ。compare 図は6本の帯が重なるので薄めにする
+CI_ALPHA = 0.15
+
+
+def load_ci(csv_file):
+    """ブートストラップ CSV を読み、{(own_bw, other_bw): {own_load: (lo, hi)}} を返す。
+
+    読み替えは load_series() と同じく own_other() に任せる。
+    """
+    with open(csv_file, "r", encoding="utf-8", newline="") as f:
+        rows = list(csv.DictReader(f))
+    ci = defaultdict(dict)
+    for r in rows:
+        own = own_other(r)
+        if own is None:
+            continue
+        ci[(own["own_bw"], own["other_bw"])][own["own_load"]] = (
+            float(r["auc_ci_low"]), float(r["auc_ci_high"]))
+    return ci
+
+
 def load_series(csv_file, metric):
     """CSV を読み、{(own_bw, other_bw): {own_load: value}} を返す。
 
@@ -193,11 +220,13 @@ def load_series(csv_file, metric):
     return series
 
 
-def _draw_panel(ax, data, own_bw, modes, metric):
+def _draw_panel(ax, data, own_bw, modes, metric, ci=None):
     """1つの軸に、ある自帯域についての線を引く。
 
     data: {mode: {(own_bw, other_bw): {own_load: value}}}
     modes: 描くモードのタプル。1つなら単独図、2つなら比較図。
+    ci: {mode: {(own_bw, other_bw): {own_load: (lo, hi)}}}。あれば線と同じ色の
+        半透明の帯で 95% 信頼区間を重ねる (AUC のときだけ渡される)。
     """
     loads = sorted(OFFERED_LOAD_PERCENTS)
     # モードを外側で回すので、凡例は「実線 50/100/200 -> 点線 50/100/200」の順に
@@ -216,6 +245,11 @@ def _draw_panel(ax, data, own_bw, modes, metric):
                     color=COLOR[other_bw], linestyle=LINESTYLE[mode],
                     marker=MARKER[other_bw], markersize=6, linewidth=2.0,
                     label=label)
+            band = (ci or {}).get(mode, {}).get((own_bw, other_bw), {})
+            bx = [l for l in xs if l in band]
+            if bx:
+                ax.fill_between(bx, [band[l][0] for l in bx], [band[l][1] for l in bx],
+                                color=COLOR[other_bw], alpha=CI_ALPHA, linewidth=0)
 
     spec = metric_spec(metric)
     if spec["ref"] is not None:
@@ -232,10 +266,10 @@ def _draw_panel(ax, data, own_bw, modes, metric):
     style_axes(ax)
 
 
-def plot_single(data, own_bw, modes, metric, out_dir, tag, fmt):
+def plot_single(data, own_bw, modes, metric, out_dir, tag, fmt, ci=None):
     """自帯域1つ分の図を1枚描く。"""
     fig, ax = plt.subplots(figsize=(7.2, 5.8))
-    _draw_panel(ax, data, own_bw, modes, metric)
+    _draw_panel(ax, data, own_bw, modes, metric, ci)
     ax.legend(loc="lower left", frameon=True, fontsize=LEGEND_FONTSIZE)
     path = os.path.join(out_dir, f"{metric}_own{own_bw}_{tag}.{fmt}")
     fig.savefig(path, bbox_inches="tight")
@@ -243,11 +277,11 @@ def plot_single(data, own_bw, modes, metric, out_dir, tag, fmt):
     return path
 
 
-def plot_3panel(data, modes, metric, out_dir, tag, fmt):
+def plot_3panel(data, modes, metric, out_dir, tag, fmt, ci=None):
     """自帯域3つを横並びのサブプロットにした1枚。"""
     fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.8), sharey=True)
     for ax, own_bw in zip(axes, BANDWIDTHS):
-        _draw_panel(ax, data, own_bw, modes, metric)
+        _draw_panel(ax, data, own_bw, modes, metric, ci)
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.5),
                frameon=True, fontsize=LEGEND_FONTSIZE)
@@ -258,21 +292,30 @@ def plot_3panel(data, modes, metric, out_dir, tag, fmt):
     return path
 
 
-def dump_values(data, metric, out_dir):
-    """描画に使った値を CSV に出す。数値確認用と relief rule への対応を兼ねる。"""
+def dump_values(data, metric, out_dir, ci=None):
+    """描画に使った値を CSV に出す。数値確認用と relief rule への対応を兼ねる。
+
+    信頼区間 (ci) を描いたときは、その下端・上端の列も足す。
+    """
     path = os.path.join(out_dir, f"{metric}_plotted_values.csv")
     with open(path, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(["mode", "own_bw_kbps", "other_bw_kbps",
-                    "other_load_percent", "own_load_percent", metric])
+                    "other_load_percent", "own_load_percent", metric]
+                   + ([f"{metric}_ci_low", f"{metric}_ci_high"] if ci else []))
         for mode in MODES:
             for own_bw in BANDWIDTHS:
                 for other_bw in BANDWIDTHS:
                     pts = data[mode].get((own_bw, other_bw), {})
                     for load in sorted(pts):
+                        extra = []
+                        if ci:
+                            lo, hi = ci[mode].get((own_bw, other_bw), {}).get(
+                                load, (float("nan"), float("nan")))
+                            extra = [f"{lo:.6g}", f"{hi:.6g}"]
                         w.writerow([mode, own_bw, other_bw,
                                     OTHER_LOAD_PERCENT, load,
-                                    f"{pts[load]:.6g}"])
+                                    f"{pts[load]:.6g}"] + extra)
     return path
 
 
@@ -314,6 +357,19 @@ def main():
                        if k not in data[mode]]
             print(f"    Warning: 欠けている (own, other) = {missing}")
 
+    # AUC のときだけ、ブートストラップの 95% 信頼区間を帯で重ねる。
+    # 両モードぶん揃っていなければ描かない (片方だけ帯があると比較図が読み違える)。
+    ci = None
+    if args.metric == "auc":
+        ci_paths = {m: ci_csv_path(m) for m in MODES}
+        if all(os.path.isfile(p) for p in ci_paths.values()):
+            ci = {m: load_ci(p) for m, p in ci_paths.items()}
+            print("--- 95% 信頼区間: " + ", ".join(
+                os.path.basename(p) for p in ci_paths.values()) + " ---")
+        else:
+            print("    (auc_bootstrap*.csv が無いので信頼区間の帯は描きません。"
+                  "先に script/bootstrap_auc.py を実行してください)")
+
     os.makedirs(args.out_dir, exist_ok=True)
     fmt = args.format
     written = []
@@ -322,10 +378,10 @@ def main():
                        ("compare", MODES)):
         for own_bw in BANDWIDTHS:
             written.append(plot_single(data, own_bw, modes, args.metric,
-                                       args.out_dir, tag, fmt))
+                                       args.out_dir, tag, fmt, ci))
         written.append(plot_3panel(data, modes, args.metric,
-                                   args.out_dir, tag, fmt))
-    written.append(dump_values(data, args.metric, args.out_dir))
+                                   args.out_dir, tag, fmt, ci))
+    written.append(dump_values(data, args.metric, args.out_dir, ci))
 
     print(f"\n--- {args.out_dir} に {len(written)} ファイル出力 ---")
     for path in written:
