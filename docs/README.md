@@ -44,9 +44,10 @@ IEEE 802.15.4 の標準では、PER の計算に要る5つの MAC カウンタ�
 「従来方式」と説明していたのが内容に合っていなかったので書き下した。
 略して `seq` / `sim` にはしない ―― **`sim` はシミュレータ本体（`./sim`）と衝突する**。
 
-図の凡例も略さずに `simultaneous` / `sequential` と書く（`plot_detection_lines.py` の
-`MODE_LABEL`）。以前は compare 図の凡例の箱を小さくするため `simul` / `sequen` に
-縮めていたが、読み手に通じにくいのでやめた。
+図の凡例では、論文での呼び方に合わせて `simultaneous` を `single-query`、
+`sequential` を `multi-query` と書く（`plot_detection_lines.py` の `MODE_LABEL`）。
+変えるのは図に出す文字だけで、列名・ファイル名・`--mode` の値といったデータの
+識別子は `simultaneous` / `sequential` のまま。
 
 窓の定義は `script/interference_2pan_config.py` の `METRIC_WINDOW_ORDER` /
 `metric_window()` / `simultaneous_window()` が唯一の定義元。

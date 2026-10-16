@@ -63,9 +63,11 @@ MARKER = {50: "o", 100: "s", 200: "^"}
 # 測定モード -> 線種。simultaneous は標準では実現できない参照 (上界) で、
 # これを基準に sequential がどれだけ落ちるかを見るので、参照側を実線にする。
 LINESTYLE = {"simultaneous": "-", "sequential": ":"}
-# 凡例に出す名前。以前は凡例の箱を小さくするため simul/sequen に縮めていたが、
-# 読み手に通じにくいので書き下す (compare 図は "200 kbps (simultaneous)" になる)。
-MODE_LABEL = {"simultaneous": "simultaneous", "sequential": "sequential"}
+# 凡例に出す名前。論文での呼び方に合わせ、全メトリックを1つの窓で同時に測る
+# simultaneous を single-query、メトリックごとに窓を分けて順に測る sequential を
+# multi-query と書く (compare 図は "200 kbps (single-query)" になる)。
+# 変えるのは図に出す文字だけで、キー・列名・ファイル名はそのまま。
+MODE_LABEL = {"simultaneous": "single-query", "sequential": "multi-query"}
 MODES = ("simultaneous", "sequential")
 
 # 図中のテキストは英語にする。計算機 (Linux) に日本語フォントが無いと豆腐文字に
