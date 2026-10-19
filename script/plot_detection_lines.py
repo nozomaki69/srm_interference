@@ -62,9 +62,13 @@ MODE_LABEL = {"simultaneous": "single-query", "sequential": "multi-query"}
 # モード比較図での線種。single-query (参照) を実線にする
 MODE_LINESTYLE = {"simultaneous": "-", "sequential": ":"}
 # モード比較図での色 (= 相手帯域)。3手法の図の青・橙・緑 (グリッド図では手法の色)
-# と同じだと紛らわしいので、どれとも重ならない紫の濃淡にする。帯域は
-# 50 < 100 < 200 と順序のある量なので、薄い -> 濃い に対応させる。
-MODE_BW_COLOR = {50: "#c084d8", 100: "#8e44ad", 200: "#4a0e6b"}
+# と同じだと紛らわしいので、それらと色相が離れ、互いにもはっきり違う3色にする。
+# 紫の濃淡は見分けにくかったので使わない。
+MODE_BW_COLOR = {50: "#b8860b", 100: "#c2338c", 200: "#222222"}   # 濃い金 / マゼンタ / 黒
+# モード比較図だけ横幅を詰めて縦長にする (横軸は負荷の5点だけなので幅は要らない)
+MODE_FIGSIZE_SINGLE = (5.4, 6.6)
+MODE_FIGSIZE_3PANEL = (14.0, 6.6)
+MODE_XPAD = (6, 6)    # 横軸の左右の余白 [負荷 %]。他の図は (8, 12)
 
 # 信頼区間の髭 (エラーバー) の体裁
 CI_CAPSIZE = 4        # 髭の端の横棒の長さ [pt]
@@ -215,10 +219,10 @@ def _draw_series(ax, xs, ys, dx, color, linestyle, marker, label, band):
                 zorder=2)
 
 
-def _finish_axes(ax, ylim):
+def _finish_axes(ax, ylim, xpad=(8, 12)):
     loads = sorted(OFFERED_LOAD_PERCENTS)
     ax.set_xticks(loads)
-    ax.set_xlim(min(loads) - 8, max(loads) + 12)
+    ax.set_xlim(min(loads) - xpad[0], max(loads) + xpad[1])
     ax.set_ylim(*ylim)
     # 縦のグリッド線は引かない (横軸は負荷の5点だけで、目盛りで足りる)
     style_axes(ax, grid_axis="y")
@@ -510,22 +514,34 @@ def _draw_mode_panel(ax, data_by_mode, own_bw, method, ylim, ci_by_mode):
         band = ci[method].get((own_bw, other_bw)) if ci else None
         _draw_series(ax, xs, ys, dx, MODE_BW_COLOR[other_bw], MODE_LINESTYLE[mode],
                      MARKER[other_bw], f"{other_bw} kbps ({MODE_LABEL[mode]})", band)
-    _finish_axes(ax, ylim)
+    _finish_axes(ax, ylim, xpad=MODE_XPAD)
 
 
-def mode_legend(target, **kw):
-    """モード比較図の凡例。行 = モード、列 = 相手帯域の 2x3 行列を図の上に置く。
+def mode_legend(target, transpose=False, **kw):
+    """モード比較図の凡例。モード x 相手帯域の行列にして図の上に置く。
 
-    「50 kbps (single-query)」を6つ縦に並べると長いので、モードを行見出しに
-    くくり出して各セルは帯域だけにする。並べ方は legend_handles() と同じく
-    列方向に詰める: [見出し2つ] -> [帯域ごとに2モード] を ncol=4 で渡す。
+    「50 kbps (single-query)」を6つ縦に並べると長いので、モードを見出しに
+    くくり出して各セルは帯域だけにする。matplotlib の凡例は列方向に詰める。
+      transpose=False (3パネル図): 行 = モード、列 = 帯域の 2x3。
+          [行見出し2つ] -> [帯域ごとに2モード] を ncol=4 で渡す
+      transpose=True  (単独図。図の幅が狭いので縦長に): 列 = モード、行 = 帯域。
+          [列見出し + 3帯域] をモードごとに ncol=2 で渡す
     """
-    handles = [Line2D([], [], linestyle="none", marker="none",
-                      label=MODE_LABEL[m]) for m in MODES]
-    handles += [Line2D([], [], label=f"{bw} kbps",
-                       **line_kwargs(MODE_BW_COLOR[bw], MODE_LINESTYLE[m], MARKER[bw]))
-                for bw in BANDWIDTHS for m in MODES]
-    return target.legend(handles=handles, ncol=1 + len(BANDWIDTHS), frameon=True,
+    def sample(m, bw):
+        return Line2D([], [], label=f"{bw} kbps",
+                      **line_kwargs(MODE_BW_COLOR[bw], MODE_LINESTYLE[m], MARKER[bw]))
+
+    def header(m):
+        return Line2D([], [], linestyle="none", marker="none", label=MODE_LABEL[m])
+
+    if transpose:
+        handles = [h for m in MODES for h in [header(m)] + [sample(m, bw) for bw in BANDWIDTHS]]
+        ncol = len(MODES)
+    else:
+        handles = [header(m) for m in MODES]
+        handles += [sample(m, bw) for bw in BANDWIDTHS for m in MODES]
+        ncol = 1 + len(BANDWIDTHS)
+    return target.legend(handles=handles, ncol=ncol, frameon=True,
                          fontsize=LEGEND_FONTSIZE, columnspacing=1.2,
                          handlelength=2.6, loc="lower center", **kw)
 
@@ -535,15 +551,15 @@ def plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim):
     written = []
     for method in METHODS:
         for own_bw in BANDWIDTHS:
-            fig, ax = plt.subplots(figsize=(7.2, 5.8))
+            fig, ax = plt.subplots(figsize=MODE_FIGSIZE_SINGLE)
             _draw_mode_panel(ax, data_by_mode, own_bw, method, ylim, ci_by_mode)
-            mode_legend(ax, bbox_to_anchor=(0.5, 1.02))
+            mode_legend(ax, transpose=True, bbox_to_anchor=(0.5, 1.02))
             path = os.path.join(out_dir, f"{METRIC}_own{own_bw}_{method}.{fmt}")
             fig.savefig(path, bbox_inches="tight")
             plt.close(fig)
             written.append(path)
 
-        fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.8), sharey=True)
+        fig, axes = plt.subplots(1, 3, figsize=MODE_FIGSIZE_3PANEL, sharey=True)
         for ax, own_bw in zip(axes, BANDWIDTHS):
             _draw_mode_panel(ax, data_by_mode, own_bw, method, ylim, ci_by_mode)
         fig.tight_layout()
