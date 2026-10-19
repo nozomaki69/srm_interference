@@ -14,7 +14,8 @@ docs/README.md を参照。
   横軸: 自PAN負荷 20-100%
   縦軸: AUC (下限 0.5 がランダム判定の水準)
   色  : 相手の帯域 (50 / 100 / 200 kbps)
-  線種: 判定手法 (proposed 実線 / dper 破線 / rssi 点線)
+  線種: 判定手法 (proposed 実線 / dper 長い破線 / rssi 丸い点の列)
+  点  : 白抜き。3手法の図の凡例は 3x3 の行列 (行 = 手法、列 = 相手帯域)
 
 測定モードは --mode で選ぶ (既定 simultaneous = single-query)。測定モードと手法を
 1枚に同時に振ると線種が2つの軸に取られて図が読めなくなるので、3手法の図は
@@ -96,7 +97,27 @@ MARKER = {50: "o", 100: "s", 200: "^"}
 
 # 手法 -> 線種。提案手法を実線にして、ベースラインを破線・点線で下に敷く。
 # 以前はこの軸が測定モード (simultaneous 実線 / sequential 点線) だった。
-LINESTYLE = {"proposed": "-", "dper": "--", "rssi": ":"}
+#
+# "--" と ":" は線幅 2.0 だと間隔が近く、縮小すると見分けにくい。そこで dper は
+# 長い破線、rssi は丸い点の列 (長さほぼ0の線分を丸キャップで描く) にして、
+# 線の形そのものを変える。docs/line_plot_style.md 参照。
+LINESTYLE = {"proposed": "-", "dper": (0, (8, 4)), "rssi": (0, (0.1, 3.0))}
+# 丸い点の列は丸キャップでないと点にならない。破線の端も丸くなるが見分けには効かない
+DASH_CAPSTYLE = "round"
+
+# 点 (マーカー) は白抜きにする。縁だけで形を読むので塗りつぶしより大きくする
+MARKER_SIZE = 8
+MARKER_EDGEWIDTH = 1.8
+MARKER_FACE = "white"
+
+
+def line_kwargs(color, linestyle, marker):
+    """図中の線と凡例の見本で共通の体裁。2箇所に書くと見本と線が食い違う。"""
+    return dict(color=color, linestyle=linestyle, linewidth=2.0,
+                dash_capstyle=DASH_CAPSTYLE,
+                marker=marker, markersize=MARKER_SIZE,
+                markerfacecolor=MARKER_FACE, markeredgecolor=color,
+                markeredgewidth=MARKER_EDGEWIDTH)
 
 # 図中のテキストは英語にする。計算機 (Linux) に日本語フォントが無いと豆腐文字に
 # なるため。コメント・argparse ヘルプ・コンソール出力は日本語のままでよい。
@@ -170,8 +191,9 @@ def maybe_load_ci(mode):
 
 def _draw_series(ax, xs, ys, dx, color, linestyle, marker, label, band):
     """1本の線と、あれば髭。band: {load: (lo, hi)} か None。"""
-    ax.plot([x + dx for x in xs], ys, color=color, linestyle=linestyle,
-            marker=marker, markersize=6, linewidth=2.0, label=label)
+    # 白抜きの点が髭に隠れないよう、線と点を髭より手前 (zorder 大) に描く
+    ax.plot([x + dx for x in xs], ys, label=label, zorder=3,
+            **line_kwargs(color, linestyle, marker))
     bx = [x for x in xs if band and x in band]
     if not bx:
         return
@@ -180,7 +202,8 @@ def _draw_series(ax, xs, ys, dx, color, linestyle, marker, label, band):
     yerr = [[max(y - band[x][0], 0.0) for x, y in zip(bx, by)],
             [max(band[x][1] - y, 0.0) for x, y in zip(bx, by)]]
     ax.errorbar([x + dx for x in bx], by, yerr=yerr, fmt="none", ecolor=color,
-                elinewidth=CI_LINEWIDTH, capsize=CI_CAPSIZE, capthick=CI_LINEWIDTH)
+                elinewidth=CI_LINEWIDTH, capsize=CI_CAPSIZE, capthick=CI_LINEWIDTH,
+                zorder=2)
 
 
 def _finish_axes(ax, ylim):
@@ -308,33 +331,53 @@ def _draw_panel(ax, data, own_bw, methods, ylim, ci=None):
     _finish_axes(ax, ylim)
 
 
-def legend_handles(methods):
-    """凡例の手。色 (帯域) と線種 (手法) を分けて並べる。
+def _sample(method, bw, label):
+    """凡例の見本1つ。図中の線と同じ色・線種・白抜きマーカー。"""
+    return Line2D([], [], label=label,
+                  **line_kwargs(COLOR[bw], LINESTYLE[method], MARKER[bw]))
 
-    3手法 x 3帯域を総当たりで出すと 9 項目になり、どれが色の違いでどれが線種の
-    違いなのかが読み取れない。符号化の軸ごとに1ブロックずつ出せば 3+3 で済む。
-    手法が1つだけの図では線種の軸が無いので、帯域のブロックだけを出す。
+
+def legend_handles(methods):
+    """凡例の手と、凡例の列数を返す。
+
+    手法が1つだけの図は線種の軸が無いので、帯域3項目だけを出す (1列)。
+
+    3手法を重ねた図は、実際に引いている 3手法 x 3帯域 = 9 本をそのまま
+    3x3 の行列で出す (行 = 手法、列 = 相手帯域)。色と線種を別ブロックに分けると
+    3+3 = 6 項目になり、線が6本あるように見えてしまうため。
+    1列目は手法名だけの行見出し (見本を描かない)。matplotlib の凡例は列方向に
+    詰めるので、[見出し3つ] -> [帯域ごとに3手法] の順に並べて ncol=4 で渡す。
     """
-    handles = [Line2D([], [], color=COLOR[bw], marker=MARKER[bw],
-                      linestyle="-" if len(methods) == 1 else LINESTYLE[methods[0]],
-                      markersize=6, linewidth=2.0, label=f"{bw} kbps")
-               for bw in BANDWIDTHS]
     if len(methods) == 1:
-        return handles
-    # 線種の凡例は色を持たせない (色は帯域の軸なので、混ぜると意味が二重になる)
-    handles += [Line2D([], [], color="0.35", linestyle=LINESTYLE[m],
-                       linewidth=2.0, label=METHOD_LABEL[m])
-                for m in methods]
-    return handles
+        return [_sample(methods[0], bw, f"{bw} kbps") for bw in BANDWIDTHS], 1
+    handles = [Line2D([], [], linestyle="none", marker="none",
+                      label=METHOD_LABEL[m]) for m in methods]
+    handles += [_sample(m, bw, f"{bw} kbps") for bw in BANDWIDTHS for m in methods]
+    return handles, 1 + len(BANDWIDTHS)
+
+
+def _add_legend(target, methods, **kw):
+    """legend_handles() の凡例を target (Axes か Figure) に付ける。
+
+    行列凡例は大きく、軸の中に置くと線に重なるので軸の上側の外に置く。
+    """
+    handles, ncol = legend_handles(methods)
+    if ncol == 1:
+        return target.legend(handles=handles, frameon=True,
+                             fontsize=LEGEND_FONTSIZE, **kw)
+    return target.legend(handles=handles, ncol=ncol, frameon=True,
+                         fontsize=LEGEND_FONTSIZE, columnspacing=1.2,
+                         handlelength=2.6, loc="lower center", **kw)
 
 
 def plot_single(data, own_bw, methods, out_dir, tag, fmt, ylim, ci=None):
     """自帯域1つ分の図を1枚描く。"""
     fig, ax = plt.subplots(figsize=(7.2, 5.8))
     _draw_panel(ax, data, own_bw, methods, ylim, ci)
-    handles = legend_handles(methods)
-    ax.legend(handles=handles, loc="lower left", frameon=True,
-              fontsize=LEGEND_FONTSIZE)
+    if len(methods) == 1:
+        _add_legend(ax, methods, loc="lower left")
+    else:
+        _add_legend(ax, methods, bbox_to_anchor=(0.5, 1.02))
     path = os.path.join(out_dir, f"{METRIC}_own{own_bw}_{tag}.{fmt}")
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
@@ -346,10 +389,12 @@ def plot_3panel(data, methods, out_dir, tag, fmt, ylim, ci=None):
     fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.8), sharey=True)
     for ax, own_bw in zip(axes, BANDWIDTHS):
         _draw_panel(ax, data, own_bw, methods, ylim, ci)
-    handles = legend_handles(methods)
-    fig.legend(handles=handles, loc="center left", bbox_to_anchor=(1.0, 0.5),
-               frameon=True, fontsize=LEGEND_FONTSIZE)
     fig.tight_layout()
+    if len(methods) == 1:
+        _add_legend(fig, methods, loc="center left", bbox_to_anchor=(1.0, 0.5))
+    else:
+        # 行列凡例は横に長いので、3パネルの上にまとめて置く
+        _add_legend(fig, methods, bbox_to_anchor=(0.5, 1.0))
     path = os.path.join(out_dir, f"{METRIC}_3panel_{tag}.{fmt}")
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
