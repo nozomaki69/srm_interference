@@ -61,6 +61,10 @@ MODES = A.MEASUREMENT_MODES                         # ("simultaneous", "sequenti
 MODE_LABEL = {"simultaneous": "single-query", "sequential": "multi-query"}
 # モード比較図での線種。single-query (参照) を実線にする
 MODE_LINESTYLE = {"simultaneous": "-", "sequential": ":"}
+# モード比較図での色 (= 相手帯域)。3手法の図の青・橙・緑 (グリッド図では手法の色)
+# と同じだと紛らわしいので、どれとも重ならない紫の濃淡にする。帯域は
+# 50 < 100 < 200 と順序のある量なので、薄い -> 濃い に対応させる。
+MODE_BW_COLOR = {50: "#c084d8", 100: "#8e44ad", 200: "#4a0e6b"}
 
 # 信頼区間の髭 (エラーバー) の体裁
 CI_CAPSIZE = 4        # 髭の端の横棒の長さ [pt]
@@ -134,7 +138,7 @@ GRID_KW = dict(color="0.85", linestyle="--", linewidth=0.8)
 TICK_LABELSIZE = 20     # 目盛りの数字
 TICK_LENGTH = 10        # 目盛り線の長さ
 TICK_WIDTH = 2.0        # 目盛り線の太さ
-LEGEND_FONTSIZE = 18
+LEGEND_FONTSIZE = 22
 
 
 def style_axes(ax, grid_axis="both"):
@@ -288,7 +292,7 @@ def load_series(csv_file):
     return series
 
 
-def choose_ylim(data):
+def choose_ylim(data, cis=()):
     """全図で共通に使う y 軸の範囲を決める。
 
     save ブランチは AUC を (0.50, 1.0) に固定していた。0.5 がランダム判定の
@@ -298,11 +302,19 @@ def choose_ylim(data):
 
     枚ごとに変えてはいけない。図をまたいで比較できることがこの図の目的なので、
     全描画値の最小値から1つだけ決めて全図に同じ値を当てる。
+
+    cis: load_ci() の戻り値の並び (髭を描くとき)。点が枠内でも髭の下端が枠外に
+    出て切れないよう、信頼区間の下限も最小値の候補に入れる。
     """
     values = [v
               for per_method in data.values()
               for pts in per_method.values()
               for v in pts.values()]
+    values += [lo
+               for ci in cis if ci
+               for per_method in ci.values()
+               for band in per_method.values()
+               for lo, _hi in band.values()]
     if not values:
         return (0.50, 1.0)
     lo = min(values)
@@ -496,9 +508,26 @@ def _draw_mode_panel(ax, data_by_mode, own_bw, method, ylim, ci_by_mode):
         dx = (k - (len(series) - 1) / 2.0) * CI_DODGE if with_ci else 0.0
         ci = ci_by_mode.get(mode)
         band = ci[method].get((own_bw, other_bw)) if ci else None
-        _draw_series(ax, xs, ys, dx, COLOR[other_bw], MODE_LINESTYLE[mode],
+        _draw_series(ax, xs, ys, dx, MODE_BW_COLOR[other_bw], MODE_LINESTYLE[mode],
                      MARKER[other_bw], f"{other_bw} kbps ({MODE_LABEL[mode]})", band)
     _finish_axes(ax, ylim)
+
+
+def mode_legend(target, **kw):
+    """モード比較図の凡例。行 = モード、列 = 相手帯域の 2x3 行列を図の上に置く。
+
+    「50 kbps (single-query)」を6つ縦に並べると長いので、モードを行見出しに
+    くくり出して各セルは帯域だけにする。並べ方は legend_handles() と同じく
+    列方向に詰める: [見出し2つ] -> [帯域ごとに2モード] を ncol=4 で渡す。
+    """
+    handles = [Line2D([], [], linestyle="none", marker="none",
+                      label=MODE_LABEL[m]) for m in MODES]
+    handles += [Line2D([], [], label=f"{bw} kbps",
+                       **line_kwargs(MODE_BW_COLOR[bw], MODE_LINESTYLE[m], MARKER[bw]))
+                for bw in BANDWIDTHS for m in MODES]
+    return target.legend(handles=handles, ncol=1 + len(BANDWIDTHS), frameon=True,
+                         fontsize=LEGEND_FONTSIZE, columnspacing=1.2,
+                         handlelength=2.6, loc="lower center", **kw)
 
 
 def plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim):
@@ -508,7 +537,7 @@ def plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim):
         for own_bw in BANDWIDTHS:
             fig, ax = plt.subplots(figsize=(7.2, 5.8))
             _draw_mode_panel(ax, data_by_mode, own_bw, method, ylim, ci_by_mode)
-            ax.legend(loc="lower left", frameon=True, fontsize=LEGEND_FONTSIZE - 4)
+            mode_legend(ax, bbox_to_anchor=(0.5, 1.02))
             path = os.path.join(out_dir, f"{METRIC}_own{own_bw}_{method}.{fmt}")
             fig.savefig(path, bbox_inches="tight")
             plt.close(fig)
@@ -517,10 +546,8 @@ def plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim):
         fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.8), sharey=True)
         for ax, own_bw in zip(axes, BANDWIDTHS):
             _draw_mode_panel(ax, data_by_mode, own_bw, method, ylim, ci_by_mode)
-        handles, labels = axes[0].get_legend_handles_labels()
-        fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.5),
-                   frameon=True, fontsize=LEGEND_FONTSIZE)
         fig.tight_layout()
+        mode_legend(fig, bbox_to_anchor=(0.5, 1.0))
         path = os.path.join(out_dir, f"{METRIC}_3panel_{method}.{fmt}")
         fig.savefig(path, bbox_inches="tight")
         plt.close(fig)
@@ -580,15 +607,16 @@ def main():
         data_by_mode = {m: load_mode(m) for m in MODES}
         ci_by_mode = {m: maybe_load_ci(m) for m in MODES}
         ylim = choose_ylim({f"{m}/{k}": v for m in MODES
-                            for k, v in data_by_mode[m].items()})
+                            for k, v in data_by_mode[m].items()},
+                           cis=ci_by_mode.values())
         print(f"--- y軸: {ylim[0]:.2f} - {ylim[1]:.2f} ---")
         written = plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim)
     else:
         data = load_mode(args.mode, args.csv)
         ci = maybe_load_ci(args.mode)
-        ylim = choose_ylim(data)
+        ylim = choose_ylim(data, cis=(ci,))
         print(f"--- y軸: {ylim[0]:.2f} - {ylim[1]:.2f} "
-              f"(全図共通。0.5 を下回る値があるときだけ下げる) ---")
+              f"(全図共通。点か髭の下端が 0.5 を下回るときだけ下げる) ---")
         written = []
         # 手法ごとの単独図と、3手法を重ねた比較図
         tags = [(m, (m,)) for m in METHODS] + [("compare", tuple(METHODS))]
