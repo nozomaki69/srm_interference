@@ -204,7 +204,7 @@ RSSI でビン分けする。ビンの起点は**チャネル固有の固定値*
 | `plots/roc/{simultaneous,sequential}/` | ROC 曲線 27枚（自帯域 × 相手帯域 × 手法） |
 | `plots/interference_detection_results.csv` ほか接尾辞なしの CSV | multi-query（sequential）の検知結果・スコア |
 | `plots/detection_lines_sequential/`、`plots/score_histograms_sequential/` | multi-query の折れ線・スコア分布 |
-| `plots/detection_lines_mode_compare/` | single-query と multi-query の比較（手法ごと 4枚 × 3） |
+| `plots/detection_lines_mode_compare/` | single-query と multi-query の比較。手法ごとの 3×3 グリッド図 3枚（各パネル2本、single 赤 / multi 紫） |
 
 multi-query の CSV と図は、計算機で `./script/sbatch_reanalyze.sh` を回したときに作られる
 （`simulation_results.csv` が手元に無いため）。`plot_figures.sh` は検知結果CSVがある

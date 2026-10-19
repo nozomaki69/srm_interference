@@ -20,7 +20,7 @@ docs/README.md を参照。
 測定モードは --mode で選ぶ (既定 simultaneous = single-query)。測定モードと手法を
 1枚に同時に振ると線種が2つの軸に取られて図が読めなくなるので、3手法の図は
 モードごとに出力先を分ける。モードどうしの比較は --mode compare で、手法ごとに
-1枚ずつ描く (色 = 相手帯域、線種 = モード。save ブランチの compare 図と同じ形)。
+3x3 グリッドを1枚ずつ描く (行 = 自帯域、列 = 相手帯域、各パネル single 赤 / multi 紫の2本)。
 
 AUC のブートストラップ 95% 信頼区間 (bootstrap_auc.py の出力) があれば、各点に
 線と同じ色の髭を付ける。docs/save_features.md 参照。
@@ -59,16 +59,10 @@ OUT_DIR_BY_MODE = {
 MODES = A.MEASUREMENT_MODES                         # ("simultaneous", "sequential")
 # 凡例に出す名前 (論文での呼び方。save ブランチと同じ)
 MODE_LABEL = {"simultaneous": "single-query", "sequential": "multi-query"}
-# モード比較図での線種。single-query (参照) を実線にする
-MODE_LINESTYLE = {"simultaneous": "-", "sequential": ":"}
-# モード比較図での色 (= 相手帯域)。3手法の図の青・橙・緑 (グリッド図では手法の色)
-# と同じだと紛らわしいので、それらと違う 赤 / 紫 / 山吹 にする。
-# (紫の濃淡、金 / マゼンタ / 黒、黒に近い濃い紺 は不採用)
-MODE_BW_COLOR = {50: "#d62839", 100: "#7b2cbf", 200: "#e09f00"}   # 赤 / 紫 / 山吹
-# モード比較図だけ横幅を詰めて縦長にする (横軸は負荷の5点だけなので幅は要らない)
-MODE_FIGSIZE_SINGLE = (5.4, 6.6)
-MODE_FIGSIZE_3PANEL = (14.0, 6.6)
-MODE_XPAD = (6, 6)    # 横軸の左右の余白 [負荷 %]。他の図は (8, 12)
+# モード比較図 (手法ごとの 3x3 グリッド) での色とマーカー。1パネルは2本だけなので
+# 線は両方実線にし、色 (single 赤 / multi 紫) とマーカー (○ / □) で分ける。
+MODE_COLOR = {"simultaneous": "#d62839", "sequential": "#7b2cbf"}   # 赤 / 紫
+MODE_MARKER = {"simultaneous": "o", "sequential": "s"}
 
 # 信頼区間の髭 (エラーバー) の体裁
 CI_CAPSIZE = 4        # 髭の端の横棒の長さ [pt]
@@ -440,42 +434,62 @@ METHOD_MARKER = {"proposed": "o", "dper": "s", "rssi": "^"}
 GRID_LINESTYLE = "-"
 
 
-def plot_grid(data, out_dir, fmt, ylim, ci=None):
-    """行 = 自帯域、列 = 相手帯域の 3x3。1パネルに3手法の3本だけを描く。
+def _plot_bw_grid(series_of, handles, path, ylim):
+    """行 = 自帯域、列 = 相手帯域の 3x3 を描いて保存する。
 
-    compare 図は1パネルに 9 本乗って読みにくいので、その代替。
-    docs/line_plot_style.md の「3×3 グリッド図」参照。
+    series_of(own_bw, other_bw) は、そのパネルに描く系列
+    [(xs, ys, color, marker, label, band), ...] を返す。
+    3手法のグリッド図とモード比較のグリッド図で共通の枠組み。
     """
     n = len(BANDWIDTHS)
     fig, axes = plt.subplots(n, n, figsize=(15.0, 13.0), sharex=True, sharey=True)
     for i, own_bw in enumerate(BANDWIDTHS):
         for j, other_bw in enumerate(BANDWIDTHS):
             ax = axes[i][j]
-            for method in METHODS:
-                pts = data[method].get((own_bw, other_bw))
-                if not pts:
-                    continue
-                xs = [l for l in sorted(OFFERED_LOAD_PERCENTS) if l in pts]
-                ys = [pts[l] for l in xs]
-                band = ci[method].get((own_bw, other_bw)) if ci else None
-                _draw_series(ax, xs, ys, 0.0, METHOD_COLOR[method], GRID_LINESTYLE,
-                             METHOD_MARKER[method], METHOD_LABEL[method], band)
+            for xs, ys, color, marker, label, band in series_of(own_bw, other_bw):
+                _draw_series(ax, xs, ys, 0.0, color, GRID_LINESTYLE, marker, label, band)
             _finish_axes(ax, ylim)
             # sharex/sharey でも目盛りの数字は外周のパネルにだけ出す
             ax.tick_params(labelleft=(j == 0), labelbottom=(i == n - 1))
             # 行・列の見出し (自帯域 / 相手帯域) は入れない。軸タイトルを入れない
             # 方針どおり、図のキャプションで説明する
     fig.tight_layout()
-    handles = [Line2D([], [], label=METHOD_LABEL[m],
-                      **line_kwargs(METHOD_COLOR[m], GRID_LINESTYLE, METHOD_MARKER[m]))
-               for m in METHODS]
-    fig.legend(handles=handles, ncol=len(METHODS), loc="lower center",
+    fig.legend(handles=handles, ncol=len(handles), loc="lower center",
                bbox_to_anchor=(0.5, 0.99), frameon=True, fontsize=LEGEND_FONTSIZE,
                handlelength=2.6)
-    path = os.path.join(out_dir, f"{METRIC}_grid.{fmt}")
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     return path
+
+
+def _points(pts):
+    """{load: auc} -> 負荷順の (xs, ys)。"""
+    xs = [l for l in sorted(OFFERED_LOAD_PERCENTS) if l in pts]
+    return xs, [pts[l] for l in xs]
+
+
+def plot_grid(data, out_dir, fmt, ylim, ci=None):
+    """行 = 自帯域、列 = 相手帯域の 3x3。1パネルに3手法の3本だけを描く。
+
+    compare 図は1パネルに 9 本乗って読みにくいので、その代替。
+    docs/line_plot_style.md の「3×3 グリッド図」参照。
+    """
+    def series_of(own_bw, other_bw):
+        out = []
+        for method in METHODS:
+            pts = data[method].get((own_bw, other_bw))
+            if not pts:
+                continue
+            band = ci[method].get((own_bw, other_bw)) if ci else None
+            out.append((*_points(pts), METHOD_COLOR[method], METHOD_MARKER[method],
+                        METHOD_LABEL[method], band))
+        return out
+
+    handles = [Line2D([], [], label=METHOD_LABEL[m],
+                      **line_kwargs(METHOD_COLOR[m], GRID_LINESTYLE, METHOD_MARKER[m]))
+               for m in METHODS]
+    return _plot_bw_grid(series_of, handles,
+                         os.path.join(out_dir, f"{METRIC}_grid.{fmt}"), ylim)
 
 
 def dump_values(data, out_dir, ci=None):
@@ -508,76 +522,33 @@ def dump_values(data, out_dir, ci=None):
 # ------------------------------------------------------------
 # モード比較 (single-query vs multi-query)。手法ごとに1枚
 # ------------------------------------------------------------
-def _draw_mode_panel(ax, data_by_mode, own_bw, method, ylim, ci_by_mode):
-    """1手法・1自帯域。色 = 相手帯域、線種 = モード (single 実線 / multi 点線)。"""
-    loads = sorted(OFFERED_LOAD_PERCENTS)
-    with_ci = any(ci_by_mode.values())
-    series = [(mode, bw) for mode in MODES for bw in BANDWIDTHS]
-    for k, (mode, other_bw) in enumerate(series):
-        pts = data_by_mode[mode][method].get((own_bw, other_bw))
-        if not pts:
-            continue
-        xs = [l for l in loads if l in pts]
-        ys = [pts[l] for l in xs]
-        dx = (k - (len(series) - 1) / 2.0) * CI_DODGE if with_ci else 0.0
-        ci = ci_by_mode.get(mode)
-        band = ci[method].get((own_bw, other_bw)) if ci else None
-        _draw_series(ax, xs, ys, dx, MODE_BW_COLOR[other_bw], MODE_LINESTYLE[mode],
-                     MARKER[other_bw], f"{other_bw} kbps ({MODE_LABEL[mode]})", band)
-    _finish_axes(ax, ylim, xpad=MODE_XPAD)
-
-
-def mode_legend(target, transpose=False, **kw):
-    """モード比較図の凡例。モード x 相手帯域の行列にして図の上に置く。
-
-    「50 kbps (single-query)」を6つ縦に並べると長いので、モードを見出しに
-    くくり出して各セルは帯域だけにする。matplotlib の凡例は列方向に詰める。
-      transpose=False (3パネル図): 行 = モード、列 = 帯域の 2x3。
-          [行見出し2つ] -> [帯域ごとに2モード] を ncol=4 で渡す
-      transpose=True  (単独図。図の幅が狭いので縦長に): 列 = モード、行 = 帯域。
-          [列見出し + 3帯域] をモードごとに ncol=2 で渡す
-    """
-    def sample(m, bw):
-        return Line2D([], [], label=f"{bw} kbps",
-                      **line_kwargs(MODE_BW_COLOR[bw], MODE_LINESTYLE[m], MARKER[bw]))
-
-    def header(m):
-        return Line2D([], [], linestyle="none", marker="none", label=MODE_LABEL[m])
-
-    if transpose:
-        handles = [h for m in MODES for h in [header(m)] + [sample(m, bw) for bw in BANDWIDTHS]]
-        ncol = len(MODES)
-    else:
-        handles = [header(m) for m in MODES]
-        handles += [sample(m, bw) for bw in BANDWIDTHS for m in MODES]
-        ncol = 1 + len(BANDWIDTHS)
-    return target.legend(handles=handles, ncol=ncol, frameon=True,
-                         fontsize=LEGEND_FONTSIZE, columnspacing=1.2,
-                         handlelength=2.6, loc="lower center", **kw)
-
-
 def plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim):
-    """手法ごとに、自帯域3枚 + 3パネル1枚。計 3手法 x 4 = 12枚。"""
+    """手法ごとに 3x3 グリッドを1枚 (計3枚)。各パネルは single / multi の2本。
+
+    以前は1パネルに 3相手帯域 x 2モード = 6本を重ねていて見にくかったので、
+    帯域の組を位置で分け、同じ条件の2モードだけを並べる。
+    docs/line_plot_style.md の「モード比較図」参照。
+    """
+    handles = [Line2D([], [], label=MODE_LABEL[m],
+                      **line_kwargs(MODE_COLOR[m], GRID_LINESTYLE, MODE_MARKER[m]))
+               for m in MODES]
     written = []
     for method in METHODS:
-        for own_bw in BANDWIDTHS:
-            fig, ax = plt.subplots(figsize=MODE_FIGSIZE_SINGLE)
-            _draw_mode_panel(ax, data_by_mode, own_bw, method, ylim, ci_by_mode)
-            mode_legend(ax, transpose=True, bbox_to_anchor=(0.5, 1.02))
-            path = os.path.join(out_dir, f"{METRIC}_own{own_bw}_{method}.{fmt}")
-            fig.savefig(path, bbox_inches="tight")
-            plt.close(fig)
-            written.append(path)
+        def series_of(own_bw, other_bw, method=method):
+            out = []
+            for mode in MODES:
+                pts = data_by_mode[mode][method].get((own_bw, other_bw))
+                if not pts:
+                    continue
+                ci = ci_by_mode.get(mode)
+                band = ci[method].get((own_bw, other_bw)) if ci else None
+                out.append((*_points(pts), MODE_COLOR[mode], MODE_MARKER[mode],
+                            MODE_LABEL[mode], band))
+            return out
 
-        fig, axes = plt.subplots(1, 3, figsize=MODE_FIGSIZE_3PANEL, sharey=True)
-        for ax, own_bw in zip(axes, BANDWIDTHS):
-            _draw_mode_panel(ax, data_by_mode, own_bw, method, ylim, ci_by_mode)
-        fig.tight_layout()
-        mode_legend(fig, bbox_to_anchor=(0.5, 1.0))
-        path = os.path.join(out_dir, f"{METRIC}_3panel_{method}.{fmt}")
-        fig.savefig(path, bbox_inches="tight")
-        plt.close(fig)
-        written.append(path)
+        written.append(_plot_bw_grid(
+            series_of, handles,
+            os.path.join(out_dir, f"{METRIC}_grid_{method}.{fmt}"), ylim))
     return written
 
 

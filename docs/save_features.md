@@ -38,15 +38,16 @@ icc の全条件を含むので、**icc_load200 のシミュレーションが�
 | 図 | single-query | multi-query |
 |---|---|---|
 | 折れ線（3手法） | `plots/detection_lines/`（従来） | `plots/detection_lines_sequential/` |
-| 折れ線（モード比較） | `plots/detection_lines_mode_compare/`（手法ごとに single 実線 / multi 点線） | ← |
+| 折れ線（モード比較） | `plots/detection_lines_mode_compare/`（手法ごとの 3×3 グリッド。single 赤 / multi 紫） | ← |
 | ヒートマップ | `plots/heatmaps_auc_simultaneous/{method}/` | `plots/heatmaps_auc/{method}/` |
 | ROC | `plots/roc/simultaneous/` | `plots/roc/sequential/` |
 | スコア分布 | `plots/score_histograms/`（従来） | `plots/score_histograms_sequential/` |
 
 - **折れ線の髭**：ブートストラップの 95% 区間を、線と同じ色の髭で描く。save は系列ごとに
   横へ少しずらしていたが、icc ではずらさず本来の負荷の位置に描く（`CI_DODGE = 0`）
-- **モード比較**：1枚 = 手法1つ。色が相手帯域、線種が測定モード
-  （凡例 `50 kbps (single-query)` / `50 kbps (multi-query)`。save と同じ）
+- **モード比較**：1枚 = 手法1つの 3×3 グリッド（行 = 自帯域、列 = 相手帯域）。各パネルは
+  single-query（赤）と multi-query（紫）の2本。save の「色 = 相手帯域、線種 = モード」で
+  6本重ねる形は見にくかったので変えた（`docs/line_plot_style.md`）
 - **ヒートマップ**：save の `create_heatmap.py` の AUC 版をそのまま移し、手法ごとにサブフォルダを分ける。
   軸は PAN1 / PAN2 のまま（save と同じ）。1手法 12 枚（6帯域ペア × 2PAN）
 - **ROC**：save の `plot_roc.py` を移す。1枚 = (自帯域, 相手帯域, 手法)、線が自PAN負荷 5本。
