@@ -43,8 +43,8 @@ icc の全条件を含むので、**icc_load200 のシミュレーションが�
 | ROC | `plots/roc/simultaneous/` | `plots/roc/sequential/` |
 | スコア分布 | `plots/score_histograms/`（従来） | `plots/score_histograms_sequential/` |
 
-- **折れ線の髭**：ブートストラップの 95% 区間を、線と同じ色の髭で描く。同じ負荷の髭が
-  重ならないよう系列ごとに横へ少しずらす（save と同じ）。目盛りは本来の位置のまま
+- **折れ線の髭**：ブートストラップの 95% 区間を、線と同じ色の髭で描く。save は系列ごとに
+  横へ少しずらしていたが、icc ではずらさず本来の負荷の位置に描く（`CI_DODGE = 0`）
 - **モード比較**：1枚 = 手法1つ。色が相手帯域、線種が測定モード
   （凡例 `50 kbps (single-query)` / `50 kbps (multi-query)`。save と同じ）
 - **ヒートマップ**：save の `create_heatmap.py` の AUC 版をそのまま移し、手法ごとにサブフォルダを分ける。

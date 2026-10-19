@@ -46,9 +46,8 @@ AUC を計算し直すと、検知結果 CSV の `auc` と 2モード × 300 条
 スコアCSVがまだ無いモード（計算機で再解析する前の sequential）は飛ばす。
 
 AUC の折れ線（`plot_detection_lines.py`。`--mode simultaneous / sequential / compare` のどれでも）は、
-この CSV があれば各点に 95% 区間を線と同じ色の髭（エラーバー）で付ける。同じ負荷の髭が
-真上に重ならないよう、系列ごとに横へ少し（1.2% 刻み）ずらして描く。目盛りは本来の負荷の
-位置のまま。`auc_plotted_values.csv` にも `auc_ci_low` / `auc_ci_high` 列が付く。
+この CSV があれば各点に 95% 区間を線と同じ色の髭（エラーバー）で付ける。点と髭は
+横にずらさず、本来の負荷の位置に描く（以前は 1.2% 刻みでずらしていた。`CI_DODGE`）。`auc_plotted_values.csv` にも `auc_ci_low` / `auc_ci_high` 列が付く。
 
 ## 実行
 

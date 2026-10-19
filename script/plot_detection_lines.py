@@ -65,10 +65,11 @@ MODE_LINESTYLE = {"simultaneous": "-", "sequential": ":"}
 # 信頼区間の髭 (エラーバー) の体裁
 CI_CAPSIZE = 4        # 髭の端の横棒の長さ [pt]
 CI_LINEWIDTH = 1.2
-# 髭を描くときは、同じ負荷の点が真上に重ならないよう系列ごとに横へずらす
-# (dodge)。系列間の間隔 [負荷 %]。系列は最大9本 (3手法 x 3帯域) なので、
-# 両端でも ±4.8% に収まり、負荷の刻み (20%) を跨がない。
-CI_DODGE = 1.2
+# 髭を描くときに系列ごとに横へずらす (dodge) 間隔 [負荷 %]。
+# 以前は 1.2 で、同じ負荷の点と髭が真上に重ならないようにしていたが、点が本来の
+# 負荷の位置から外れて見えるので 0 (ずらさない) にしている。docs/line_plot_style.md 参照。
+# 戻すときはここだけを 1.2 にする (系列は最大9本なので両端でも ±4.8%)。
+CI_DODGE = 0.0
 
 # 縦軸に使う列。このブランチは AUC だけを見る (F1 は出さない)。
 METRIC = "auc"
@@ -311,7 +312,7 @@ def _draw_panel(ax, data, own_bw, methods, ylim, ci=None):
 
     data: {method: {(own_bw, other_bw): {own_load: auc}}}
     methods: 描く手法のタプル。1つなら単独図、3つなら比較図。
-    ci: load_ci() の戻り値か None。あれば髭を付け、系列ごとに横へずらす。
+    ci: load_ci() の戻り値か None。あれば髭を付ける (横へのずらし幅は CI_DODGE)。
     """
     loads = sorted(OFFERED_LOAD_PERCENTS)
     # 手法を外側で回すので、凡例は「実線 50/100/200 -> 破線 50/100/200 -> ...」の
