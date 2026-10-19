@@ -338,10 +338,9 @@ def _draw_panel(ax, data, own_bw, methods, ylim, ci=None):
     ci: load_ci() の戻り値か None。あれば髭を付ける (横へのずらし幅は CI_DODGE)。
     """
     loads = sorted(OFFERED_LOAD_PERCENTS)
-    # 手法を外側で回すので、凡例は「実線 50/100/200 -> 破線 50/100/200 -> ...」の
-    # 順に並ぶ。帯域を外側にすると 50実線/50破線/50点線/100実線/... と交互になって
-    # 読みにくい。
-    series = [(m, bw) for m in methods for bw in BANDWIDTHS]
+    # 後に描いた線ほど手前に来る。提案手法が一番手前になるよう、手法は逆順に描く
+    # (凡例は legend_handles() が別に作るので、並び順はこの順に左右されない)。
+    series = [(m, bw) for m in reversed(methods) for bw in BANDWIDTHS]
     for k, (method, other_bw) in enumerate(series):
         pts = data[method].get((own_bw, other_bw))
         if not pts:
@@ -428,7 +427,7 @@ def plot_3panel(data, methods, out_dir, tag, fmt, ylim, ci=None):
 # --- 3x3 グリッド図 ---------------------------------------------------
 # 帯域の組を位置 (行 = 自帯域、列 = 相手帯域) で分けるので、色は手法に回す。
 # 色は帯域用と同じパレットの3スロット。線種・マーカーも手法ごとに変えて冗長にする。
-METHOD_COLOR = {"proposed": "#2a78d6", "dper": "#eb6834", "rssi": "#1baf7a"}
+METHOD_COLOR = {"proposed": "#eb6834", "dper": "#2a78d6", "rssi": "#1baf7a"}   # 橙 / 青 / 緑
 METHOD_MARKER = {"proposed": "o", "dper": "s", "rssi": "^"}
 # 1パネル3本なので線種で区別する必要は無く、全部実線にする (手法は色とマーカーで読む)
 GRID_LINESTYLE = "-"
@@ -476,7 +475,8 @@ def plot_grid(data, out_dir, fmt, ylim, ci=None):
     """
     def series_of(own_bw, other_bw):
         out = []
-        for method in METHODS:
+        # 後に描いた線ほど手前に来る。提案手法が一番手前になるよう逆順に描く
+        for method in reversed(METHODS):
             pts = data[method].get((own_bw, other_bw))
             if not pts:
                 continue
