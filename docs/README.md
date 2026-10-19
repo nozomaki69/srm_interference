@@ -197,7 +197,7 @@ RSSI でビン分けする。ビンの起点は**チャネル固有の固定値*
 | `plots/simulation_results.csv` | トレースの集約（gitignore。巨大） |
 | `plots/interference_detection_results_simultaneous.csv` | 検知結果。**900行** = 6帯域ペア × 25負荷 × 2PAN × 3手法 |
 | `plots/detection_scores_simultaneous.csv` | Seed ごとの干渉指標。180,000行 |
-| `plots/detection_lines/` | 折れ線 16枚 + 描画値の CSV（single-query。95% 信頼区間の髭つき） |
+| `plots/detection_lines/` | 折れ線 16枚 + 3×3 グリッド図 `auc_grid.pdf` + 描画値の CSV（single-query。95% 信頼区間の髭つき） |
 | `plots/score_histograms/` | 干渉あり/なしのスコア分布 9枚 |
 | `plots/auc_bootstrap{_simultaneous,}.csv` | AUC のブートストラップ 95% 信頼区間。900行ずつ |
 | `plots/heatmaps_auc{_simultaneous,}/{手法}/` | AUC ヒートマップ 12枚 × 3手法 |
@@ -252,6 +252,10 @@ other_load = pan2_offload if pan == "PAN1" else pan1_offload
 
 `tag` が `proposed` / `dper` / `rssi` / `compare` の4種、それぞれ自帯域3枚 +
 3パネル1枚で**計16枚**。`compare` が3手法の重ね描き。
+
+これに加えて、**`auc_grid.pdf`**（行 = 自帯域、列 = 相手帯域の 3×3 パネル）を1枚出す。
+1パネルの線は 3手法の 3本だけで、色が手法。`compare` 図の 9本重ねが読みにくいための
+代替（`docs/line_plot_style.md`）。
 
 3手法を重ねた図の凡例は、実際に引いている 3手法 × 3帯域 = 9 本を **3×3 の行列**
 (行 = 手法、列 = 相手帯域) で出し、軸の上側の外に置く。色と線種を別ブロックにした

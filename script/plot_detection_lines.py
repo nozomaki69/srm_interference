@@ -402,6 +402,58 @@ def plot_3panel(data, methods, out_dir, tag, fmt, ylim, ci=None):
     return path
 
 
+# --- 3x3 グリッド図 ---------------------------------------------------
+# 帯域の組を位置 (行 = 自帯域、列 = 相手帯域) で分けるので、色は手法に回す。
+# 色は帯域用と同じパレットの3スロット。線種・マーカーも手法ごとに変えて冗長にする。
+METHOD_COLOR = {"proposed": "#2a78d6", "dper": "#eb6834", "rssi": "#1baf7a"}
+METHOD_MARKER = {"proposed": "o", "dper": "s", "rssi": "^"}
+GRID_HEADER_FONTSIZE = 20
+
+
+def plot_grid(data, out_dir, fmt, ylim, ci=None):
+    """行 = 自帯域、列 = 相手帯域の 3x3。1パネルに3手法の3本だけを描く。
+
+    compare 図は1パネルに 9 本乗って読みにくいので、その代替。
+    docs/line_plot_style.md の「3×3 グリッド図」参照。
+    """
+    n = len(BANDWIDTHS)
+    fig, axes = plt.subplots(n, n, figsize=(15.0, 13.0), sharex=True, sharey=True)
+    for i, own_bw in enumerate(BANDWIDTHS):
+        for j, other_bw in enumerate(BANDWIDTHS):
+            ax = axes[i][j]
+            for method in METHODS:
+                pts = data[method].get((own_bw, other_bw))
+                if not pts:
+                    continue
+                xs = [l for l in sorted(OFFERED_LOAD_PERCENTS) if l in pts]
+                ys = [pts[l] for l in xs]
+                band = ci[method].get((own_bw, other_bw)) if ci else None
+                _draw_series(ax, xs, ys, 0.0, METHOD_COLOR[method], LINESTYLE[method],
+                             METHOD_MARKER[method], METHOD_LABEL[method], band)
+            _finish_axes(ax, ylim)
+            # sharex/sharey でも目盛りの数字は外周のパネルにだけ出す
+            ax.tick_params(labelleft=(j == 0), labelbottom=(i == n - 1))
+            if i == 0:
+                ax.annotate(f"Other {other_bw} kbps", xy=(0.5, 1.04),
+                            xycoords="axes fraction", ha="center", va="bottom",
+                            fontsize=GRID_HEADER_FONTSIZE)
+            if j == 0:
+                ax.annotate(f"Own {own_bw} kbps", xy=(-0.30, 0.5),
+                            xycoords="axes fraction", ha="right", va="center",
+                            rotation=90, fontsize=GRID_HEADER_FONTSIZE)
+    fig.tight_layout()
+    handles = [Line2D([], [], label=METHOD_LABEL[m],
+                      **line_kwargs(METHOD_COLOR[m], LINESTYLE[m], METHOD_MARKER[m]))
+               for m in METHODS]
+    fig.legend(handles=handles, ncol=len(METHODS), loc="lower center",
+               bbox_to_anchor=(0.5, 1.03), frameon=True, fontsize=LEGEND_FONTSIZE,
+               handlelength=2.6)
+    path = os.path.join(out_dir, f"{METRIC}_grid.{fmt}")
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
 def dump_values(data, out_dir, ci=None):
     """描画に使った値を CSV に出す。数値確認用と relief rule への対応を兼ねる。
 
@@ -547,6 +599,7 @@ def main():
                 written.append(plot_single(data, own_bw, methods,
                                            out_dir, tag, fmt, ylim, ci))
             written.append(plot_3panel(data, methods, out_dir, tag, fmt, ylim, ci))
+        written.append(plot_grid(data, out_dir, fmt, ylim, ci))
         written.append(dump_values(data, out_dir, ci))
 
     print(f"\n--- {out_dir} に {len(written)} ファイル出力 ---")

@@ -65,6 +65,30 @@ dper / rssi の図では図中の線種と食い違っていたので、見本�
 描くので、点の形 (○□△) と縁の色は読める。重なりが読みにくければ
 `CI_DODGE` を 1.2 に戻すだけで元の描き方になる。
 
+### 3×3 グリッド図 (`auc_grid.pdf`)
+
+3手法を重ねた図 (`auc_*_compare.pdf`) は、1パネルに 3手法 × 3相手帯域 = 9 本の線が乗り、
+ずらしを止めたことで点と髭も重なって読みにくい。そこで、帯域の組を**位置**で分けた
+3×3 の小さな図 (small multiples) を足す。
+
+```
+              Other 50 kbps   Other 100 kbps   Other 200 kbps
+Own 50 kbps    [P  D  R]        [P  D  R]         [P  D  R]
+Own 100 kbps   [P  D  R]        [P  D  R]         [P  D  R]
+Own 200 kbps   [P  D  R]        [P  D  R]         [P  D  R]
+```
+
+- 行 = 自帯域、列 = 相手帯域。1パネルの線は 3手法の 3本だけ
+- 帯域は位置で読めるので、**色を手法に割り当てる** (Proposed 青 / ΔPER only 橙 / RSSI only 緑)。
+  線種 (実線 / 長い破線 / 丸点) とマーカー (○ / □ / △) も手法ごとに変え、色に頼らず読めるようにする
+- 横軸・縦軸は全パネル共通 (`choose_ylim()` の値)。軸ラベルは入れず、行見出し・列見出しだけ付ける
+- 凡例は手法の 3 項目を図の上に 1 行
+- 点・髭の体裁 (白抜き、ずらし無し) は他の図と同じ `_draw_series()` を使う
+- 出力: `plots/detection_lines/auc_grid.pdf` (single-query)、
+  `plots/detection_lines_sequential/auc_grid.pdf` (multi-query)。モード比較には作らない
+
+既存の 16 枚はそのまま残す。
+
 ## 2. 変えないもの
 
 - AUC の値、断面 (相手負荷 100%)、own/other の読み替え (`own_other()`)
