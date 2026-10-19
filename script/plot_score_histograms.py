@@ -102,6 +102,9 @@ def load_reference_auc(path):
         return ref
     with open(path, "r", encoding="utf-8", newline="") as f:
         for r in csv.DictReader(f):
+            # 描画値 CSV は相手負荷5通りぶん入っている。ヒストグラムと同じ断面だけを使う
+            if int(r["other_load_percent"]) != L.OTHER_LOAD_PERCENT:
+                continue
             key = (r["method"], int(r["own_bw_kbps"]), int(r["other_bw_kbps"]),
                    int(r["own_load_percent"]))
             ref[key] = float(r["auc"])
@@ -226,7 +229,7 @@ def main():
     loads = sorted(OFFERED_LOAD_PERCENTS)
 
     # AUC を折れ線の描画値と突き合わせる (同じスコアから同じ定義で出しているはず)
-    ref_path = os.path.join(L.OUT_DIR_BY_MODE[args.mode], f"{L.METRIC}_plotted_values.csv")
+    ref_path = L.plotted_values_path(args.mode)
     ref_auc = load_reference_auc(ref_path)
 
     os.makedirs(args.out_dir, exist_ok=True)

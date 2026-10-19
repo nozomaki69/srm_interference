@@ -137,10 +137,47 @@ y 軸の上端をちょうど 1.0 にしていたので、AUC = 1.0 の線と点
 描画範囲の上端を 1.0 + 0.03 に広げ (`YTOP_PAD`)、目盛りは 0.1 刻みで 1.0 までに固定する
 (折れ線の全図)。
 
+### 相手 PAN の負荷ごとに描き、ファイル名を見分けやすくする
+
+以前は相手 PAN の負荷を 100% に固定した断面だけを描いていた。これを
+**相手負荷 20 / 40 / 60 / 80 / 100% の5通りすべて**について描く (折れ線の全図)。
+断面の選び方 (own/other の読み替え、対称ペアは PAN1 側) は `own_other()` のまま、
+相手負荷だけを引数にした。y 軸は5つの相手負荷すべてで共通 (`choose_ylim()` に全部渡す)。
+
+ファイル名は、図を `plots/` の外に持ち出しても何の図か分かるよう、
+**測定モード・図の種類・相手負荷**を必ず入れる:
+
+```
+auc_<モード>_<中身>_<形>_other<相手負荷3桁>.pdf
+```
+
+| 部品 | 値 |
+|---|---|
+| モード | `single` (single-query) / `multi` (multi-query) / `modecompare` (両モードの比較) |
+| 中身 | `proposed` / `dper` / `rssi` (手法1つ) / `3methods` (3手法) |
+| 形 | `own50` / `own100` / `own200` (自帯域ごとの単独図) / `3panel` / `grid` (3×3) |
+| 相手負荷 | `other020` / `other040` / `other060` / `other080` / `other100` (3桁にそろえて名前順 = 負荷順にする) |
+
+例:
+
+| ファイル | 中身 |
+|---|---|
+| `detection_lines/auc_single_3methods_grid_other100.pdf` | single-query、3手法の 3×3 グリッド、相手負荷 100% (旧 `auc_grid.pdf`) |
+| `detection_lines_sequential/auc_multi_dper_3panel_other060.pdf` | multi-query、ΔPER only の3パネル、相手負荷 60% |
+| `detection_lines_mode_compare/auc_modecompare_proposed_grid_other020.pdf` | 提案手法の single / multi 比較、相手負荷 20% (旧 `auc_grid_proposed.pdf`) |
+
+旧名 → 新名: `auc_own{bw}_{手法}` → `auc_<モード>_{手法}_own{bw}_other<L>`、
+`auc_own{bw}_compare` → `auc_<モード>_3methods_own{bw}_other<L>`、
+`auc_3panel_{手法|compare}` → `auc_<モード>_{手法|3methods}_3panel_other<L>`。
+
+枚数: single-query / multi-query それぞれ (16 + グリッド1) × 5 = 85 枚、
+モード比較は 3手法 × 5 = 15 枚。描画値の CSV は `auc_<モード>_plotted_values.csv` に
+5つの相手負荷ぶんをまとめる (`other_load_percent` 列で区別)。
+スコア分布のヒストグラム・ROC 曲線は従来どおり相手負荷 100% の断面のまま。
+
 ## 2. 変えないもの
 
-- AUC の値、断面 (相手負荷 100%)、own/other の読み替え (`own_other()`)
-- 出力ファイル名・枚数 (16枚 + `auc_plotted_values.csv`)
+- AUC の値、own/other の読み替え (`own_other()`)
 
 ## 3. 実行
 

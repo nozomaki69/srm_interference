@@ -76,8 +76,32 @@ CI_DODGE = 0.0
 # 縦軸に使う列。このブランチは AUC だけを見る (F1 は出さない)。
 METRIC = "auc"
 
-# 相手PAN の負荷をこの値に固定した断面を描く
+# 相手PAN の負荷を1つに固定した断面を描く。折れ線は OTHER_LOADS の全部について描く。
+# OTHER_LOAD_PERCENT は own_other() の既定値で、相手負荷を指定しない呼び出し
+# (plot_score_histograms.py / plot_roc.py。どちらも相手負荷 100% の断面) が使う。
 OTHER_LOAD_PERCENT = 100
+OTHER_LOADS = sorted(OFFERED_LOAD_PERCENTS)
+
+# ファイル名に入れるモードの呼び名 (図を plots/ の外に持ち出しても区別できるように)
+FILE_MODE_TAG = {"simultaneous": "single", "sequential": "multi"}
+# 3手法を重ねた図の「中身」の呼び名
+ALL_METHODS_TAG = "3methods"
+
+
+def fig_path(out_dir, mode_tag, content, shape, other_load, fmt):
+    """auc_<モード>_<中身>_<形>_other<相手負荷3桁>.<fmt>。命名規則は docs/line_plot_style.md。
+
+    相手負荷は3桁にそろえる (other020 ... other100)。そろえないと名前順で
+    other100 が other20 より前に並ぶ。
+    """
+    return os.path.join(
+        out_dir, f"{METRIC}_{mode_tag}_{content}_{shape}_other{other_load:03d}.{fmt}")
+
+
+def plotted_values_path(mode):
+    """描画値 CSV のパス。plot_score_histograms.py も AUC の照合に読む。"""
+    return os.path.join(OUT_DIR_BY_MODE[mode],
+                        f"{METRIC}_{FILE_MODE_TAG[mode]}_plotted_values.csv")
 
 # 自分 / 相手として取り得る帯域 (kbps)。CHANNEL_KBPS の値域と一致させる。
 BANDWIDTHS = sorted(set(A.CHANNEL_KBPS.values()))   # [50, 100, 200]
@@ -167,7 +191,7 @@ def ci_csv_path(mode="simultaneous"):
     return os.path.join(PLOT_BASE_DIR, f"auc_bootstrap{A.mode_suffix(mode)}.csv")
 
 
-def load_ci(csv_file):
+def load_ci(csv_file, other_load=OTHER_LOAD_PERCENT):
     """ブートストラップ CSV を読み、{method: {(own_bw, other_bw): {own_load: (lo, hi)}}}。
 
     読み替えは load_series() と同じく own_other() に任せる。
@@ -177,7 +201,7 @@ def load_ci(csv_file):
         for r in csv.DictReader(f):
             if r["method"] not in ci:
                 continue
-            own = own_other(r)
+            own = own_other(r, other_load)
             if own is None:
                 continue
             ci[r["method"]][(own["own_bw"], own["other_bw"])][own["own_load"]] = (
@@ -186,14 +210,17 @@ def load_ci(csv_file):
 
 
 def maybe_load_ci(mode):
-    """そのモードの信頼区間 CSV があれば読む。無ければ None (髭を描かない)。"""
+    """そのモードの信頼区間 CSV があれば、相手負荷ごとに読む: {other_load: ci}。
+
+    無ければ {other_load: None} (髭を描かない)。
+    """
     path = ci_csv_path(mode)
     if not os.path.isfile(path):
         print(f"    ({os.path.basename(path)} が無いので髭は描きません。"
               "先に script/bootstrap_auc.py を実行してください)")
-        return None
+        return {L: None for L in OTHER_LOADS}
     print(f"--- 95% 信頼区間: {os.path.basename(path)} ---")
-    return load_ci(path)
+    return {L: load_ci(path, L) for L in OTHER_LOADS}
 
 
 def _draw_series(ax, xs, ys, dx, color, linestyle, marker, label, band):
@@ -230,7 +257,7 @@ def _finish_axes(ax, ylim, xpad=(8, 12)):
     style_axes(ax, grid_axis="y")
 
 
-def own_other(row):
+def own_other(row, other_load_wanted=OTHER_LOAD_PERCENT):
     """結果CSVの1行を「自分 / 相手」に読み替える。
 
     検知を行っている側 (pan 列) が「自分」。bandwidth "AvsB" は PAN1=A kbps /
@@ -238,7 +265,7 @@ def own_other(row):
     が、TARGET_BANDWIDTH_PATTERNS が常に kbps(PAN1) <= kbps(PAN2) を満たすので
     そのソートは恒等写像になる。導出根拠は docs/README.md の「折れ線グラフ」節。
 
-    この断面に入らない行 (相手負荷が OTHER_LOAD_PERCENT でない、対称ペアの
+    この断面に入らない行 (相手負荷が other_load_wanted でない、対称ペアの
     PAN2 側) は None を返す。対称ペアで PAN1 だけを採るのは、非対称ペアは
     片方の PAN しか該当しないので、全系列を 1 PAN 分 (100+100 Seed) に揃えて
     ノイズ水準を均一にするため。
@@ -254,14 +281,14 @@ def own_other(row):
         own_bw, other_bw = b, a
         own_load, other_load = int(row["pan2_offload"]), int(row["pan1_offload"])
 
-    if other_load != OTHER_LOAD_PERCENT:
+    if other_load != other_load_wanted:
         return None
     if a == b and pan != "PAN1":
         return None
     return {"own_bw": own_bw, "other_bw": other_bw, "own_load": own_load}
 
 
-def load_series(csv_file):
+def load_series(csv_file, other_load=OTHER_LOAD_PERCENT):
     """CSV を読み、{method: {(own_bw, other_bw): {own_load: auc}}} を返す。
 
     自分 / 相手の読み替えと断面の絞り込みは own_other() が担当する。
@@ -286,7 +313,7 @@ def load_series(csv_file):
         if method not in series:
             unknown.add(method)
             continue
-        own = own_other(r)
+        own = own_other(r, other_load)
         if own is None:
             continue
         series[method][(own["own_bw"], own["other_bw"])][own["own_load"]] = \
@@ -393,7 +420,7 @@ def _add_legend(target, methods, **kw):
                          handlelength=2.6, loc="lower center", **kw)
 
 
-def plot_single(data, own_bw, methods, out_dir, tag, fmt, ylim, ci=None):
+def plot_single(data, own_bw, methods, path, ylim, ci=None):
     """自帯域1つ分の図を1枚描く。"""
     fig, ax = plt.subplots(figsize=(7.2, 5.8))
     _draw_panel(ax, data, own_bw, methods, ylim, ci)
@@ -401,13 +428,12 @@ def plot_single(data, own_bw, methods, out_dir, tag, fmt, ylim, ci=None):
         _add_legend(ax, methods, loc="lower left")
     else:
         _add_legend(ax, methods, bbox_to_anchor=(0.5, 1.02))
-    path = os.path.join(out_dir, f"{METRIC}_own{own_bw}_{tag}.{fmt}")
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     return path
 
 
-def plot_3panel(data, methods, out_dir, tag, fmt, ylim, ci=None):
+def plot_3panel(data, methods, path, ylim, ci=None):
     """自帯域3つを横並びのサブプロットにした1枚。"""
     fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.8), sharey=True)
     for ax, own_bw in zip(axes, BANDWIDTHS):
@@ -418,7 +444,6 @@ def plot_3panel(data, methods, out_dir, tag, fmt, ylim, ci=None):
     else:
         # 行列凡例は横に長いので、3パネルの上にまとめて置く
         _add_legend(fig, methods, bbox_to_anchor=(0.5, 1.0))
-    path = os.path.join(out_dir, f"{METRIC}_3panel_{tag}.{fmt}")
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     return path
@@ -467,7 +492,7 @@ def _points(pts):
     return xs, [pts[l] for l in xs]
 
 
-def plot_grid(data, out_dir, fmt, ylim, ci=None):
+def plot_grid(data, path, ylim, ci=None):
     """行 = 自帯域、列 = 相手帯域の 3x3。1パネルに3手法の3本だけを描く。
 
     compare 図は1パネルに 9 本乗って読みにくいので、その代替。
@@ -488,41 +513,43 @@ def plot_grid(data, out_dir, fmt, ylim, ci=None):
     handles = [Line2D([], [], label=METHOD_LABEL[m],
                       **line_kwargs(METHOD_COLOR[m], GRID_LINESTYLE, METHOD_MARKER[m]))
                for m in METHODS]
-    return _plot_bw_grid(series_of, handles,
-                         os.path.join(out_dir, f"{METRIC}_grid.{fmt}"), ylim)
+    return _plot_bw_grid(series_of, handles, path, ylim)
 
 
-def dump_values(data, out_dir, ci=None):
+def dump_values(data_by_load, ci_by_load, path):
     """描画に使った値を CSV に出す。数値確認用と relief rule への対応を兼ねる。
 
+    相手負荷5通りぶんを1つにまとめる (other_load_percent 列で区別)。
     髭を描いたときは、信頼区間の下端・上端の列も足す。
     """
-    path = os.path.join(out_dir, f"{METRIC}_plotted_values.csv")
+    with_ci = any(ci_by_load.values())
     with open(path, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(["method", "own_bw_kbps", "other_bw_kbps",
                     "other_load_percent", "own_load_percent", METRIC]
-                   + ([f"{METRIC}_ci_low", f"{METRIC}_ci_high"] if ci else []))
-        for method in METHODS:
-            for own_bw in BANDWIDTHS:
-                for other_bw in BANDWIDTHS:
-                    pts = data[method].get((own_bw, other_bw), {})
-                    for load in sorted(pts):
-                        extra = []
-                        if ci:
-                            lo, hi = ci[method].get((own_bw, other_bw), {}).get(
-                                load, (float("nan"), float("nan")))
-                            extra = [f"{lo:.6g}", f"{hi:.6g}"]
-                        w.writerow([method, own_bw, other_bw,
-                                    OTHER_LOAD_PERCENT, load,
-                                    f"{pts[load]:.6g}"] + extra)
+                   + ([f"{METRIC}_ci_low", f"{METRIC}_ci_high"] if with_ci else []))
+        for other_load in OTHER_LOADS:
+            data, ci = data_by_load[other_load], ci_by_load[other_load]
+            for method in METHODS:
+                for own_bw in BANDWIDTHS:
+                    for other_bw in BANDWIDTHS:
+                        pts = data[method].get((own_bw, other_bw), {})
+                        for load in sorted(pts):
+                            extra = []
+                            if with_ci:
+                                lo, hi = (ci or {}).get(method, {}).get(
+                                    (own_bw, other_bw), {}).get(
+                                    load, (float("nan"), float("nan")))
+                                extra = [f"{lo:.6g}", f"{hi:.6g}"]
+                            w.writerow([method, own_bw, other_bw, other_load, load,
+                                        f"{pts[load]:.6g}"] + extra)
     return path
 
 
 # ------------------------------------------------------------
 # モード比較 (single-query vs multi-query)。手法ごとに1枚
 # ------------------------------------------------------------
-def plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim):
+def plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim, other_load):
     """手法ごとに 3x3 グリッドを1枚 (計3枚)。各パネルは single / multi の2本。
 
     以前は1パネルに 3相手帯域 x 2モード = 6本を重ねていて見にくかったので、
@@ -548,12 +575,12 @@ def plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim):
 
         written.append(_plot_bw_grid(
             series_of, handles,
-            os.path.join(out_dir, f"{METRIC}_grid_{method}.{fmt}"), ylim))
+            fig_path(out_dir, "modecompare", method, "grid", other_load, fmt), ylim))
     return written
 
 
 def load_mode(mode, csv_path=None):
-    """1モード分の検知結果を読み、系列数を確かめて返す。"""
+    """1モード分の検知結果を相手負荷ごとに読み、系列数を確かめて返す: {other_load: data}。"""
     path = csv_path or input_csv_path(mode)
     if not os.path.isfile(path):
         raise FileNotFoundError(
@@ -564,25 +591,28 @@ def load_mode(mode, csv_path=None):
         os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M")
     # 解析コードより CSV が古いことがあるので更新時刻を必ず出す
     print(f"--- {mode}: {path} (更新 {mtime}) ---")
-    data = load_series(path)
 
-    # 期待する系列数の確認。欠けたまま静かに描くと図が嘘になる。
+    data_by_load = {}
     expected = len(BANDWIDTHS) ** 2
-    for method in METHODS:
-        got = len(data[method])
-        n_pts = {k: len(v) for k, v in data[method].items()}
-        print(f"    {method:>8}: 系列 {got}/{expected}, "
-              f"1系列あたりの点数 {sorted(set(n_pts.values()))}")
-        if got != expected:
-            missing = [k for k in ((o, t) for o in BANDWIDTHS for t in BANDWIDTHS)
-                       if k not in data[method]]
-            print(f"    Warning: 欠けている (own, other) = {missing}")
-    return data
+    for other_load in OTHER_LOADS:
+        data = load_series(path, other_load)
+        # 期待する系列数の確認。欠けたまま静かに描くと図が嘘になる。
+        for method in METHODS:
+            got = len(data[method])
+            n_pts = sorted(set(len(v) for v in data[method].values()))
+            if got != expected or n_pts != [len(OFFERED_LOAD_PERCENTS)]:
+                missing = [k for k in ((o, t) for o in BANDWIDTHS for t in BANDWIDTHS)
+                           if k not in data[method]]
+                print(f"    Warning: 相手負荷 {other_load}% {method}: 系列 {got}/{expected}, "
+                      f"点数 {n_pts}, 欠け {missing}")
+        data_by_load[other_load] = data
+    print(f"    相手負荷 {OTHER_LOADS} x 手法 {len(METHODS)} を読み込み")
+    return data_by_load
 
 
 def main():
     p = argparse.ArgumentParser(
-        description="相手PAN負荷100%の断面で、干渉判定3手法の AUC を折れ線にする")
+        description="相手PAN負荷 (20-100%) ごとの断面で、干渉判定3手法の AUC を折れ線にする")
     p.add_argument("--mode", choices=MODES + ("compare",), default="simultaneous",
                    help="simultaneous: single-query の3手法 (既定) / "
                         "sequential: multi-query の3手法 / "
@@ -603,27 +633,44 @@ def main():
     if args.mode == "compare":
         data_by_mode = {m: load_mode(m) for m in MODES}
         ci_by_mode = {m: maybe_load_ci(m) for m in MODES}
-        ylim = choose_ylim({f"{m}/{k}": v for m in MODES
-                            for k, v in data_by_mode[m].items()},
-                           cis=ci_by_mode.values())
+        # y 軸は両モード・全相手負荷で共通
+        ylim = choose_ylim({f"{m}/{L}/{k}": v for m in MODES for L in OTHER_LOADS
+                            for k, v in data_by_mode[m][L].items()},
+                           cis=[ci_by_mode[m][L] for m in MODES for L in OTHER_LOADS])
         print(f"--- y軸: {ylim[0]:.2f} - {ylim[1]:.2f} ---")
-        written = plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim)
+        written = []
+        for L in OTHER_LOADS:
+            written += plot_mode_compare({m: data_by_mode[m][L] for m in MODES},
+                                         {m: ci_by_mode[m][L] for m in MODES},
+                                         out_dir, fmt, ylim, L)
     else:
-        data = load_mode(args.mode, args.csv)
-        ci = maybe_load_ci(args.mode)
-        ylim = choose_ylim(data, cis=(ci,))
+        mode_tag = FILE_MODE_TAG[args.mode]
+        data_by_load = load_mode(args.mode, args.csv)
+        ci_by_load = maybe_load_ci(args.mode)
+        # y 軸は全相手負荷で共通 (図をまたいで比べられるように)
+        ylim = choose_ylim({f"{L}/{k}": v for L in OTHER_LOADS
+                            for k, v in data_by_load[L].items()},
+                           cis=list(ci_by_load.values()))
         print(f"--- y軸: {ylim[0]:.2f} - {ylim[1]:.2f} "
               f"(全図共通。点か髭の下端が 0.5 を下回るときだけ下げる) ---")
         written = []
         # 手法ごとの単独図と、3手法を重ねた比較図
-        tags = [(m, (m,)) for m in METHODS] + [("compare", tuple(METHODS))]
-        for tag, methods in tags:
-            for own_bw in BANDWIDTHS:
-                written.append(plot_single(data, own_bw, methods,
-                                           out_dir, tag, fmt, ylim, ci))
-            written.append(plot_3panel(data, methods, out_dir, tag, fmt, ylim, ci))
-        written.append(plot_grid(data, out_dir, fmt, ylim, ci))
-        written.append(dump_values(data, out_dir, ci))
+        tags = [(m, (m,)) for m in METHODS] + [(ALL_METHODS_TAG, tuple(METHODS))]
+        for L in OTHER_LOADS:
+            data, ci = data_by_load[L], ci_by_load[L]
+            for content, methods in tags:
+                for own_bw in BANDWIDTHS:
+                    written.append(plot_single(
+                        data, own_bw, methods,
+                        fig_path(out_dir, mode_tag, content, f"own{own_bw}", L, fmt),
+                        ylim, ci))
+                written.append(plot_3panel(
+                    data, methods, fig_path(out_dir, mode_tag, content, "3panel", L, fmt),
+                    ylim, ci))
+            written.append(plot_grid(
+                data, fig_path(out_dir, mode_tag, ALL_METHODS_TAG, "grid", L, fmt), ylim, ci))
+        csv_path = os.path.join(out_dir, os.path.basename(plotted_values_path(args.mode)))
+        written.append(dump_values(data_by_load, ci_by_load, csv_path))
 
     print(f"\n--- {out_dir} に {len(written)} ファイル出力 ---")
     for path in written:
