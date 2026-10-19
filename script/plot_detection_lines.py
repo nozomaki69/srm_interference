@@ -62,9 +62,10 @@ MODE_LABEL = {"simultaneous": "single-query", "sequential": "multi-query"}
 # モード比較図での線種。single-query (参照) を実線にする
 MODE_LINESTYLE = {"simultaneous": "-", "sequential": ":"}
 # モード比較図での色 (= 相手帯域)。3手法の図の青・橙・緑 (グリッド図では手法の色)
-# と同じだと紛らわしいので、それらと色相が離れ、互いにもはっきり違う3色にする。
-# 紫の濃淡は見分けにくかったので使わない。
-MODE_BW_COLOR = {50: "#b8860b", 100: "#c2338c", 200: "#222222"}   # 濃い金 / マゼンタ / 黒
+# と同じだと紛らわしいので、それらと違う 赤 / 紫 / 濃い紺 にする。
+# 赤 -> 紫 -> 紺 と色相が一方向に進むので、50 < 100 < 200 kbps の順序とも合う。
+# (紫の濃淡、金 / マゼンタ / 黒 は見分けにくい・合わないとして不採用)
+MODE_BW_COLOR = {50: "#d62839", 100: "#7b2cbf", 200: "#1d2d50"}   # 赤 / 紫 / 濃い紺
 # モード比較図だけ横幅を詰めて縦長にする (横軸は負荷の5点だけなので幅は要らない)
 MODE_FIGSIZE_SINGLE = (5.4, 6.6)
 MODE_FIGSIZE_3PANEL = (14.0, 6.6)
@@ -219,11 +220,19 @@ def _draw_series(ax, xs, ys, dx, color, linestyle, marker, label, band):
                 zorder=2)
 
 
+# y 軸の上端の余白。上端をちょうど AUC = 1.0 にすると、1.0 の線と点の上半分が
+# 枠で切れて見えなくなる。目盛りは 1.0 までのまま、描画範囲だけ少し上に広げる。
+YTOP_PAD = 0.03
+
+
 def _finish_axes(ax, ylim, xpad=(8, 12)):
     loads = sorted(OFFERED_LOAD_PERCENTS)
     ax.set_xticks(loads)
     ax.set_xlim(min(loads) - xpad[0], max(loads) + xpad[1])
-    ax.set_ylim(*ylim)
+    lo, hi = ylim
+    ax.set_ylim(lo, hi + YTOP_PAD)
+    # 余白に 1.1 などの目盛りが出ないよう、0.1 刻みで lo..hi に固定する
+    ax.set_yticks([round(lo + 0.1 * k, 1) for k in range(int(round((hi - lo) / 0.1)) + 1)])
     # 縦のグリッド線は引かない (横軸は負荷の5点だけで、目盛りで足りる)
     style_axes(ax, grid_axis="y")
 
