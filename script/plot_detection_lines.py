@@ -137,9 +137,13 @@ TICK_WIDTH = 2.0        # 目盛り線の太さ
 LEGEND_FONTSIZE = 18
 
 
-def style_axes(ax):
-    """グリッド・枠線・目盛りをまとめて整える。"""
-    ax.grid(True, **GRID_KW)
+def style_axes(ax, grid_axis="both"):
+    """グリッド・枠線・目盛りをまとめて整える。
+
+    grid_axis: グリッド線を引く向き。折れ線は横線 ("y") だけ (_finish_axes)。
+    plot_roc.py もこれを使うので既定は両方のまま。
+    """
+    ax.grid(True, axis=grid_axis, **GRID_KW)
     ax.set_axisbelow(True)
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
@@ -212,7 +216,8 @@ def _finish_axes(ax, ylim):
     ax.set_xticks(loads)
     ax.set_xlim(min(loads) - 8, max(loads) + 12)
     ax.set_ylim(*ylim)
-    style_axes(ax)
+    # 縦のグリッド線は引かない (横軸は負荷の5点だけで、目盛りで足りる)
+    style_axes(ax, grid_axis="y")
 
 
 def own_other(row):
@@ -407,7 +412,6 @@ def plot_3panel(data, methods, out_dir, tag, fmt, ylim, ci=None):
 # 色は帯域用と同じパレットの3スロット。線種・マーカーも手法ごとに変えて冗長にする。
 METHOD_COLOR = {"proposed": "#2a78d6", "dper": "#eb6834", "rssi": "#1baf7a"}
 METHOD_MARKER = {"proposed": "o", "dper": "s", "rssi": "^"}
-GRID_HEADER_FONTSIZE = 20
 
 
 def plot_grid(data, out_dir, fmt, ylim, ci=None):
@@ -433,20 +437,14 @@ def plot_grid(data, out_dir, fmt, ylim, ci=None):
             _finish_axes(ax, ylim)
             # sharex/sharey でも目盛りの数字は外周のパネルにだけ出す
             ax.tick_params(labelleft=(j == 0), labelbottom=(i == n - 1))
-            if i == 0:
-                ax.annotate(f"Other {other_bw} kbps", xy=(0.5, 1.04),
-                            xycoords="axes fraction", ha="center", va="bottom",
-                            fontsize=GRID_HEADER_FONTSIZE)
-            if j == 0:
-                ax.annotate(f"Own {own_bw} kbps", xy=(-0.30, 0.5),
-                            xycoords="axes fraction", ha="right", va="center",
-                            rotation=90, fontsize=GRID_HEADER_FONTSIZE)
+            # 行・列の見出し (自帯域 / 相手帯域) は入れない。軸タイトルを入れない
+            # 方針どおり、図のキャプションで説明する
     fig.tight_layout()
     handles = [Line2D([], [], label=METHOD_LABEL[m],
                       **line_kwargs(METHOD_COLOR[m], LINESTYLE[m], METHOD_MARKER[m]))
                for m in METHODS]
     fig.legend(handles=handles, ncol=len(METHODS), loc="lower center",
-               bbox_to_anchor=(0.5, 1.03), frameon=True, fontsize=LEGEND_FONTSIZE,
+               bbox_to_anchor=(0.5, 0.99), frameon=True, fontsize=LEGEND_FONTSIZE,
                handlelength=2.6)
     path = os.path.join(out_dir, f"{METRIC}_grid.{fmt}")
     fig.savefig(path, bbox_inches="tight")
