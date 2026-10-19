@@ -6,12 +6,21 @@
 # simulation_results.csv を再パースすることになり数分かかるが、CSV が既にあるなら
 # その必要は無い。
 #
-# 入力 (analyze_csv.py が作る):
-#   plots/interference_detection_results_simultaneous.csv   検知結果 (method / auc 列)
+# 測定モードは simultaneous (single-query) と sequential (multi-query) の2つ。
+# 検知結果CSVがあるモードだけ描き、無いモードは飛ばして注記を出す
+# (sequential の CSV は計算機での再解析で作られる。docs/save_features.md)。
 #
-# 出力:
-#   plots/detection_lines/   折れ線 16枚 (手法3 + 比較1) x (自帯域3 + 3パネル1)
-#                            + auc_plotted_values.csv
+# 入力 (analyze_csv.py が作る):
+#   plots/interference_detection_results{_simultaneous,}.csv   検知結果
+#   plots/detection_scores{_simultaneous,}.csv                 Seed ごとのスコア
+#
+# 出力 (モードごと):
+#   plots/auc_bootstrap*.csv                 AUC の 95% 信頼区間 (1000回)
+#   plots/detection_lines{,_sequential}/     3手法の折れ線 16枚 + 描画値 CSV
+#   plots/heatmaps_auc{_simultaneous,}/      手法ごとのヒートマップ 12枚 x 3
+#   plots/roc/{simultaneous,sequential}/     ROC 曲線 27枚
+#   plots/score_histograms{,_sequential}/    スコア分布 9枚
+#   plots/detection_lines_mode_compare/      モード比較の折れ線 (両モードあるとき)
 #
 # 解析からやり直したいときは ./script/sbatch_reanalyze.sh (こちらも最後にこれを呼ぶ)。
 
@@ -20,13 +29,6 @@ set -uo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 CMD_DIR=$(cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd)
 PLOTS="$CMD_DIR/plots"
-
-INPUT="$PLOTS/interference_detection_results_simultaneous.csv"
-if [ ! -f "$INPUT" ]; then
-    echo "エラー: 入力CSVがありません: plots/$(basename "$INPUT")" >&2
-    echo "       先に ./script/sbatch_reanalyze.sh で解析を回してください。" >&2
-    exit 1
-fi
 
 cd "$CMD_DIR" || exit 1
 
@@ -38,17 +40,49 @@ run() {
     fi
 }
 
-# 折れ線は3手法を1枚に重ねるので、手法を跨いで1回で済む
-run "$SCRIPT_DIR/plot_detection_lines.py"
+# モード -> 検知結果CSV の接尾辞 (analyze_csv.mode_suffix() と同じ規則)
+suffix() { if [ "$1" = "sequential" ]; then echo ""; else echo "_simultaneous"; fi; }
 
-# 干渉あり(赤)/なし(青)のスコア分布 (山)。折れ線と同じ断面を、自PAN負荷ごとに
-# 描く。AUC の照合に折れ線の描画値を読むので、折れ線の後に回す。
-run "$SCRIPT_DIR/plot_score_histograms.py"
+MODES_DONE=()
+for MODE in simultaneous sequential; do
+    if [ -f "$PLOTS/interference_detection_results$(suffix "$MODE").csv" ]; then
+        MODES_DONE+=("$MODE")
+    else
+        echo "    ($MODE の検知結果CSVが無いので、$MODE の図は飛ばします。"
+        echo "     計算機で ./script/sbatch_reanalyze.sh を回すと作られます)"
+    fi
+done
+if [ ${#MODES_DONE[@]} -eq 0 ]; then
+    echo "エラー: 検知結果CSVがありません。先に ./script/sbatch_reanalyze.sh で解析を回してください。" >&2
+    exit 1
+fi
 
-count() { ls "$1" 2>/dev/null | wc -l | tr -d ' '; }
+# 信頼区間は折れ線が髭として読むので、折れ線より先に回す
+# (スコアCSVが無いモードは自分で飛ばす)
+run "$SCRIPT_DIR/bootstrap_auc.py"
+
+for MODE in "${MODES_DONE[@]}"; do
+    # 折れ線は3手法を1枚に重ねるので、手法を跨いで1回で済む
+    run "$SCRIPT_DIR/plot_detection_lines.py" --mode "$MODE"
+    # スコア分布は AUC の照合に折れ線の描画値を読むので、折れ線の後に回す
+    run "$SCRIPT_DIR/plot_score_histograms.py" --mode "$MODE"
+    run "$SCRIPT_DIR/create_heatmap.py" --mode "$MODE"
+    run "$SCRIPT_DIR/plot_roc.py" --mode "$MODE"
+done
+
+# モード比較は両モードがそろったときだけ
+if [ ${#MODES_DONE[@]} -eq 2 ]; then
+    run "$SCRIPT_DIR/plot_detection_lines.py" --mode compare
+fi
+
+count() { find "$1" -type f 2>/dev/null | wc -l | tr -d ' '; }
 
 echo "========================================"
-echo "作図が完了しました"
-echo "  plots/detection_lines/     $(count "$PLOTS/detection_lines") ファイル"
-echo "  plots/score_histograms/   $(count "$PLOTS/score_histograms") ファイル"
+echo "作図が完了しました (モード: ${MODES_DONE[*]})"
+for D in detection_lines detection_lines_sequential detection_lines_mode_compare \
+         heatmaps_auc_simultaneous heatmaps_auc roc score_histograms score_histograms_sequential; do
+    if [ -d "$PLOTS/$D" ]; then
+        printf "  plots/%-30s %s ファイル\n" "$D/" "$(count "$PLOTS/$D")"
+    fi
+done
 echo "========================================"

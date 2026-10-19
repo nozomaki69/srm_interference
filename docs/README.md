@@ -8,15 +8,16 @@ F1 と AUC の両方で、sequential/simultaneous 両モードについて評価
 ## 1. 何をするブランチか
 
 - **判定手法**: 3つ ―― 提案手法 / ΔPER のみ / RSSI のみ (§4)
-- **評価指標**: AUC だけ (F1 は出さない)
-- **測定モード**: simultaneous だけ (§2)
-- **出力**: 折れ線グラフ (detection line) だけ。ヒートマップと ROC は出さない
+- **評価指標**: AUC だけ (F1 は出さない)。ブートストラップ（1000回）の 95% 信頼区間つき
+- **測定モード**: simultaneous（single-query）が主。sequential（multi-query）も解析して比べる (§2)
+- **出力**: 折れ線グラフ・ヒートマップ・ROC 曲線・スコア分布・ノード配置図
 - **実行**: `./script/sbatch_jobs.sh` 1本で、シミュレーションから図まで通る
 
-`save` にあった F1・ヒートマップ・ROC 曲線・sequential 側の解析は入っていない。
-削った理由は §8。
+**`save` から取り込んだもの**: multi-query（sequential）の解析・ヒートマップ・ROC 曲線・
+ブートストラップ信頼区間。どれも3手法ぶん作る。設計は `docs/save_features.md`、
+信頼区間の計算は `docs/bootstrap.md`。F1 は取り込んでいない（理由は §8）。
 
-## 2. 測定モード ―― simultaneous に固定する
+## 2. 測定モード ―― simultaneous が主、sequential は比較用
 
 IEEE 802.15.4 の標準では、PER の計算に要る5つの MAC カウンタを**同時に測定できない**。
 そこで1メトリックあたり 200 s の窓を順に割り当てるのが **`sequential`**。
@@ -36,17 +37,21 @@ IEEE 802.15.4 の標準では、PER の計算に要る5つの MAC カウンタ�
 `simultaneous` は標準では実現できない測り方であり、実機では到達できない
 **上界 (参照)** であって「従来方式」ではない。
 
-**このブランチは simultaneous だけを解析する。** 見たいのが「時間分割のコスト」では
-なく「判定手法の差」だからである。測定モードと手法を同時に振ると、折れ線の線種が
-2つの軸に取られて図が読めなくなる。測定側の劣化が無い状態に条件を固定して、
-手法だけを比べる。
+**このブランチの主眼は simultaneous（single-query）での手法比較である。** 見たいのが
+「時間分割のコスト」ではなく「判定手法の差」だからで、測定モードと手法を1枚に同時に
+振ると、折れ線の線種が2つの軸に取られて図が読めなくなる。
+
+そのうえで `save` と同じく sequential（multi-query）も解析する（`analyze_csv.py --mode
+sequential`）。3手法の図はモードごとに出力先を分け、モードどうしの比較は手法ごとに
+別の図にする（`plot_detection_lines.py --mode compare`）。図の凡例での呼び名は
+simultaneous = **single-query**、sequential = **multi-query**。
 
 `create_csv.py` は1本のトレースから両モードを変わらず集計する (simultaneous 側の
 列には接尾辞 `_simultaneous`、sequential 側は接尾辞なし)。
 **窓の定義にもシミュレーション側にも手を入れていない** ―― 窓を1つに縮めれば
 30,000 ランの実時間は縮むが、シミュレーション条件そのものが `save` と変わって
-過去の結果と比較できなくなるため。`analyze_csv.py` が sequential 側の列を
-読まないだけである (`COLUMN_SUFFIX = "_simultaneous"` 固定)。
+過去の結果と比較できなくなるため。`analyze_csv.py` は `--mode` で読む列を切り替える
+（既定は simultaneous）。
 
 窓の定義は `script/interference_2pan_config.py` の `METRIC_WINDOW_ORDER` /
 `metric_window()` / `simultaneous_window()` が唯一の定義元。
@@ -150,8 +155,8 @@ RSSI でビン分けする。ビンの起点は**チャネル固有の固定値*
 ./script/sbatch_jobs.sh
 ```
 
-これ1本で、config 生成 → シミュレーション → トレース解析 → 3手法の解析 →
-折れ線グラフ まで通る。
+これ1本で、config 生成 → シミュレーション → トレース解析 → 3手法の解析
+（両モード） → 図 まで通る。
 
 パイプラインの形:
 
@@ -164,8 +169,13 @@ RSSI でビン分けする。ビンの起点は**チャネル固有の固定値*
    バッチの集計が済んだ時点でまとめて削除する。`.trace` が巨大なのが主な理由だが、
    `.pos` も 30,000 ラン分で約 187MB 溜まる。
    いずれもシミュレーション中にしか読まれないので、バッチ完了後は残す必要がない
-4. `analyze_csv.py` が3手法ぶんの検知結果 CSV と Seed 別スコア CSV を出す
-5. `plot_detection_lines.py` が折れ線を出す（手順は `run_analysis.sh` にまとめてある）
+4. `analyze_csv.py --mode simultaneous` と `--mode sequential` が、それぞれ3手法ぶんの
+   検知結果 CSV と Seed 別スコア CSV を出す
+5. `plot_figures.sh` が、ブートストラップ信頼区間 → 折れ線 → スコア分布 → ヒートマップ →
+   ROC → モード比較 の順に図を出す（手順は `run_analysis.sh` にまとめてある）
+
+`analyze_csv.py` は負荷グリッド（20〜100%）に無い行を読み飛ばすので、icc_load200
+（20〜200%）の `simulation_results.csv` を入力にしても icc の条件だけで解析できる。
 
 解析だけやり直すときは `./script/sbatch_reanalyze.sh`（再シミュレーション不要。
 `plots/simulation_results.csv` だけあればよい）。
@@ -187,8 +197,18 @@ RSSI でビン分けする。ビンの起点は**チャネル固有の固定値*
 | `plots/simulation_results.csv` | トレースの集約（gitignore。巨大） |
 | `plots/interference_detection_results_simultaneous.csv` | 検知結果。**900行** = 6帯域ペア × 25負荷 × 2PAN × 3手法 |
 | `plots/detection_scores_simultaneous.csv` | Seed ごとの干渉指標。180,000行 |
-| `plots/detection_lines/` | 折れ線 16枚 + 描画値の CSV |
+| `plots/detection_lines/` | 折れ線 16枚 + 描画値の CSV（single-query。95% 信頼区間の髭つき） |
 | `plots/score_histograms/` | 干渉あり/なしのスコア分布 9枚 |
+| `plots/auc_bootstrap{_simultaneous,}.csv` | AUC のブートストラップ 95% 信頼区間。900行ずつ |
+| `plots/heatmaps_auc{_simultaneous,}/{手法}/` | AUC ヒートマップ 12枚 × 3手法 |
+| `plots/roc/{simultaneous,sequential}/` | ROC 曲線 27枚（自帯域 × 相手帯域 × 手法） |
+| `plots/interference_detection_results.csv` ほか接尾辞なしの CSV | multi-query（sequential）の検知結果・スコア |
+| `plots/detection_lines_sequential/`、`plots/score_histograms_sequential/` | multi-query の折れ線・スコア分布 |
+| `plots/detection_lines_mode_compare/` | single-query と multi-query の比較（手法ごと 4枚 × 3） |
+
+multi-query の CSV と図は、計算機で `./script/sbatch_reanalyze.sh` を回したときに作られる
+（`simulation_results.csv` が手元に無いため）。`plot_figures.sh` は検知結果CSVがある
+モードだけ描き、無いモードは飛ばす。
 | `plots/position_plots/` | ノード配置図 12枚（Seed 1つ） |
 
 ### 検知結果 CSV の列
@@ -300,6 +320,9 @@ script/
   analyze_csv.py                PER・3手法の統計量・AUC・検知結果 CSV
   plot_detection_lines.py       折れ線グラフ。own/other の読み替え規則の定義元
   plot_score_histograms.py      干渉あり/なしのスコア分布 (山) のヒストグラム
+  bootstrap_auc.py              AUC のブートストラップ 95% 信頼区間 (save から)
+  create_heatmap.py             AUC ヒートマップ (save から)
+  plot_roc.py                   ROC 曲線 (save から)
   pos.py                        ノード配置図 (Seed 1つ)
   plot_figures.sh               図だけ作り直す (解析は走らせない)
   run_analysis.sh               解析から作図まで。下の2つから呼ばれる
@@ -308,9 +331,11 @@ script/
 template/                       Jinja2 テンプレート
 docs/README.md                  このファイル
 docs/auc.md                     AUC の詳細
+docs/save_features.md           save から取り込んだ機能の設計
+docs/bootstrap.md               AUC のブートストラップ信頼区間
 ```
 
-`analyze_csv.py` は CSV を作るだけで、図は出さない。図は `plot_detection_lines.py` の担当。
+`analyze_csv.py` は CSV を作るだけで、図は出さない。図は `plot_figures.sh` が呼ぶ各スクリプトの担当。
 
 ## 8. ここで意図的にやっていないこと
 
@@ -318,9 +343,6 @@ docs/auc.md                     AUC の詳細
   最適化した値なので楽観側に偏る。それ以上に、3手法のスコアは分散 (proposed/dper) と
   dBm (rssi) で単位も値域も違い、**共通の閾値グリッドが引けない**。AUC は順位しか
   見ないので単調変換に不変で、この比較が成立する。`save` に実装がある
-- **ヒートマップ**（負荷 5×5 の格子）と **ROC 曲線**。手法3つを重ねられるのが
-  折れ線だけだから。どちらも `save` に実装がある
-- **sequential モードの解析**。§2 のとおり
 - **変動係数 CV / 正規化分散 nvar による判定**。`cv` ブランチにある
 - **PER のクリップの修正**。§3 のとおり把握しているが未修正。3手法に等しく効くので
   手法間の比較には影響しない

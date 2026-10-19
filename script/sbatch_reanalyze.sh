@@ -46,40 +46,46 @@ fi
 
 # --- 結果の検証 ---------------------------------------------------------
 # ジョブが成功で終わっても、出力が期待どおりとは限らない。中身を確かめる。
-# 行数は 6帯域ペア x 25負荷 x 2PAN x 3手法 = 900。
+# 行数は 6帯域ペア x 25負荷 x 2PAN x 3手法 = 900 (モードごと)。
 # (手法を増減したらここも直すこと。手法の定義元は analyze_csv.py の
 #  DETECTION_METHODS で、3 はそこから来ている)
 EXPECTED_ROWS=900
 EXPECTED_METHODS=3
 STATUS=0
-CSV="$CMD_DIR/plots/interference_detection_results_simultaneous.csv"
-if [ ! -f "$CSV" ]; then
-    echo "エラー: $CSV がありません" >&2
-    STATUS=1
-else
+# 両モードの検知結果CSVを確かめる (simultaneous = single-query / sequential = multi-query)
+for CSV in "$CMD_DIR/plots/interference_detection_results_simultaneous.csv" \
+           "$CMD_DIR/plots/interference_detection_results.csv"; do
+    NAME=$(basename "$CSV")
+    if [ ! -f "$CSV" ]; then
+        echo "エラー: $NAME がありません" >&2
+        STATUS=1
+        continue
+    fi
     ROWS=$(($(wc -l < "$CSV") - 1))
+    COLS_OK=1
     for COL in method auc; do
         if ! head -1 "$CSV" | tr ',' '\n' | grep -qx "$COL"; then
-            echo "エラー: $COL 列がありません (古い analyze_csv.py が走った可能性)" >&2
+            echo "エラー: $NAME に $COL 列がありません (古い analyze_csv.py が走った可能性)" >&2
             STATUS=1
+            COLS_OK=0
         fi
     done
     if [ "$ROWS" -ne "$EXPECTED_ROWS" ]; then
-        echo "エラー: 行数が $ROWS です (期待 $EXPECTED_ROWS)" >&2
+        echo "エラー: $NAME の行数が $ROWS です (期待 $EXPECTED_ROWS)" >&2
         STATUS=1
     fi
     # 列があっても手法が1つしか入っていなければ比較にならない。実際に数える。
-    if [ "$STATUS" -eq 0 ]; then
+    if [ "$COLS_OK" -eq 1 ]; then
         METHOD_COL=$(head -1 "$CSV" | tr ',' '\n' | grep -nx "method" | cut -d: -f1)
         NUM_METHODS=$(tail -n +2 "$CSV" | cut -d, -f"$METHOD_COL" | sort -u | wc -l | tr -d ' ')
         if [ "$NUM_METHODS" -ne "$EXPECTED_METHODS" ]; then
-            echo "エラー: 手法が $NUM_METHODS 種類です (期待 $EXPECTED_METHODS)" >&2
+            echo "エラー: $NAME の手法が $NUM_METHODS 種類です (期待 $EXPECTED_METHODS)" >&2
             STATUS=1
         else
-            echo "  $ROWS 行、$NUM_METHODS 手法: $(tail -n +2 "$CSV" | cut -d, -f"$METHOD_COL" | sort -u | tr '\n' ' ')"
+            echo "  $NAME: $ROWS 行、$NUM_METHODS 手法"
         fi
     fi
-fi
+done
 
 if [ "$STATUS" -ne 0 ]; then
     echo "検証に失敗しました。" >&2
@@ -87,6 +93,6 @@ if [ "$STATUS" -ne 0 ]; then
 fi
 
 echo "========================================"
-echo "再解析が完了しました"
-echo "  plots/detection_lines/"
+echo "再解析が完了しました (single-query / multi-query の両方)"
+echo "  図の一覧はジョブのログ (plot_figures.sh の出力) を参照"
 echo "========================================"

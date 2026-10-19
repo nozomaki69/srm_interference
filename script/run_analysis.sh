@@ -26,11 +26,15 @@ fi
 
 cd "$CMD_DIR" || exit 1
 
-echo "--- 解析 (3手法) ---"
-if ! python3 "$SCRIPT_DIR/analyze_csv.py"; then
-    echo "エラー: analyze_csv.py に失敗しました" >&2
-    exit 1
-fi
+# 両方の測定モードを解析する (single-query = simultaneous / multi-query = sequential)。
+# 同じ simulation_results.csv の別の列を読むだけ (docs/save_features.md)。
+for MODE in simultaneous sequential; do
+    echo "--- 解析 (3手法, $MODE) ---"
+    if ! python3 "$SCRIPT_DIR/analyze_csv.py" --mode "$MODE"; then
+        echo "エラー: analyze_csv.py --mode $MODE に失敗しました" >&2
+        exit 1
+    fi
+done
 
 # 作図は plot_figures.sh が唯一の定義元。手順を2箇所に書くと片方だけ直して
 # 静かにずれる (図の設定だけ変えたいときはそちらを単体で回せる)。
@@ -41,7 +45,7 @@ fi
 
 echo "========================================"
 echo "解析と作図が完了しました"
-echo "  plots/interference_detection_results_simultaneous.csv   検知結果"
-echo "  plots/detection_scores_simultaneous.csv                 Seed ごとの指標"
+echo "  plots/interference_detection_results{_simultaneous,}.csv   検知結果"
+echo "  plots/detection_scores{_simultaneous,}.csv                 Seed ごとの指標"
 echo "  (図の一覧は上の plot_figures.sh の出力を参照)"
 echo "========================================"

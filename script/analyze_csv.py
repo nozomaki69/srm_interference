@@ -36,6 +36,7 @@ CHANNEL_FREQ_MHZ = {0: 920, 1: 920, 2: 920, 3: 921, 4: 921, 5: 921}
 # OFFERED_LOAD_PERCENTS を生成側から取っている)。
 sys.path.insert(0, SCRIPT_DIR)
 from interference_2pan_config import CHANNELS as _CHANNELS  # noqa: E402
+from interference_2pan_config import OFFERED_LOAD_PERCENTS as _LOADS  # noqa: E402
 
 RX_SENSITIVITY_DBM = {c["id"]: c["rx_sensitivity_dbm"] for c in _CHANNELS}
 
@@ -79,15 +80,28 @@ RSSI_BIN_ANCHOR_OFFSET_DBM = 3.0
 #   sequential   : 各メトリックを自分の 200s 窓で順に測る。標準に忠実。接尾辞なし
 #   simultaneous : 全メトリックを W0 の 200s で同時に測る。接尾辞 "_simultaneous"
 #
-# ★このブランチ (icc) は simultaneous だけを読む★
-#
-# 見たいのが「時間分割のコスト」ではなく「干渉判定の手法間の差」だから。
-# 測定モードと手法を同時に振ると、折れ線の線種が2つの軸に取られて図が読めなくなる。
-# メトリックを同時測定した場合 = 測定側の劣化が無い状態に条件を固定して、
-# 手法だけを比べる。sequential 側の列は create_csv.py が出し続けるが読まない
-# (窓の定義に手を入れるとシミュレーションの意味自体が変わるので触らない)。
+# 既定は simultaneous (このブランチの主眼は手法間の比較なので、測定側の劣化が
+# 無い状態を基準にする)。save ブランチから取り込んだ multi-query の比較のため、
+# --mode sequential でもう一方も解析できる (docs/save_features.md)。
+# 出力ファイル名の接尾辞も COLUMN_SUFFIX で切り替わる (sequential は接尾辞なし)。
+# 図に出す呼び名は simultaneous = single-query、sequential = multi-query。
 MEASUREMENT_MODE = "simultaneous"
 COLUMN_SUFFIX = "_simultaneous"
+MEASUREMENT_MODES = ("simultaneous", "sequential")
+
+
+def set_measurement_mode(mode):
+    """"sequential" か "simultaneous" を指定して、参照する列と出力名を切り替える。"""
+    global MEASUREMENT_MODE, COLUMN_SUFFIX
+    if mode not in MEASUREMENT_MODES:
+        raise ValueError(f"unknown measurement mode: {mode}")
+    MEASUREMENT_MODE = mode
+    COLUMN_SUFFIX = mode_suffix(mode)
+
+
+def mode_suffix(mode):
+    """mode -> 列名・ファイル名の接尾辞。"""
+    return "" if mode == "sequential" else "_simultaneous"
 
 
 def bin_anchor_dbm(channel):
@@ -306,6 +320,11 @@ def load_and_aggregate(csv_file):
     だけで、このブランチはヒートマップと折れ線しか出さないため。
     """
     data = defaultdict(make_empty_condition_data)
+    # このブランチの負荷グリッドに無い行は読み飛ばす。icc_load200 (20-200%) の
+    # simulation_results.csv は icc の全条件を含むので、それをそのまま入力にできる
+    # (docs/save_features.md の「負荷のふるい分け」)。
+    allowed_loads = set(_LOADS)
+    n_skipped = 0
 
     with open(csv_file, mode="r", encoding="utf-8") as f:
         reader = csv.reader(f)
@@ -333,6 +352,9 @@ def load_and_aggregate(csv_file):
             distance = r[idx["Distance"]]
             pan1_offload = r[idx["PAN1_Offload"]]
             pan2_offload = r[idx["PAN2_Offload"]]
+            if pan1_offload not in allowed_loads or pan2_offload not in allowed_loads:
+                n_skipped += 1
+                continue
 
             condition_key = (pan1_ch, pan2_ch, distance, pan1_offload, pan2_offload)
 
@@ -369,6 +391,10 @@ def load_and_aggregate(csv_file):
 
             # この観測(1 Seed 分)のRSSIから、起点を超えた端末数を数える
             _update_anchor_stats("PAN2", pan2_ch, entry["pan2_rssi"][-NUM_DEVICE:])
+
+    if n_skipped:
+        print(f"--- 負荷グリッド {sorted(allowed_loads)} に無い行を {n_skipped} 件"
+              " 読み飛ばしました ---")
 
     # 受信数ベースのPERは重複受信で負になり得る。どれだけ起きたかを必ず出す。
     # 割合が大きいなら、この定義は「ACK損失が損失として現れない」という
@@ -727,7 +753,12 @@ def main():
     parser = argparse.ArgumentParser(
         description="干渉判定3手法の解析。検知結果CSVを出すだけで、図は作らない "
                     "(図は plot_detection_lines.py の担当)。")
-    parser.parse_args()   # 引数は取らない。--help と誤入力の検出のためだけに呼ぶ
+    parser.add_argument(
+        "--mode", choices=MEASUREMENT_MODES, default="simultaneous",
+        help="simultaneous: 全メトリックを W0 で同時に測る (single-query。既定) / "
+             "sequential: メトリックごとに窓を分けて順に測る (multi-query)")
+    args = parser.parse_args()
+    set_measurement_mode(args.mode)
     print(f"--- 測定モード: {MEASUREMENT_MODE} (列の接尾辞 '{COLUMN_SUFFIX}') ---")
     print(f"--- 手法: {', '.join(DETECTION_METHODS)} ---")
 

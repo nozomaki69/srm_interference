@@ -16,9 +16,13 @@ docs/README.md を参照。
   色  : 相手の帯域 (50 / 100 / 200 kbps)
   線種: 判定手法 (proposed 実線 / dper 破線 / rssi 点線)
 
-測定モードは simultaneous (メトリックの同時測定) 固定。理由は analyze_csv.py の
-「測定モード」節を参照 ―― 測定モードと手法を同時に振ると線種が2つの軸に
-取られて図が読めなくなる。
+測定モードは --mode で選ぶ (既定 simultaneous = single-query)。測定モードと手法を
+1枚に同時に振ると線種が2つの軸に取られて図が読めなくなるので、3手法の図は
+モードごとに出力先を分ける。モードどうしの比較は --mode compare で、手法ごとに
+1枚ずつ描く (色 = 相手帯域、線種 = モード。save ブランチの compare 図と同じ形)。
+
+AUC のブートストラップ 95% 信頼区間 (bootstrap_auc.py の出力) があれば、各点に
+線と同じ色の髭を付ける。docs/save_features.md 参照。
 """
 
 import os
@@ -44,6 +48,26 @@ from interference_2pan_config import OFFERED_LOAD_PERCENTS  # noqa: E402
 
 PLOT_BASE_DIR = A.PLOT_BASE_DIR
 DEFAULT_OUT_DIR = os.path.join(PLOT_BASE_DIR, "detection_lines")
+# モードごとの既定の出力先。simultaneous は従来と同じ場所。
+OUT_DIR_BY_MODE = {
+    "simultaneous": DEFAULT_OUT_DIR,
+    "sequential": os.path.join(PLOT_BASE_DIR, "detection_lines_sequential"),
+    "compare": os.path.join(PLOT_BASE_DIR, "detection_lines_mode_compare"),
+}
+
+MODES = A.MEASUREMENT_MODES                         # ("simultaneous", "sequential")
+# 凡例に出す名前 (論文での呼び方。save ブランチと同じ)
+MODE_LABEL = {"simultaneous": "single-query", "sequential": "multi-query"}
+# モード比較図での線種。single-query (参照) を実線にする
+MODE_LINESTYLE = {"simultaneous": "-", "sequential": ":"}
+
+# 信頼区間の髭 (エラーバー) の体裁
+CI_CAPSIZE = 4        # 髭の端の横棒の長さ [pt]
+CI_LINEWIDTH = 1.2
+# 髭を描くときは、同じ負荷の点が真上に重ならないよう系列ごとに横へずらす
+# (dodge)。系列間の間隔 [負荷 %]。系列は最大9本 (3手法 x 3帯域) なので、
+# 両端でも ±4.8% に収まり、負荷の刻み (20%) を跨がない。
+CI_DODGE = 1.2
 
 # 縦軸に使う列。このブランチは AUC だけを見る (F1 は出さない)。
 METRIC = "auc"
@@ -104,10 +128,67 @@ def style_axes(ax):
                    length=TICK_LENGTH, width=TICK_WIDTH)
 
 
-def input_csv_path():
-    """検知結果 CSV。測定モードは simultaneous 固定なので接尾辞も固定。"""
+def input_csv_path(mode="simultaneous"):
+    """mode -> 検知結果 CSV。"""
     return os.path.join(
-        PLOT_BASE_DIR, f"interference_detection_results{A.COLUMN_SUFFIX}.csv")
+        PLOT_BASE_DIR, f"interference_detection_results{A.mode_suffix(mode)}.csv")
+
+
+def ci_csv_path(mode="simultaneous"):
+    """mode -> AUC のブートストラップ信頼区間 CSV (bootstrap_auc.py が作る)。"""
+    return os.path.join(PLOT_BASE_DIR, f"auc_bootstrap{A.mode_suffix(mode)}.csv")
+
+
+def load_ci(csv_file):
+    """ブートストラップ CSV を読み、{method: {(own_bw, other_bw): {own_load: (lo, hi)}}}。
+
+    読み替えは load_series() と同じく own_other() に任せる。
+    """
+    ci = {m: defaultdict(dict) for m in METHODS}
+    with open(csv_file, "r", encoding="utf-8", newline="") as f:
+        for r in csv.DictReader(f):
+            if r["method"] not in ci:
+                continue
+            own = own_other(r)
+            if own is None:
+                continue
+            ci[r["method"]][(own["own_bw"], own["other_bw"])][own["own_load"]] = (
+                float(r["auc_ci_low"]), float(r["auc_ci_high"]))
+    return ci
+
+
+def maybe_load_ci(mode):
+    """そのモードの信頼区間 CSV があれば読む。無ければ None (髭を描かない)。"""
+    path = ci_csv_path(mode)
+    if not os.path.isfile(path):
+        print(f"    ({os.path.basename(path)} が無いので髭は描きません。"
+              "先に script/bootstrap_auc.py を実行してください)")
+        return None
+    print(f"--- 95% 信頼区間: {os.path.basename(path)} ---")
+    return load_ci(path)
+
+
+def _draw_series(ax, xs, ys, dx, color, linestyle, marker, label, band):
+    """1本の線と、あれば髭。band: {load: (lo, hi)} か None。"""
+    ax.plot([x + dx for x in xs], ys, color=color, linestyle=linestyle,
+            marker=marker, markersize=6, linewidth=2.0, label=label)
+    bx = [x for x in xs if band and x in band]
+    if not bx:
+        return
+    by = [ys[xs.index(x)] for x in bx]
+    # errorbar の yerr は点からの上下の距離で渡す
+    yerr = [[max(y - band[x][0], 0.0) for x, y in zip(bx, by)],
+            [max(band[x][1] - y, 0.0) for x, y in zip(bx, by)]]
+    ax.errorbar([x + dx for x in bx], by, yerr=yerr, fmt="none", ecolor=color,
+                elinewidth=CI_LINEWIDTH, capsize=CI_CAPSIZE, capthick=CI_LINEWIDTH)
+
+
+def _finish_axes(ax, ylim):
+    loads = sorted(OFFERED_LOAD_PERCENTS)
+    ax.set_xticks(loads)
+    ax.set_xlim(min(loads) - 8, max(loads) + 12)
+    ax.set_ylim(*ylim)
+    style_axes(ax)
 
 
 def own_other(row):
@@ -202,32 +283,29 @@ def choose_ylim(data):
     return (math.floor(lo * 10.0) / 10.0, 1.0)
 
 
-def _draw_panel(ax, data, own_bw, methods, ylim):
+def _draw_panel(ax, data, own_bw, methods, ylim, ci=None):
     """1つの軸に、ある自帯域についての線を引く。
 
     data: {method: {(own_bw, other_bw): {own_load: auc}}}
     methods: 描く手法のタプル。1つなら単独図、3つなら比較図。
+    ci: load_ci() の戻り値か None。あれば髭を付け、系列ごとに横へずらす。
     """
     loads = sorted(OFFERED_LOAD_PERCENTS)
     # 手法を外側で回すので、凡例は「実線 50/100/200 -> 破線 50/100/200 -> ...」の
     # 順に並ぶ。帯域を外側にすると 50実線/50破線/50点線/100実線/... と交互になって
     # 読みにくい。
-    for method in methods:
-        for other_bw in BANDWIDTHS:
-            pts = data[method].get((own_bw, other_bw))
-            if not pts:
-                continue
-            xs = [l for l in loads if l in pts]
-            ys = [pts[l] for l in xs]
-            ax.plot(xs, ys,
-                    color=COLOR[other_bw], linestyle=LINESTYLE[method],
-                    marker=MARKER[other_bw], markersize=6, linewidth=2.0,
-                    label=f"{other_bw} kbps")
-
-    ax.set_xticks(loads)
-    ax.set_xlim(min(loads) - 5, max(loads) + 12)
-    ax.set_ylim(*ylim)
-    style_axes(ax)
+    series = [(m, bw) for m in methods for bw in BANDWIDTHS]
+    for k, (method, other_bw) in enumerate(series):
+        pts = data[method].get((own_bw, other_bw))
+        if not pts:
+            continue
+        xs = [l for l in loads if l in pts]
+        ys = [pts[l] for l in xs]
+        dx = (k - (len(series) - 1) / 2.0) * CI_DODGE if ci else 0.0
+        band = ci[method].get((own_bw, other_bw)) if ci else None
+        _draw_series(ax, xs, ys, dx, COLOR[other_bw], LINESTYLE[method],
+                     MARKER[other_bw], f"{other_bw} kbps", band)
+    _finish_axes(ax, ylim)
 
 
 def legend_handles(methods):
@@ -250,10 +328,10 @@ def legend_handles(methods):
     return handles
 
 
-def plot_single(data, own_bw, methods, out_dir, tag, fmt, ylim):
+def plot_single(data, own_bw, methods, out_dir, tag, fmt, ylim, ci=None):
     """自帯域1つ分の図を1枚描く。"""
     fig, ax = plt.subplots(figsize=(7.2, 5.8))
-    _draw_panel(ax, data, own_bw, methods, ylim)
+    _draw_panel(ax, data, own_bw, methods, ylim, ci)
     handles = legend_handles(methods)
     ax.legend(handles=handles, loc="lower left", frameon=True,
               fontsize=LEGEND_FONTSIZE)
@@ -263,11 +341,11 @@ def plot_single(data, own_bw, methods, out_dir, tag, fmt, ylim):
     return path
 
 
-def plot_3panel(data, methods, out_dir, tag, fmt, ylim):
+def plot_3panel(data, methods, out_dir, tag, fmt, ylim, ci=None):
     """自帯域3つを横並びのサブプロットにした1枚。"""
     fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.8), sharey=True)
     for ax, own_bw in zip(axes, BANDWIDTHS):
-        _draw_panel(ax, data, own_bw, methods, ylim)
+        _draw_panel(ax, data, own_bw, methods, ylim, ci)
     handles = legend_handles(methods)
     fig.legend(handles=handles, loc="center left", bbox_to_anchor=(1.0, 0.5),
                frameon=True, fontsize=LEGEND_FONTSIZE)
@@ -278,41 +356,94 @@ def plot_3panel(data, methods, out_dir, tag, fmt, ylim):
     return path
 
 
-def dump_values(data, out_dir):
-    """描画に使った値を CSV に出す。数値確認用と relief rule への対応を兼ねる。"""
+def dump_values(data, out_dir, ci=None):
+    """描画に使った値を CSV に出す。数値確認用と relief rule への対応を兼ねる。
+
+    髭を描いたときは、信頼区間の下端・上端の列も足す。
+    """
     path = os.path.join(out_dir, f"{METRIC}_plotted_values.csv")
     with open(path, "w", encoding="utf-8", newline="") as f:
         w = csv.writer(f)
         w.writerow(["method", "own_bw_kbps", "other_bw_kbps",
-                    "other_load_percent", "own_load_percent", METRIC])
+                    "other_load_percent", "own_load_percent", METRIC]
+                   + ([f"{METRIC}_ci_low", f"{METRIC}_ci_high"] if ci else []))
         for method in METHODS:
             for own_bw in BANDWIDTHS:
                 for other_bw in BANDWIDTHS:
                     pts = data[method].get((own_bw, other_bw), {})
                     for load in sorted(pts):
+                        extra = []
+                        if ci:
+                            lo, hi = ci[method].get((own_bw, other_bw), {}).get(
+                                load, (float("nan"), float("nan")))
+                            extra = [f"{lo:.6g}", f"{hi:.6g}"]
                         w.writerow([method, own_bw, other_bw,
                                     OTHER_LOAD_PERCENT, load,
-                                    f"{pts[load]:.6g}"])
+                                    f"{pts[load]:.6g}"] + extra)
     return path
 
 
-def main():
-    p = argparse.ArgumentParser(
-        description="相手PAN負荷100%の断面で、干渉判定3手法の AUC を折れ線にする")
-    p.add_argument("--csv", default=None,
-                   help=f"検知結果 CSV (既定: {input_csv_path()})")
-    p.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
-    p.add_argument("--format", default="pdf", choices=("pdf", "png"),
-                   help="出力形式 (既定: pdf)。目視確認には png")
-    args = p.parse_args()
+# ------------------------------------------------------------
+# モード比較 (single-query vs multi-query)。手法ごとに1枚
+# ------------------------------------------------------------
+def _draw_mode_panel(ax, data_by_mode, own_bw, method, ylim, ci_by_mode):
+    """1手法・1自帯域。色 = 相手帯域、線種 = モード (single 実線 / multi 点線)。"""
+    loads = sorted(OFFERED_LOAD_PERCENTS)
+    with_ci = any(ci_by_mode.values())
+    series = [(mode, bw) for mode in MODES for bw in BANDWIDTHS]
+    for k, (mode, other_bw) in enumerate(series):
+        pts = data_by_mode[mode][method].get((own_bw, other_bw))
+        if not pts:
+            continue
+        xs = [l for l in loads if l in pts]
+        ys = [pts[l] for l in xs]
+        dx = (k - (len(series) - 1) / 2.0) * CI_DODGE if with_ci else 0.0
+        ci = ci_by_mode.get(mode)
+        band = ci[method].get((own_bw, other_bw)) if ci else None
+        _draw_series(ax, xs, ys, dx, COLOR[other_bw], MODE_LINESTYLE[mode],
+                     MARKER[other_bw], f"{other_bw} kbps ({MODE_LABEL[mode]})", band)
+    _finish_axes(ax, ylim)
 
-    path = args.csv or input_csv_path()
+
+def plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim):
+    """手法ごとに、自帯域3枚 + 3パネル1枚。計 3手法 x 4 = 12枚。"""
+    written = []
+    for method in METHODS:
+        for own_bw in BANDWIDTHS:
+            fig, ax = plt.subplots(figsize=(7.2, 5.8))
+            _draw_mode_panel(ax, data_by_mode, own_bw, method, ylim, ci_by_mode)
+            ax.legend(loc="lower left", frameon=True, fontsize=LEGEND_FONTSIZE - 4)
+            path = os.path.join(out_dir, f"{METRIC}_own{own_bw}_{method}.{fmt}")
+            fig.savefig(path, bbox_inches="tight")
+            plt.close(fig)
+            written.append(path)
+
+        fig, axes = plt.subplots(1, 3, figsize=(19.0, 5.8), sharey=True)
+        for ax, own_bw in zip(axes, BANDWIDTHS):
+            _draw_mode_panel(ax, data_by_mode, own_bw, method, ylim, ci_by_mode)
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.5),
+                   frameon=True, fontsize=LEGEND_FONTSIZE)
+        fig.tight_layout()
+        path = os.path.join(out_dir, f"{METRIC}_3panel_{method}.{fmt}")
+        fig.savefig(path, bbox_inches="tight")
+        plt.close(fig)
+        written.append(path)
+    return written
+
+
+def load_mode(mode, csv_path=None):
+    """1モード分の検知結果を読み、系列数を確かめて返す。"""
+    path = csv_path or input_csv_path(mode)
     if not os.path.isfile(path):
-        raise FileNotFoundError(f"CSV file not found: {path}")
+        raise FileNotFoundError(
+            f"CSV file not found: {path}\n"
+            f"  analyze_csv.py --mode {mode} を実行してください "
+            f"(./script/sbatch_reanalyze.sh でも作られます)。")
     mtime = datetime.datetime.fromtimestamp(
         os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M")
     # 解析コードより CSV が古いことがあるので更新時刻を必ず出す
-    print(f"--- {path} (更新 {mtime}) ---")
+    print(f"--- {mode}: {path} (更新 {mtime}) ---")
     data = load_series(path)
 
     # 期待する系列数の確認。欠けたまま静かに描くと図が嘘になる。
@@ -326,24 +457,53 @@ def main():
             missing = [k for k in ((o, t) for o in BANDWIDTHS for t in BANDWIDTHS)
                        if k not in data[method]]
             print(f"    Warning: 欠けている (own, other) = {missing}")
+    return data
 
-    ylim = choose_ylim(data)
-    print(f"--- y軸: {ylim[0]:.2f} - {ylim[1]:.2f} "
-          f"(全図共通。0.5 を下回る値があるときだけ下げる) ---")
 
-    os.makedirs(args.out_dir, exist_ok=True)
+def main():
+    p = argparse.ArgumentParser(
+        description="相手PAN負荷100%の断面で、干渉判定3手法の AUC を折れ線にする")
+    p.add_argument("--mode", choices=MODES + ("compare",), default="simultaneous",
+                   help="simultaneous: single-query の3手法 (既定) / "
+                        "sequential: multi-query の3手法 / "
+                        "compare: 手法ごとに single-query と multi-query を重ねる")
+    p.add_argument("--csv", default=None,
+                   help="検知結果 CSV (--mode が simultaneous / sequential のとき。"
+                        "既定はモードに応じた plots/ 以下の CSV)")
+    p.add_argument("--out-dir", default=None,
+                   help="出力先 (既定はモードごとに plots/detection_lines* )")
+    p.add_argument("--format", default="pdf", choices=("pdf", "png"),
+                   help="出力形式 (既定: pdf)。目視確認には png")
+    args = p.parse_args()
+
+    out_dir = args.out_dir or OUT_DIR_BY_MODE[args.mode]
+    os.makedirs(out_dir, exist_ok=True)
     fmt = args.format
-    written = []
-    # 手法ごとの単独図と、3手法を重ねた比較図
-    tags = [(m, (m,)) for m in METHODS] + [("compare", tuple(METHODS))]
-    for tag, methods in tags:
-        for own_bw in BANDWIDTHS:
-            written.append(plot_single(data, own_bw, methods,
-                                       args.out_dir, tag, fmt, ylim))
-        written.append(plot_3panel(data, methods, args.out_dir, tag, fmt, ylim))
-    written.append(dump_values(data, args.out_dir))
 
-    print(f"\n--- {args.out_dir} に {len(written)} ファイル出力 ---")
+    if args.mode == "compare":
+        data_by_mode = {m: load_mode(m) for m in MODES}
+        ci_by_mode = {m: maybe_load_ci(m) for m in MODES}
+        ylim = choose_ylim({f"{m}/{k}": v for m in MODES
+                            for k, v in data_by_mode[m].items()})
+        print(f"--- y軸: {ylim[0]:.2f} - {ylim[1]:.2f} ---")
+        written = plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim)
+    else:
+        data = load_mode(args.mode, args.csv)
+        ci = maybe_load_ci(args.mode)
+        ylim = choose_ylim(data)
+        print(f"--- y軸: {ylim[0]:.2f} - {ylim[1]:.2f} "
+              f"(全図共通。0.5 を下回る値があるときだけ下げる) ---")
+        written = []
+        # 手法ごとの単独図と、3手法を重ねた比較図
+        tags = [(m, (m,)) for m in METHODS] + [("compare", tuple(METHODS))]
+        for tag, methods in tags:
+            for own_bw in BANDWIDTHS:
+                written.append(plot_single(data, own_bw, methods,
+                                           out_dir, tag, fmt, ylim, ci))
+            written.append(plot_3panel(data, methods, out_dir, tag, fmt, ylim, ci))
+        written.append(dump_values(data, out_dir, ci))
+
+    print(f"\n--- {out_dir} に {len(written)} ファイル出力 ---")
     for path in written:
         print(f"    {os.path.basename(path)}")
 

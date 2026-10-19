@@ -44,6 +44,11 @@ import plot_detection_lines as L  # noqa: E402
 from interference_2pan_config import OFFERED_LOAD_PERCENTS  # noqa: E402
 
 DEFAULT_OUT_DIR = os.path.join(A.PLOT_BASE_DIR, "score_histograms")
+# モードごとの既定の出力先。simultaneous は従来と同じ場所。
+OUT_DIR_BY_MODE = {
+    "simultaneous": DEFAULT_OUT_DIR,
+    "sequential": os.path.join(A.PLOT_BASE_DIR, "score_histograms_sequential"),
+}
 
 METHODS = A.DETECTION_METHODS
 BANDWIDTHS = L.BANDWIDTHS
@@ -67,8 +72,8 @@ X_LABEL = {
 NUM_BINS = 40
 
 
-def scores_csv_path():
-    return os.path.join(A.PLOT_BASE_DIR, f"detection_scores{A.COLUMN_SUFFIX}.csv")
+def scores_csv_path(mode="simultaneous"):
+    return os.path.join(A.PLOT_BASE_DIR, f"detection_scores{A.mode_suffix(mode)}.csv")
 
 
 def load_scores(csv_file):
@@ -203,13 +208,17 @@ def main():
     p = argparse.ArgumentParser(
         description="相手PAN負荷100%の断面で、干渉あり(赤)/なし(青)のスコア分布を"
                     "自PAN負荷ごとにヒストグラムにする")
+    p.add_argument("--mode", choices=A.MEASUREMENT_MODES, default="simultaneous",
+                   help="simultaneous: single-query (既定) / sequential: multi-query")
     p.add_argument("--csv", default=None,
-                   help=f"Seed 別スコア CSV (既定: {scores_csv_path()})")
-    p.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
+                   help="Seed 別スコア CSV (既定はモードに応じた plots/detection_scores*.csv)")
+    p.add_argument("--out-dir", default=None,
+                   help="出力先 (既定はモードごとに plots/score_histograms*)")
     p.add_argument("--format", default="pdf", choices=("pdf", "png"))
     args = p.parse_args()
+    args.out_dir = args.out_dir or OUT_DIR_BY_MODE[args.mode]
 
-    path = args.csv or scores_csv_path()
+    path = args.csv or scores_csv_path(args.mode)
     if not os.path.isfile(path):
         raise FileNotFoundError(f"CSV file not found: {path}")
     print(f"--- {path} ---")
@@ -217,7 +226,7 @@ def main():
     loads = sorted(OFFERED_LOAD_PERCENTS)
 
     # AUC を折れ線の描画値と突き合わせる (同じスコアから同じ定義で出しているはず)
-    ref_path = os.path.join(L.DEFAULT_OUT_DIR, f"{L.METRIC}_plotted_values.csv")
+    ref_path = os.path.join(L.OUT_DIR_BY_MODE[args.mode], f"{L.METRIC}_plotted_values.csv")
     ref_auc = load_reference_auc(ref_path)
 
     os.makedirs(args.out_dir, exist_ok=True)
