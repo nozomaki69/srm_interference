@@ -62,10 +62,9 @@ MODE_LABEL = {"simultaneous": "single-query", "sequential": "multi-query"}
 # モード比較図での線種。single-query (参照) を実線にする
 MODE_LINESTYLE = {"simultaneous": "-", "sequential": ":"}
 # モード比較図での色 (= 相手帯域)。3手法の図の青・橙・緑 (グリッド図では手法の色)
-# と同じだと紛らわしいので、それらと違う 赤 / 紫 / 濃い紺 にする。
-# 赤 -> 紫 -> 紺 と色相が一方向に進むので、50 < 100 < 200 kbps の順序とも合う。
-# (紫の濃淡、金 / マゼンタ / 黒 は見分けにくい・合わないとして不採用)
-MODE_BW_COLOR = {50: "#d62839", 100: "#7b2cbf", 200: "#1d2d50"}   # 赤 / 紫 / 濃い紺
+# と同じだと紛らわしいので、それらと違う 赤 / 紫 / 山吹 にする。
+# (紫の濃淡、金 / マゼンタ / 黒、黒に近い濃い紺 は不採用)
+MODE_BW_COLOR = {50: "#d62839", 100: "#7b2cbf", 200: "#e09f00"}   # 赤 / 紫 / 山吹
 # モード比較図だけ横幅を詰めて縦長にする (横軸は負荷の5点だけなので幅は要らない)
 MODE_FIGSIZE_SINGLE = (5.4, 6.6)
 MODE_FIGSIZE_3PANEL = (14.0, 6.6)
@@ -437,6 +436,8 @@ def plot_3panel(data, methods, out_dir, tag, fmt, ylim, ci=None):
 # 色は帯域用と同じパレットの3スロット。線種・マーカーも手法ごとに変えて冗長にする。
 METHOD_COLOR = {"proposed": "#2a78d6", "dper": "#eb6834", "rssi": "#1baf7a"}
 METHOD_MARKER = {"proposed": "o", "dper": "s", "rssi": "^"}
+# 1パネル3本なので線種で区別する必要は無く、全部実線にする (手法は色とマーカーで読む)
+GRID_LINESTYLE = "-"
 
 
 def plot_grid(data, out_dir, fmt, ylim, ci=None):
@@ -457,7 +458,7 @@ def plot_grid(data, out_dir, fmt, ylim, ci=None):
                 xs = [l for l in sorted(OFFERED_LOAD_PERCENTS) if l in pts]
                 ys = [pts[l] for l in xs]
                 band = ci[method].get((own_bw, other_bw)) if ci else None
-                _draw_series(ax, xs, ys, 0.0, METHOD_COLOR[method], LINESTYLE[method],
+                _draw_series(ax, xs, ys, 0.0, METHOD_COLOR[method], GRID_LINESTYLE,
                              METHOD_MARKER[method], METHOD_LABEL[method], band)
             _finish_axes(ax, ylim)
             # sharex/sharey でも目盛りの数字は外周のパネルにだけ出す
@@ -466,7 +467,7 @@ def plot_grid(data, out_dir, fmt, ylim, ci=None):
             # 方針どおり、図のキャプションで説明する
     fig.tight_layout()
     handles = [Line2D([], [], label=METHOD_LABEL[m],
-                      **line_kwargs(METHOD_COLOR[m], LINESTYLE[m], METHOD_MARKER[m]))
+                      **line_kwargs(METHOD_COLOR[m], GRID_LINESTYLE, METHOD_MARKER[m]))
                for m in METHODS]
     fig.legend(handles=handles, ncol=len(METHODS), loc="lower center",
                bbox_to_anchor=(0.5, 0.99), frameon=True, fontsize=LEGEND_FONTSIZE,
