@@ -197,14 +197,14 @@ RSSI でビン分けする。ビンの起点は**チャネル固有の固定値*
 | `plots/simulation_results.csv` | トレースの集約（gitignore。巨大） |
 | `plots/interference_detection_results_simultaneous.csv` | 検知結果。**900行** = 6帯域ペア × 25負荷 × 2PAN × 3手法 |
 | `plots/detection_scores_simultaneous.csv` | Seed ごとの干渉指標。180,000行 |
-| `plots/detection_lines/` | single-query の折れ線。(16枚 + 3×3 グリッド図) × 相手負荷5通り = 85枚と描画値の CSV（95% 信頼区間の髭つき）。名前は `auc_single_…_other<L>.pdf` |
+| `plots/detection_lines/` | single-query の折れ線。(16枚 + 3×3 グリッド図) × 相手負荷5通り = 85枚と描画値の CSV（95% 信頼区間の髭つき）。名前は `auc_single_…_otherload<L>.pdf` |
 | `plots/score_histograms/` | 干渉あり/なしのスコア分布 9枚 |
 | `plots/auc_bootstrap{_simultaneous,}.csv` | AUC のブートストラップ 95% 信頼区間。900行ずつ |
 | `plots/heatmaps_auc{_simultaneous,}/{手法}/` | AUC ヒートマップ 12枚 × 3手法 |
-| `plots/roc/{simultaneous,sequential}/` | ROC 曲線 27枚（自帯域 × 相手帯域 × 手法） |
+| `plots/roc/{simultaneous,sequential}/` | ROC 曲線 135枚（自帯域 × 相手帯域 × 手法 × 相手負荷5通り）。名前は `roc_<single\|multi>_<手法>_own<A>kbps_other<B>kbps_otherload<L>.pdf` |
 | `plots/interference_detection_results.csv` ほか接尾辞なしの CSV | multi-query（sequential）の検知結果・スコア |
 | `plots/detection_lines_sequential/`、`plots/score_histograms_sequential/` | multi-query の折れ線・スコア分布 |
-| `plots/detection_lines_mode_compare/` | single-query と multi-query の比較。手法ごとの 3×3 グリッド図 × 相手負荷5通り = 15枚（各パネル2本、single 赤 / multi 紫）。名前は `auc_modecompare_<手法>_grid_other<L>.pdf` |
+| `plots/detection_lines_mode_compare/` | single-query と multi-query の比較。手法ごとの 3×3 グリッド図 × 相手負荷5通り = 15枚（各パネル2本、single 赤 / multi 紫）。名前は `auc_modecompare_<手法>_grid_otherload<L>.pdf` |
 
 multi-query の CSV と図は、計算機で `./script/sbatch_reanalyze.sh` を回したときに作られる
 （`simulation_results.csv` が手元に無いため）。`plot_figures.sh` は検知結果CSVがある
@@ -225,7 +225,7 @@ n_interf_seeds, n_no_interf_seeds, n_degenerate_interf, n_degenerate_no_interf
 ### 折れ線グラフ
 
 **相手PAN負荷を1つに固定した断面**を、相手負荷 20 / 40 / 60 / 80 / 100% の5通りすべて描く
-（ファイル名の `other<相手負荷>`）。横軸が自PAN負荷 20–100%、
+（ファイル名の `otherload<相手負荷>`）。横軸が自PAN負荷 20–100%、
 縦軸が AUC、色が相手の帯域、**線種が判定手法**（proposed 実線 / dper 長い破線 / rssi 丸い点の列）。
 
 一番見たいのは相手負荷 100%（「相手が最大負荷のとき自分の負荷を上げると検知性能が
@@ -255,7 +255,7 @@ other_load = pan2_offload if pan == "PAN1" else pan1_offload
 中身が `proposed` / `dper` / `rssi` / `3methods` の4種、それぞれ自帯域3枚 +
 3パネル1枚で 16枚。`3methods` が3手法の重ね描き。これを相手負荷5通りぶん出す。
 
-これに加えて、**`auc_<モード>_3methods_grid_other<L>.pdf`**（行 = 自帯域、列 = 相手帯域の 3×3 パネル）を相手負荷ごとに1枚出す。
+これに加えて、**`auc_<モード>_3methods_grid_otherload<L>.pdf`**（行 = 自帯域、列 = 相手帯域の 3×3 パネル）を相手負荷ごとに1枚出す。
 1パネルの線は 3手法の 3本だけで、色が手法。`compare` 図の 9本重ねが読みにくいための
 代替（`docs/line_plot_style.md`）。
 

@@ -89,13 +89,24 @@ ALL_METHODS_TAG = "3methods"
 
 
 def fig_path(out_dir, mode_tag, content, shape, other_load, fmt):
-    """auc_<モード>_<中身>_<形>_other<相手負荷3桁>.<fmt>。命名規則は docs/line_plot_style.md。
+    """auc_<モード>_<中身>_<形>_otherload<相手負荷3桁>.<fmt>。命名規則は docs/line_plot_style.md。
 
-    相手負荷は3桁にそろえる (other020 ... other100)。そろえないと名前順で
-    other100 が other20 より前に並ぶ。
+    相手負荷は3桁にそろえる (otherload020 ... otherload100)。そろえないと名前順で
+    100 が 20 より前に並ぶ。帯域は "own100kbps" のように kbps を付けて書き
+    (bw_token())、相手負荷の "otherload" と取り違えないようにする。
     """
-    return os.path.join(
-        out_dir, f"{METRIC}_{mode_tag}_{content}_{shape}_other{other_load:03d}.{fmt}")
+    return os.path.join(out_dir, f"{METRIC}_{mode_tag}_{content}_{shape}_"
+                                 f"{otherload_token(other_load)}.{fmt}")
+
+
+def bw_token(side, bw):
+    """帯域のファイル名部品: bw_token("own", 100) -> "own100kbps"。"""
+    return f"{side}{bw}kbps"
+
+
+def otherload_token(other_load):
+    """相手負荷のファイル名部品: 60 -> "otherload060"。plot_roc.py も使う。"""
+    return f"otherload{other_load:03d}"
 
 
 def plotted_values_path(mode):
@@ -662,7 +673,7 @@ def main():
                 for own_bw in BANDWIDTHS:
                     written.append(plot_single(
                         data, own_bw, methods,
-                        fig_path(out_dir, mode_tag, content, f"own{own_bw}", L, fmt),
+                        fig_path(out_dir, mode_tag, content, bw_token("own", own_bw), L, fmt),
                         ylim, ci))
                 written.append(plot_3panel(
                     data, methods, fig_path(out_dir, mode_tag, content, "3panel", L, fmt),

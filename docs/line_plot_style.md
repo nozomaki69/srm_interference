@@ -148,32 +148,49 @@ y 軸の上端をちょうど 1.0 にしていたので、AUC = 1.0 の線と点
 **測定モード・図の種類・相手負荷**を必ず入れる:
 
 ```
-auc_<モード>_<中身>_<形>_other<相手負荷3桁>.pdf
+auc_<モード>_<中身>_<形>_otherload<相手負荷3桁>.pdf
 ```
 
 | 部品 | 値 |
 |---|---|
 | モード | `single` (single-query) / `multi` (multi-query) / `modecompare` (両モードの比較) |
 | 中身 | `proposed` / `dper` / `rssi` (手法1つ) / `3methods` (3手法) |
-| 形 | `own50` / `own100` / `own200` (自帯域ごとの単独図) / `3panel` / `grid` (3×3) |
-| 相手負荷 | `other020` / `other040` / `other060` / `other080` / `other100` (3桁にそろえて名前順 = 負荷順にする) |
+| 形 | `own50kbps` / `own100kbps` / `own200kbps` (自帯域ごとの単独図) / `3panel` / `grid` (3×3) |
+| 相手負荷 | `otherload020` / `otherload040` / `otherload060` / `otherload080` / `otherload100` (3桁にそろえて名前順 = 負荷順にする) |
 
 例:
 
 | ファイル | 中身 |
 |---|---|
-| `detection_lines/auc_single_3methods_grid_other100.pdf` | single-query、3手法の 3×3 グリッド、相手負荷 100% (旧 `auc_grid.pdf`) |
-| `detection_lines_sequential/auc_multi_dper_3panel_other060.pdf` | multi-query、ΔPER only の3パネル、相手負荷 60% |
-| `detection_lines_mode_compare/auc_modecompare_proposed_grid_other020.pdf` | 提案手法の single / multi 比較、相手負荷 20% (旧 `auc_grid_proposed.pdf`) |
+| `detection_lines/auc_single_3methods_grid_otherload100.pdf` | single-query、3手法の 3×3 グリッド、相手負荷 100% (旧 `auc_grid.pdf`) |
+| `detection_lines_sequential/auc_multi_dper_3panel_otherload060.pdf` | multi-query、ΔPER only の3パネル、相手負荷 60% |
+| `detection_lines_mode_compare/auc_modecompare_proposed_grid_otherload020.pdf` | 提案手法の single / multi 比較、相手負荷 20% (旧 `auc_grid_proposed.pdf`) |
 
-旧名 → 新名: `auc_own{bw}_{手法}` → `auc_<モード>_{手法}_own{bw}_other<L>`、
-`auc_own{bw}_compare` → `auc_<モード>_3methods_own{bw}_other<L>`、
-`auc_3panel_{手法|compare}` → `auc_<モード>_{手法|3methods}_3panel_other<L>`。
+旧名 → 新名: `auc_own{bw}_{手法}` → `auc_<モード>_{手法}_own{bw}kbps_otherload<L>`、
+`auc_own{bw}_compare` → `auc_<モード>_3methods_own{bw}kbps_otherload<L>`、
+`auc_3panel_{手法|compare}` → `auc_<モード>_{手法|3methods}_3panel_otherload<L>`。
+
+**帯域には `kbps` を付け、相手負荷は `otherload` と書く。** 最初は相手負荷を `other100` と
+書いていたが、ROC 曲線のファイル名では `other200` が相手の**帯域**を表していて、同じ
+`other` が図によって負荷と帯域の両方の意味になっていた。帯域 = `<own|other><数値>kbps`、
+相手負荷 = `otherload<3桁>` に統一して見分けられるようにした。
 
 枚数: single-query / multi-query それぞれ (16 + グリッド1) × 5 = 85 枚、
 モード比較は 3手法 × 5 = 15 枚。描画値の CSV は `auc_<モード>_plotted_values.csv` に
 5つの相手負荷ぶんをまとめる (`other_load_percent` 列で区別)。
-スコア分布のヒストグラム・ROC 曲線は従来どおり相手負荷 100% の断面のまま。
+スコア分布のヒストグラムは従来どおり相手負荷 100% の断面のまま。
+
+### ROC 曲線も相手負荷ごとに描く
+
+`plot_roc.py` も相手負荷 20 / 40 / 60 / 80 / 100% の5通りすべてで描く。1枚 = (自帯域, 相手帯域,
+手法, 相手負荷)、線は自負荷 5本 (凡例に AUC) で、中身は従来と同じ。1モード 27 × 5 = 135 枚。
+名前は折れ線と同じ規則にそろえる:
+
+```
+roc_<single|multi>_<手法>_own<自帯域>kbps_other<相手帯域>kbps_otherload<相手負荷3桁>.pdf
+例: roc/simultaneous/roc_single_proposed_own100kbps_other50kbps_otherload100.pdf
+   (旧 roc_own100_other50_proposed.pdf)
+```
 
 ## 2. 変えないもの
 

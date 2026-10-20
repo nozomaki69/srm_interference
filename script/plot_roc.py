@@ -7,10 +7,12 @@ save ブランチの plot_roc.py を、手法の列 (method) を持つこのブ�
 立ち上がっているのか、高 FPR 側でようやく稼いでいるのかを曲線で見る。
 
 断面は折れ線 (plot_detection_lines.py) と揃える:
-  相手PAN負荷 = 100% に固定、1枚に5本 (自PAN負荷 20-100%)、凡例に AUC を併記
-  1枚 = (自帯域, 相手帯域, 手法)。1モード 27 枚
+  相手PAN負荷を1つに固定、1枚に5本 (自PAN負荷 20-100%)、凡例に AUC を併記
+  1枚 = (自帯域, 相手帯域, 手法, 相手負荷)。相手負荷は 20-100% の5通り全部。1モード 135 枚
 
-出力: plots/roc/{simultaneous,sequential}/roc_own{A}_other{B}_{method}.pdf
+出力: plots/roc/{simultaneous,sequential}/
+      roc_<single|multi>_<手法>_own<A>kbps_other<B>kbps_otherload<相手負荷3桁>.pdf
+      (命名規則は折れ線と同じ。docs/line_plot_style.md)
 設計は docs/save_features.md を参照。
 """
 
@@ -74,19 +76,26 @@ def auc_of(fpr, tpr):
 
 
 def load_scores(csv_file):
-    """{(method, own_bw, other_bw, own_load): {"interf": [...], "no_interf": [...]}}"""
-    out = defaultdict(lambda: {"interf": [], "no_interf": []})
+    """{other_load: {(method, own_bw, other_bw, own_load): {"interf": [...], "no_interf": [...]}}}
+
+    CSV は 180,000 行あるので1度だけ読み、相手負荷ごとに own_other() で振り分ける。
+    """
     with open(csv_file, "r", encoding="utf-8", newline="") as f:
-        for r in csv.DictReader(f):
-            own = L.own_other(r)
+        rows = list(csv.DictReader(f))
+    by_load = {}
+    for other_load in L.OTHER_LOADS:
+        out = defaultdict(lambda: {"interf": [], "no_interf": []})
+        for r in rows:
+            own = L.own_other(r, other_load)
             if own is None:
                 continue
             key = (r["method"], own["own_bw"], own["other_bw"], own["own_load"])
             out[key][r["klass"]].append(float(r["score"]))
-    return out
+        by_load[other_load] = out
+    return by_load
 
 
-def plot_one(scores, method, own_bw, other_bw, out_dir, fmt, mismatches):
+def plot_one(scores, method, own_bw, other_bw, path, mismatches):
     loads = sorted(OFFERED_LOAD_PERCENTS)
     fig, ax = plt.subplots(figsize=(6.6, 6.6))
     n_drawn = 0
@@ -115,7 +124,6 @@ def plot_one(scores, method, own_bw, other_bw, out_dir, fmt, mismatches):
         ax.text(0.5, 0.5, "no data", transform=ax.transAxes, ha="center",
                 va="center", color="0.55")
     fig.tight_layout()
-    path = os.path.join(out_dir, f"roc_own{own_bw}_other{other_bw}_{method}.{fmt}")
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     return path
@@ -141,12 +149,17 @@ def main():
     print(f"--- {args.mode}: {path} ---")
     scores = load_scores(path)
 
+    mode_tag = L.FILE_MODE_TAG[args.mode]
     written, mismatches = [], []
-    for method in METHODS:
-        for own_bw in BANDWIDTHS:
-            for other_bw in BANDWIDTHS:
-                written.append(plot_one(scores, method, own_bw, other_bw,
-                                        out_dir, args.format, mismatches))
+    for other_load in L.OTHER_LOADS:
+        for method in METHODS:
+            for own_bw in BANDWIDTHS:
+                for other_bw in BANDWIDTHS:
+                    name = (f"roc_{mode_tag}_{method}_{L.bw_token('own', own_bw)}_"
+                            f"{L.bw_token('other', other_bw)}_"
+                            f"{L.otherload_token(other_load)}.{args.format}")
+                    written.append(plot_one(scores[other_load], method, own_bw, other_bw,
+                                            os.path.join(out_dir, name), mismatches))
     if mismatches:
         print(f"    Warning: 曲線の面積と AUC が一致しない条件が {len(mismatches)} 件: "
               f"{mismatches[:5]}")

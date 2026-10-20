@@ -50,7 +50,8 @@ icc の全条件を含むので、**icc_load200 のシミュレーションが�
   6本重ねる形は見にくかったので変えた（`docs/line_plot_style.md`）
 - **ヒートマップ**：save の `create_heatmap.py` の AUC 版をそのまま移し、手法ごとにサブフォルダを分ける。
   軸は PAN1 / PAN2 のまま（save と同じ）。1手法 12 枚（6帯域ペア × 2PAN）
-- **ROC**：save の `plot_roc.py` を移す。1枚 = (自帯域, 相手帯域, 手法)、線が自PAN負荷 5本。
+- **ROC**：save の `plot_roc.py` を移す。1枚 = (自帯域, 相手帯域, 手法, 相手負荷)、線が自PAN負荷 5本。
+  相手負荷は 20〜100% の5通りすべて描く（`docs/line_plot_style.md`）。
   1モード 27 枚
 - 断面の読み替えは `plot_detection_lines.own_other()` を使う（規則を2箇所に書かない）
 
