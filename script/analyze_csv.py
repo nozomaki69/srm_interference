@@ -177,7 +177,7 @@ def print_bin_diagnostics():
 # ============================================================
 # ユーティリティ
 # ============================================================
-def select_bins(rssi_values, anchor_dbm, bin_size=RSSI_BIN_SIZE_DBM, min_count=2):
+def select_bins(rssi_values, anchor_dbm, bin_size=None, min_count=2):
     """
     anchor_dbm を下端として bin_size 刻みで上方向にビンを作り、
     (upper, lower) のリストを強い側から順に返す。
@@ -194,7 +194,13 @@ def select_bins(rssi_values, anchor_dbm, bin_size=RSSI_BIN_SIZE_DBM, min_count=2
     干渉検知の統計量がこの関数を経由することで、「どのビンを使うか」の定義が
     1箇所に集まる。
     端末が min_count 個未満しか入らないビンは返さない(間が空くこともある)。
+
+    bin_size を省略すると RSSI_BIN_SIZE_DBM を呼び出し時に読む (既定値に直接
+    書くと関数定義時に固定され、定数を書き換えても反映されないため)。
+    ビン幅の感度分析 (bin_width_sensitivity.py) はここに幅を渡す。
     """
+    if bin_size is None:
+        bin_size = RSSI_BIN_SIZE_DBM
     r = np.asarray(rssi_values, dtype=float).flatten()
     r = r[r != 0]
     if r.size == 0:
@@ -484,18 +490,19 @@ def _iter_seeds(delta_per, rssi_list, num_devices):
         yield rssi_seed[valid], delta_seed[valid]
 
 
-def _score_proposed(r_v, d_v, anchor_dbm, stats_key):
+def _score_proposed(r_v, d_v, anchor_dbm, stats_key, bin_size=None):
     """提案手法: RSSIビンごとのΔPER分散の、そのSeed内での最大値。
 
     どのビンを使うかは select_bins() が決める (起点 anchor_dbm 以下の端末は入らない)。
     stats_key を渡すと、ビン内端末数を診断用に集計する。
     有効なビン (データ点2個以上) が1つも無ければ (0.0, False) を返す。
+    bin_size: ビン幅 [dBm]。省略時は RSSI_BIN_SIZE_DBM。
     """
     max_var = 0.0
     n_used = 0
     # 起点は固定だが、上端(最大RSSI)と端末の入り方はSeedごとに違うので
     # ビンの本数と中身はSeedごとに変わる。
-    for upper, lower in select_bins(r_v, anchor_dbm):
+    for upper, lower in select_bins(r_v, anchor_dbm, bin_size):
         mask = (r_v > lower) & (r_v <= upper)
         bin_values = d_v[mask]
         if len(bin_values) > 1:
@@ -509,7 +516,7 @@ def _score_proposed(r_v, d_v, anchor_dbm, stats_key):
     return max_var, n_used > 0
 
 
-def _score_dper(r_v, d_v, anchor_dbm, stats_key):
+def _score_dper(r_v, d_v, anchor_dbm, stats_key, bin_size=None):
     """ベースライン1: 全端末のΔPERの分散。
 
     proposed から select_bins() を抜いただけなので、proposed との差が
@@ -522,7 +529,7 @@ def _score_dper(r_v, d_v, anchor_dbm, stats_key):
     return float(np.var(d_v)), True
 
 
-def _score_rssi(r_v, d_v, anchor_dbm, stats_key):
+def _score_rssi(r_v, d_v, anchor_dbm, stats_key, bin_size=None):
     """ベースライン2: 全端末の平均RSSI。ΔPER を一切使わない。
 
     干渉で弱い端末のフレームが落ちるぶん、受信できたフレームの平均RSSIが
@@ -542,7 +549,7 @@ _METHOD_SCORERS = {
 
 
 def compute_seed_scores(method, delta_per, rssi_list, num_devices, anchor_dbm,
-                        stats_key=None):
+                        stats_key=None, bin_size=None):
     """Seedごとの干渉指標を返す。
 
     method: DETECTION_METHODS のいずれか。
@@ -556,6 +563,9 @@ def compute_seed_scores(method, delta_per, rssi_list, num_devices, anchor_dbm,
     stats_key はビン構成の診断用で、ビンを使う proposed のときだけ効く。
     他の手法で呼んでも BIN_OCCUPANCY / DEGENERATE_SEEDS は更新しない
     (3手法ぶん回すので、素通しだと同じSeedを3回数えてしまう)。
+
+    bin_size: 提案手法のビン幅 [dBm]。省略時は RSSI_BIN_SIZE_DBM。
+    ビンを使わない dper / rssi は受け取って無視する。
     """
     if method not in _METHOD_SCORERS:
         raise ValueError(f"unknown detection method: {method}")
@@ -567,7 +577,7 @@ def compute_seed_scores(method, delta_per, rssi_list, num_devices, anchor_dbm,
     scores = []
     n_degenerate = 0
     for r_v, d_v in _iter_seeds(delta_per, rssi_list, num_devices):
-        score, ok = scorer(r_v, d_v, anchor_dbm, use_stats)
+        score, ok = scorer(r_v, d_v, anchor_dbm, use_stats, bin_size)
         if not ok:
             n_degenerate += 1
             if use_stats is not None:
@@ -610,12 +620,17 @@ def _rank_auc(interf_values, no_interf_values):
     return (ranks[:n_pos].sum() - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
 
 
-def run_interference_detection(data):
+def run_interference_detection(data, methods=None, bin_size=None):
     """
     帯域幅の組み合わせ（例: 50vs50）ごとに、干渉あり/なしシナリオの干渉指標を
     Seed 単位で比較し、閾値に依らない分離度 (AUC) を求める。
     PAN1・PAN2 それぞれについて、DETECTION_METHODS の3手法ぶん行う。
+
+    methods / bin_size はビン幅の感度分析 (bin_width_sensitivity.py) 用。
+    省略時は従来どおり 3手法・ビン幅 RSSI_BIN_SIZE_DBM。
     """
+    if methods is None:
+        methods = DETECTION_METHODS
     # (bandwidth_label, distance, pan1_offload, pan2_offload) -> {'interf': key, 'no_interf': key}
     groups = defaultdict(dict)
     for condition_key in data.keys():
@@ -661,13 +676,13 @@ def run_interference_detection(data):
             interf_delta = np.array(interf_entry[dl_key]) - np.array(interf_entry[ul_key])
             no_interf_delta = np.array(no_interf_entry[dl_key]) - np.array(no_interf_entry[ul_key])
 
-            for method in DETECTION_METHODS:
+            for method in methods:
                 interf_values, interf_degen = compute_seed_scores(
                     method, interf_delta, interf_entry[rssi_key], NUM_DEVICE, anchor,
-                    (pan_name, interf_ch[pan_name]))
+                    (pan_name, interf_ch[pan_name]), bin_size)
                 no_interf_values, no_interf_degen = compute_seed_scores(
                     method, no_interf_delta, no_interf_entry[rssi_key], NUM_DEVICE,
-                    anchor, (pan_name, no_interf_ch[pan_name]))
+                    anchor, (pan_name, no_interf_ch[pan_name]), bin_size)
 
                 if len(interf_values) == 0 or len(no_interf_values) == 0:
                     print(f"Warning: no seed data for {bw_label} {distance}m "

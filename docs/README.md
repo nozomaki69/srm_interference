@@ -180,6 +180,10 @@ RSSI でビン分けする。ビンの起点は**チャネル固有の固定値*
 解析だけやり直すときは `./script/sbatch_reanalyze.sh`（再シミュレーション不要。
 `plots/simulation_results.csv` だけあればよい）。
 
+提案手法の RSSI ビン幅 (既定 10 dBm) を 1〜20 dBm で振る感度分析は
+`./script/sbatch_bin_width_sensitivity.sh`（これも再シミュレーション不要。出力は
+`plots/bin_width_sensitivity/` だけで、既存の結果には触らない）。設計は `docs/bin_width_sensitivity.md`。
+
 **作図の設定だけ変えたときは `./script/plot_figures.sh`。** 既存の CSV から図を
 作り直すだけなので、155MB の `simulation_results.csv` を再パースしない。
 
@@ -336,11 +340,15 @@ script/
   run_analysis.sh               解析から作図まで。下の2つから呼ばれる
   sbatch_jobs.sh                全体の driver
   sbatch_reanalyze.sh           解析と作図だけやり直す
+  bin_width_sensitivity.py      提案手法の RSSI ビン幅の感度分析 (1-20 dBm)
+  plot_bin_width_sensitivity.py その図
+  sbatch_bin_width_sensitivity.sh  上の2つを SLURM で回す
 template/                       Jinja2 テンプレート
 docs/README.md                  このファイル
 docs/auc.md                     AUC の詳細
 docs/save_features.md           save から取り込んだ機能の設計
 docs/bootstrap.md               AUC のブートストラップ信頼区間
+docs/bin_width_sensitivity.md   RSSI ビン幅の感度分析
 ```
 
 `analyze_csv.py` は CSV を作るだけで、図は出さない。図は `plot_figures.sh` が呼ぶ各スクリプトの担当。
