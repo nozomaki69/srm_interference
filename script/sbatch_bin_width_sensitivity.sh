@@ -28,8 +28,14 @@ fi
 mkdir -p "$LOG_DIR"
 cd "$CMD_DIR" || exit 1
 
-# 引数を SLURM の --wrap に安全に渡す
-ARGS=$(printf ' %q' "$@")
+# 引数を SLURM の --wrap に安全に渡す。
+# 引数が0個のときに printf ' %q' を呼ぶと、書式が1回は適用されて空文字列 '' が
+# 1つ出来てしまい、python 側が "unrecognized arguments: " で落ちる。だから引数が
+# あるときだけ組み立てる。
+ARGS=""
+if [ $# -gt 0 ]; then
+    ARGS=$(printf ' %q' "$@")
+fi
 
 echo "--- 入力: $INPUT_CSV ($(du -h "$INPUT_CSV" | cut -f1)) ---"
 echo "--- SLURM に投入して完了を待ちます (ログ: $LOG_DIR/binwidth_<jobid>.{out,err}) ---"
