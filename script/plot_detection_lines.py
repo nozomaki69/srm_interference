@@ -469,26 +469,85 @@ METHOD_MARKER = {"proposed": "o", "dper": "s", "rssi": "^"}
 GRID_LINESTYLE = "-"
 
 
-def _plot_bw_grid(series_of, handles, path, ylim):
+# gridtable 図 (各パネルの下に AUC の数値表) の体裁。docs/line_plot_style.md 参照
+TABLE_FONTSIZE = 13
+TABLE_HEIGHT_RATIO = 0.42   # パネルの高さに対する表の高さ
+# 表の行見出しは隣のパネルの表にはみ出さないよう短くする (凡例は正式名のまま)
+TABLE_ROW_LABEL = {"single-query": "single", "multi-query": "multi"}
+
+
+def _draw_value_table(ax, series, row_order, xlim):
+    """パネル直下の軸 ax に、そのパネルの AUC の表を描く。
+
+    列 = 自PAN負荷 (横軸の点と中心をそろえる)、行 = 線 (row_order = 凡例の順)。
+    セルは描いた点の値そのもの (AUC の点推定)。
+    """
+    ax.axis("off")
+    loads = sorted(OFFERED_LOAD_PERCENTS)
+    by_label = {label: (dict(zip(xs, ys)), color)
+                for xs, ys, color, _marker, label, _band in series}
+    rows = [lab for lab in row_order if lab in by_label]
+    cells = [[f"{by_label[lab][0][l]:.3f}" if l in by_label[lab][0] else "-"
+              for l in loads] for lab in rows]
+    # 列の境界を負荷の中点に置き、列の中心を横軸の点の位置にそろえる
+    step = loads[1] - loads[0]
+    x0, x1 = xlim
+    left = (loads[0] - step / 2 - x0) / (x1 - x0)
+    width = step * len(loads) / (x1 - x0)
+    tbl = ax.table(cellText=cells, rowLabels=[TABLE_ROW_LABEL.get(r, r) for r in rows], colLabels=[f"{l}%" for l in loads],
+                   cellLoc="center", rowLoc="right", bbox=[left, 0.0, width, 1.0])
+    tbl.auto_set_font_size(False)
+    tbl.set_fontsize(TABLE_FONTSIZE)
+    for (r, c), cell in tbl.get_celld().items():
+        cell.set_edgecolor("0.75")
+        cell.set_linewidth(0.6)
+        if r == 0:
+            cell.set_text_props(color="0.3")
+        elif c == -1:
+            # 行見出しは凡例と同じ色にして、線との対応を色で読めるようにする
+            cell.set_text_props(color=by_label[rows[r - 1]][1], fontweight="bold")
+            cell.set_edgecolor("none")
+
+
+def _plot_bw_grid(series_of, handles, path, ylim, table=False):
     """行 = 自帯域、列 = 相手帯域の 3x3 を描いて保存する。
 
     series_of(own_bw, other_bw) は、そのパネルに描く系列
     [(xs, ys, color, marker, label, band), ...] を返す。
     3手法のグリッド図とモード比較のグリッド図で共通の枠組み。
+    table=True なら各パネルの直下に AUC の数値表を付ける (gridtable 図)。
     """
     n = len(BANDWIDTHS)
-    fig, axes = plt.subplots(n, n, figsize=(15.0, 13.0), sharex=True, sharey=True)
+    if table:
+        # パネルの行と表の行を交互に積む
+        fig = plt.figure(figsize=(17.0, 13.0 * (1 + TABLE_HEIGHT_RATIO)))
+        gs = fig.add_gridspec(2 * n, n, height_ratios=[1.0, TABLE_HEIGHT_RATIO] * n,
+                              hspace=0.12, wspace=0.42, top=0.975, bottom=0.02)
+        axes = [[None] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(n):
+                axes[i][j] = fig.add_subplot(
+                    gs[2 * i, j], sharex=axes[0][0], sharey=axes[0][0])
+    else:
+        fig, axes = plt.subplots(n, n, figsize=(15.0, 13.0), sharex=True, sharey=True)
+    row_order = [h.get_label() for h in handles]
     for i, own_bw in enumerate(BANDWIDTHS):
         for j, other_bw in enumerate(BANDWIDTHS):
             ax = axes[i][j]
-            for xs, ys, color, marker, label, band in series_of(own_bw, other_bw):
+            series = series_of(own_bw, other_bw)
+            for xs, ys, color, marker, label, band in series:
                 _draw_series(ax, xs, ys, 0.0, color, GRID_LINESTYLE, marker, label, band)
             _finish_axes(ax, ylim)
-            # sharex/sharey でも目盛りの数字は外周のパネルにだけ出す
-            ax.tick_params(labelleft=(j == 0), labelbottom=(i == n - 1))
+            # sharex/sharey でも目盛りの数字は外周のパネルにだけ出す。
+            # 表付きの図は表の列見出しが負荷を示すが、横軸の数字は同じく最下段に出す
+            ax.tick_params(labelleft=(j == 0), labelbottom=(i == n - 1 and not table))
             # 行・列の見出し (自帯域 / 相手帯域) は入れない。軸タイトルを入れない
             # 方針どおり、図のキャプションで説明する
-    fig.tight_layout()
+            if table:
+                _draw_value_table(fig.add_subplot(gs[2 * i + 1, j]), series,
+                                  row_order, ax.get_xlim())
+    if not table:
+        fig.tight_layout()
     fig.legend(handles=handles, ncol=len(handles), loc="lower center",
                bbox_to_anchor=(0.5, 0.99), frameon=True, fontsize=LEGEND_FONTSIZE,
                handlelength=2.6)
@@ -503,7 +562,7 @@ def _points(pts):
     return xs, [pts[l] for l in xs]
 
 
-def plot_grid(data, path, ylim, ci=None):
+def plot_grid(data, path, ylim, ci=None, table=False):
     """行 = 自帯域、列 = 相手帯域の 3x3。1パネルに3手法の3本だけを描く。
 
     compare 図は1パネルに 9 本乗って読みにくいので、その代替。
@@ -524,7 +583,7 @@ def plot_grid(data, path, ylim, ci=None):
     handles = [Line2D([], [], label=METHOD_LABEL[m],
                       **line_kwargs(METHOD_COLOR[m], GRID_LINESTYLE, METHOD_MARKER[m]))
                for m in METHODS]
-    return _plot_bw_grid(series_of, handles, path, ylim)
+    return _plot_bw_grid(series_of, handles, path, ylim, table)
 
 
 def dump_values(data_by_load, ci_by_load, path):
@@ -584,9 +643,11 @@ def plot_mode_compare(data_by_mode, ci_by_mode, out_dir, fmt, ylim, other_load):
                             MODE_LABEL[mode], band))
             return out
 
-        written.append(_plot_bw_grid(
-            series_of, handles,
-            fig_path(out_dir, "modecompare", method, "grid", other_load, fmt), ylim))
+        for shape, table in (("grid", False), ("gridtable", True)):
+            written.append(_plot_bw_grid(
+                series_of, handles,
+                fig_path(out_dir, "modecompare", method, shape, other_load, fmt), ylim,
+                table))
     return written
 
 
@@ -678,8 +739,10 @@ def main():
                 written.append(plot_3panel(
                     data, methods, fig_path(out_dir, mode_tag, content, "3panel", L, fmt),
                     ylim, ci))
-            written.append(plot_grid(
-                data, fig_path(out_dir, mode_tag, ALL_METHODS_TAG, "grid", L, fmt), ylim, ci))
+            for shape, table in (("grid", False), ("gridtable", True)):
+                written.append(plot_grid(
+                    data, fig_path(out_dir, mode_tag, ALL_METHODS_TAG, shape, L, fmt),
+                    ylim, ci, table))
         csv_path = os.path.join(out_dir, os.path.basename(plotted_values_path(args.mode)))
         written.append(dump_values(data_by_load, ci_by_load, csv_path))
 

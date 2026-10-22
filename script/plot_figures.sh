@@ -16,12 +16,12 @@
 #
 # 出力 (モードごと):
 #   plots/auc_bootstrap*.csv                 AUC の 95% 信頼区間 (1000回)
-#   plots/detection_lines{,_sequential}/     3手法の折れ線 (16枚 + 3x3 グリッド) x 相手負荷5通り + 描画値 CSV
+#   plots/detection_lines{,_sequential}/     3手法の折れ線 (16枚 + 3x3 グリッド + 数値表付きグリッド) x 相手負荷5通り + 描画値 CSV
 #                                            名前は auc_{single,multi}_<中身>_<形>_otherload<相手負荷3桁>.pdf
 #   plots/heatmaps_auc{_simultaneous,}/      手法ごとのヒートマップ 12枚 x 3
 #   plots/roc/{simultaneous,sequential}/     ROC 曲線 27枚 x 相手負荷5通り
 #   plots/score_histograms{,_sequential}/    スコア分布 9枚
-#   plots/detection_lines_mode_compare/      モード比較の 3x3 グリッド (手法ごと) x 相手負荷5通り (両モードあるとき)
+#   plots/detection_lines_mode_compare/      モード比較の 3x3 グリッド (+ 数値表付き) (手法ごと) x 相手負荷5通り (両モードあるとき)
 #
 # 解析からやり直したいときは ./script/sbatch_reanalyze.sh (こちらも最後にこれを呼ぶ)。
 

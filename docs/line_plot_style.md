@@ -155,7 +155,7 @@ auc_<モード>_<中身>_<形>_otherload<相手負荷3桁>.pdf
 |---|---|
 | モード | `single` (single-query) / `multi` (multi-query) / `modecompare` (両モードの比較) |
 | 中身 | `proposed` / `dper` / `rssi` (手法1つ) / `3methods` (3手法) |
-| 形 | `own50kbps` / `own100kbps` / `own200kbps` (自帯域ごとの単独図) / `3panel` / `grid` (3×3) |
+| 形 | `own50kbps` / `own100kbps` / `own200kbps` (自帯域ごとの単独図) / `3panel` / `grid` (3×3) / `gridtable` (3×3 + 各パネルの数値表) |
 | 相手負荷 | `otherload020` / `otherload040` / `otherload060` / `otherload080` / `otherload100` (3桁にそろえて名前順 = 負荷順にする) |
 
 例:
@@ -191,6 +191,27 @@ roc_<single|multi>_<手法>_own<自帯域>kbps_other<相手帯域>kbps_otherload
 例: roc/simultaneous/roc_single_proposed_own100kbps_other50kbps_otherload100.pdf
    (旧 roc_own100_other50_proposed.pdf)
 ```
+
+### 3×3 グリッド図の各パネルの下に AUC の数値表を付けた版を足す
+
+3×3 グリッド図 (`grid`) は、9 通りの帯域ペアの判定結果を並べているが、点の値は図から
+読み取るしかなかった。論文・発表で数値も示せるよう、**各パネルの直下に、そのパネルの
+AUC の数値表を付けた版**を新しく足す。**既存の `grid` 図はそのまま残し、別ファイルにする。**
+
+- 形の名前は `gridtable`。例:
+  `detection_lines/auc_single_3methods_gridtable_otherload080.pdf`、
+  `detection_lines_sequential/auc_multi_3methods_gridtable_otherload080.pdf`、
+  `detection_lines_mode_compare/auc_modecompare_proposed_gridtable_otherload080.pdf`
+- 対象は `grid` を描いている図すべて (3手法グリッド: single / multi、モード比較グリッド: 3手法)。
+  相手負荷 5 通りすべて
+- 表の列 = 自PAN負荷 20 / 40 / 60 / 80 / 100%。列の中心がパネルの横軸の点の位置にそろうように置く
+- 表の行 = そのパネルの線 (3手法グリッドは Proposed / ΔPER only / RSSI only、
+  モード比較は single-query / multi-query)。行見出しは凡例と同じ色で書く
+- セルは **AUC の点推定** (全 Seed から出した値、小数3桁)。ブートストラップ平均ではない。
+  信頼区間は図の髭と `auc_*_plotted_values.csv` / `docs/auc_otherload080_summary.md` で読む
+- パネル・線・髭・凡例・y 軸範囲は `grid` と同じ (`_plot_bw_grid()` を共有し、表の有無だけを引数で切り替える)
+
+枚数: single / multi それぞれ +5 枚、モード比較 +15 枚。
 
 ## 2. 変えないもの
 
