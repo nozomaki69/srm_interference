@@ -39,7 +39,7 @@ REFERENCE_WIDTH = A.RSSI_BIN_SIZE_DBM   # 既存の解析で使っている幅 (
 
 COND_KEYS = ("bandwidth", "distance", "pan1_offload", "pan2_offload", "pan")
 FIELDS = (["bin_width_dbm"] + list(COND_KEYS)
-          + ["auc", "auc_ci_low", "auc_ci_high", "n_boot",
+          + ["auc", "auc_ci_low", "auc_ci_high", "n_boot", "auc_direct",
              "n_degenerate_interf", "n_degenerate_no_interf"])
 DIAG_FIELDS = ["bin_width_dbm", "pan", "channel", "kbps", "observations",
                "valid_bins_per_seed", "devices_per_bin_median", "devices_per_bin_max",
@@ -165,28 +165,38 @@ def run_mode(mode, widths, n_boot, seed):
         diag_rows += diagnostics(w)
         ci = bootstrap_rows(score_rows, n_boot, seed)
 
-        n_mismatch = 0
+        # 点推定 (auc 列) は区間と同じスコア (CSV と同じ .9g の文字列から読んだ値) から出す。
+        # 検知側 (run_interference_detection) は丸める前の float で順位を付けるが、
+        # 数学的に同じ分散でも np.var は端末の並び順で最下位ビットが変わり、本来の
+        # 同順位を任意の向きに割ってしまう。細いビンでは端末 2-3 台・PER が離散値なので
+        # 同じスコアの Seed が多く、AUC が 4 桁目でずれる (10 dBm ではほぼ起きない)。
+        # 同順位を同順位として数える .9g 側を正とし、検知側の値は auc_direct 列に残す。
+        n_mismatch, n_tie_diff, max_tie_diff = 0, 0, 0.0
         for r in rows:
             if r["method"] != "proposed":
                 continue
             cond = tuple(str(r[k]) for k in COND_KEYS)
             auc, lo, hi = ci[cond + ("proposed",)]
-            if abs(round(auc, 4) - r["auc"]) > 1e-9:
-                raise AssertionError(f"{cond}: ブートストラップ側と検知側の AUC が違います")
+            d = abs(round(auc, 4) - r["auc"])
+            if d > 1e-9:
+                n_tie_diff += 1
+                max_tie_diff = max(max_tie_diff, d)
             if w == REFERENCE_WIDTH and cond in ref:
                 ra, rlo, rhi = ref[cond]
-                if (abs(r["auc"] - ra) > 1e-9
+                if (abs(round(auc, 4) - ra) > 1e-9
                         or (rlo is not None and (abs(round(lo, 4) - rlo) > 1e-9
                                                  or abs(round(hi, 4) - rhi) > 1e-9))):
                     n_mismatch += 1
             out_rows.append({"bin_width_dbm": w, **{k: r[k] for k in COND_KEYS},
-                             "auc": f"{r['auc']:.4f}",
+                             "auc": f"{auc:.4f}",
                              "auc_ci_low": f"{lo:.4f}", "auc_ci_high": f"{hi:.4f}",
-                             "n_boot": n_boot,
+                             "n_boot": n_boot, "auc_direct": f"{r['auc']:.4f}",
                              "n_degenerate_interf": r["n_degenerate_interf"],
                              "n_degenerate_no_interf": r["n_degenerate_no_interf"]})
         n_degen = sum(A.DEGENERATE_SEEDS.values())
-        print(f"    ビン幅 {w:>2} dBm: 縮退 Seed {n_degen:>5} 件 ({time.time() - t0:.0f} s)")
+        print(f"    ビン幅 {w:>2} dBm: 縮退 Seed {n_degen:>5} 件, "
+              f"同順位の扱いで auc と auc_direct が違う条件 {n_tie_diff:>3} 件 "
+              f"(最大差 {max_tie_diff:.4f}) ({time.time() - t0:.0f} s)")
         if w == REFERENCE_WIDTH and ref:
             if n_mismatch:
                 raise SystemExit(
