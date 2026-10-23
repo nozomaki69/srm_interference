@@ -36,11 +36,13 @@ LOAD_RANGE = sorted(OFFERED_LOAD_PERCENTS)
 VMIN, VMAX = 0.5, 1.0
 DECIMALS = 3          # 100x100 ペアなので AUC の刻みは 1e-4
 CELL_SIZE = 2.10      # セル1つの幅と高さ (インチ)。値だけなので正方形。
-                      # 以前は 1.70。セル内の文字を 25pt にしたら "1.000" が隣のセルに届いたので広げた
-FONTSIZE = 25          # セル内の AUC (以前は 19)
+                      # 以前は 1.70。セル内の文字を 25pt にしたら "1.000" が隣のセルに届いたので広げた。
+                      # これ以上は広げない: 論文では図ごと縮小されるので、セルを文字と同じ比で広げると
+                      # 紙面上の文字の大きさは変わらない (文字を大きく見せたいときは文字側だけを上げる)
+FONTSIZE = 30          # セル内の AUC (19 -> 25 -> 30)
 # 軸とカラーバーの目盛り。折れ線と共有の TICK_LABELSIZE より一段大きくする
-HEATMAP_TICK_LABELSIZE = 28
-CBAR_TICK_LABELSIZE = 28
+HEATMAP_TICK_LABELSIZE = 34   # 20 -> 28 -> 34
+CBAR_TICK_LABELSIZE = 34      # 20 -> 28 -> 34
 
 # 白文字に切り替える閾値。YlGnBu 上で白文字と黒文字の WCAG コントラストが
 # 入れ替わるのが値 0.838 のところ (save の create_heatmap.py と同じ根拠)。
@@ -94,7 +96,9 @@ def make_heatmap(sub, out_path):
                     color="white" if val > WHITE_TEXT_FROM else "black",
                     fontsize=FONTSIZE, fontweight="bold")
 
-    cbar = fig.colorbar(im, ax=ax)
+    # カラーバーは既定 (軸の幅の 15%) より細くし、その分セルを広く取る。図の大きさを
+    # 変えずに "1.000" どうしの間隔を確保するため (図を広げると紙面で文字が縮む)
+    cbar = fig.colorbar(im, ax=ax, fraction=0.05, pad=0.03)
     cbar.ax.tick_params(labelsize=CBAR_TICK_LABELSIZE, length=TICK_LENGTH, width=TICK_WIDTH)
     fig.tight_layout()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
