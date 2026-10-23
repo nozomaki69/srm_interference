@@ -95,6 +95,9 @@ def load_scores(csv_file):
     return by_load
 
 
+# ROC の凡例の文字 (docs/line_plot_style.md)
+ROC_LEGEND_FONTSIZE = 20
+
 def plot_one(scores, method, own_bw, other_bw, path, mismatches):
     loads = sorted(OFFERED_LOAD_PERCENTS)
     fig, ax = plt.subplots(figsize=(6.6, 6.6))
@@ -119,7 +122,9 @@ def plot_one(scores, method, own_bw, other_bw, path, mismatches):
     ax.set_aspect("equal")
     L.style_axes(ax)
     if n_drawn:
-        ax.legend(loc="lower right", frameon=True, fontsize=L.LEGEND_FONTSIZE - 2)
+        # 凡例は折れ線と共有の LEGEND_FONTSIZE に連動させない。28 - 2 = 26pt にすると
+        # 6.6 インチ四方の図で凡例が曲線の半分を覆うので、以前の 20pt に固定する
+        ax.legend(loc="lower right", frameon=True, fontsize=ROC_LEGEND_FONTSIZE)
     else:
         ax.text(0.5, 0.5, "no data", transform=ax.transAxes, ha="center",
                 va="center", color="0.55")

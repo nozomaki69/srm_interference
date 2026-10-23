@@ -30,13 +30,17 @@ sys.path.insert(0, SCRIPT_DIR)
 from interference_2pan_config import OFFERED_LOAD_PERCENTS  # noqa: E402
 import analyze_csv as A  # noqa: E402
 # 目盛りの体裁は折れ線と共有する (plot_detection_lines が定義元)
-from plot_detection_lines import TICK_LABELSIZE, TICK_LENGTH, TICK_WIDTH  # noqa: E402
+from plot_detection_lines import TICK_LENGTH, TICK_WIDTH  # noqa: E402
 
 LOAD_RANGE = sorted(OFFERED_LOAD_PERCENTS)
 VMIN, VMAX = 0.5, 1.0
 DECIMALS = 3          # 100x100 ペアなので AUC の刻みは 1e-4
-CELL_SIZE = 1.70      # セル1つの幅と高さ (インチ)。値だけなので正方形
-FONTSIZE = 19
+CELL_SIZE = 2.10      # セル1つの幅と高さ (インチ)。値だけなので正方形。
+                      # 以前は 1.70。セル内の文字を 25pt にしたら "1.000" が隣のセルに届いたので広げた
+FONTSIZE = 25          # セル内の AUC (以前は 19)
+# 軸とカラーバーの目盛り。折れ線と共有の TICK_LABELSIZE より一段大きくする
+HEATMAP_TICK_LABELSIZE = 28
+CBAR_TICK_LABELSIZE = 28
 
 # 白文字に切り替える閾値。YlGnBu 上で白文字と黒文字の WCAG コントラストが
 # 入れ替わるのが値 0.838 のところ (save の create_heatmap.py と同じ根拠)。
@@ -50,6 +54,16 @@ def input_csv_path(mode):
 
 def output_dir_path(mode):
     return os.path.join(A.PLOT_BASE_DIR, f"heatmaps_auc{A.mode_suffix(mode)}")
+
+
+def _cell_label(val):
+    """セルに書く AUC。小数3桁に丸めてから先頭の 0 を落とす (0.789 -> .789)。
+
+    丸めて 1.000 になる値はそのまま。先に丸めないと 0.9996 が .1000 のような
+    おかしな表記になりうるので、文字列にしてから判定する。
+    """
+    text = f"{val:.{DECIMALS}f}"
+    return text[1:] if text.startswith("0.") else text
 
 
 def make_heatmap(sub, out_path):
@@ -68,7 +82,7 @@ def make_heatmap(sub, out_path):
     ax.set_yticklabels(rows)
     ax.invert_yaxis()
     # 軸ラベルとタイトルは入れない (縦 = PAN1 負荷、横 = PAN2 負荷。キャプションで説明)
-    ax.tick_params(axis="both", which="major", labelsize=TICK_LABELSIZE,
+    ax.tick_params(axis="both", which="major", labelsize=HEATMAP_TICK_LABELSIZE,
                    length=TICK_LENGTH, width=TICK_WIDTH)
 
     for i in range(len(rows)):
@@ -76,12 +90,12 @@ def make_heatmap(sub, out_path):
             val = pivot.iloc[i, j]
             if pd.isna(val):
                 continue
-            ax.text(j, i, f"{val:.{DECIMALS}f}", ha="center", va="center",
+            ax.text(j, i, _cell_label(val), ha="center", va="center",
                     color="white" if val > WHITE_TEXT_FROM else "black",
                     fontsize=FONTSIZE, fontweight="bold")
 
     cbar = fig.colorbar(im, ax=ax)
-    cbar.ax.tick_params(labelsize=TICK_LABELSIZE, length=TICK_LENGTH, width=TICK_WIDTH)
+    cbar.ax.tick_params(labelsize=CBAR_TICK_LABELSIZE, length=TICK_LENGTH, width=TICK_WIDTH)
     fig.tight_layout()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fig.savefig(out_path, format="pdf", bbox_inches="tight")

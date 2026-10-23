@@ -168,10 +168,10 @@ GRID_KW = dict(color="0.85", linestyle="--", linewidth=0.8)
 # --- 論文向けの体裁 -----------------------------------------------------
 # タイトルと軸ラベルは入れない (図のキャプションで説明する前提)。そのぶん
 # 目盛りの数字・目盛り線・凡例を大きくして、縮小しても読めるようにする。
-TICK_LABELSIZE = 20     # 目盛りの数字
+TICK_LABELSIZE = 26     # 目盛りの数字 (以前は 20。docs/line_plot_style.md)
 TICK_LENGTH = 10        # 目盛り線の長さ
 TICK_WIDTH = 2.0        # 目盛り線の太さ
-LEGEND_FONTSIZE = 22
+LEGEND_FONTSIZE = 28    # 以前は 22
 
 
 def style_axes(ax, grid_axis="both"):
@@ -254,6 +254,8 @@ def _draw_series(ax, xs, ys, dx, color, linestyle, marker, label, band):
 # y 軸の上端の余白。上端をちょうど AUC = 1.0 にすると、1.0 の線と点の上半分が
 # 枠で切れて見えなくなる。目盛りは 1.0 までのまま、描画範囲だけ少し上に広げる。
 YTOP_PAD = 0.03
+# 縦軸の目盛りの間隔。以前は 0.1 刻みで、目盛りの数字が密で小さかった
+YTICK_STEP = 0.2
 
 
 def _finish_axes(ax, ylim, xpad=(8, 12)):
@@ -262,8 +264,12 @@ def _finish_axes(ax, ylim, xpad=(8, 12)):
     ax.set_xlim(min(loads) - xpad[0], max(loads) + xpad[1])
     lo, hi = ylim
     ax.set_ylim(lo, hi + YTOP_PAD)
-    # 余白に 1.1 などの目盛りが出ないよう、0.1 刻みで lo..hi に固定する
-    ax.set_yticks([round(lo + 0.1 * k, 1) for k in range(int(round((hi - lo) / 0.1)) + 1)])
+    # 目盛りは YTICK_STEP の倍数のうち lo..hi に入るもの。下端から数えると
+    # lo = 0.5 のとき 0.5/0.7/0.9 になって 1.0 に乗らないので、倍数で取る。
+    # 余白 (hi + YTOP_PAD) に 1.2 などが出ないよう hi で打ち切る
+    k0 = math.ceil(lo / YTICK_STEP - 1e-9)
+    k1 = math.floor(hi / YTICK_STEP + 1e-9)
+    ax.set_yticks([round(k * YTICK_STEP, 1) for k in range(k0, k1 + 1)])
     # 縦のグリッド線は引かない (横軸は負荷の5点だけで、目盛りで足りる)
     style_axes(ax, grid_axis="y")
 
