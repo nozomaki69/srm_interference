@@ -149,6 +149,18 @@ MARKER_EDGEWIDTH = 1.8
 MARKER_FACE = "white"
 
 
+# 凡例の見本の線は図中の線より太くする (文字を大きくしたぶん細く見えるため)。
+# 図中の線の太さは変えない。docs/line_plot_style.md 参照
+LEGEND_LINE_SCALE = 1.5
+
+
+def thicken_legend_lines(leg, scale=LEGEND_LINE_SCALE):
+    """凡例の見本の線だけを scale 倍の太さにする (マーカーは変えない)。leg を返す。"""
+    for line in leg.get_lines():
+        line.set_linewidth(line.get_linewidth() * scale)
+    return leg
+
+
 def line_kwargs(color, linestyle, marker):
     """図中の線と凡例の見本で共通の体裁。2箇所に書くと見本と線が食い違う。"""
     return dict(color=color, linestyle=linestyle, linewidth=2.0,
@@ -430,11 +442,13 @@ def _add_legend(target, methods, **kw):
     """
     handles, ncol = legend_handles(methods)
     if ncol == 1:
-        return target.legend(handles=handles, frameon=True,
-                             fontsize=LEGEND_FONTSIZE, **kw)
-    return target.legend(handles=handles, ncol=ncol, frameon=True,
-                         fontsize=LEGEND_FONTSIZE, columnspacing=1.2,
-                         handlelength=2.6, loc="lower center", **kw)
+        leg = target.legend(handles=handles, frameon=True,
+                            fontsize=LEGEND_FONTSIZE, **kw)
+    else:
+        leg = target.legend(handles=handles, ncol=ncol, frameon=True,
+                            fontsize=LEGEND_FONTSIZE, columnspacing=1.2,
+                            handlelength=2.6, loc="lower center", **kw)
+    return thicken_legend_lines(leg)
 
 
 def plot_single(data, own_bw, methods, path, ylim, ci=None):
@@ -554,9 +568,9 @@ def _plot_bw_grid(series_of, handles, path, ylim, table=False):
                                   row_order, ax.get_xlim())
     if not table:
         fig.tight_layout()
-    fig.legend(handles=handles, ncol=len(handles), loc="lower center",
-               bbox_to_anchor=(0.5, 0.99), frameon=True, fontsize=LEGEND_FONTSIZE,
-               handlelength=2.6)
+    thicken_legend_lines(fig.legend(handles=handles, ncol=len(handles), loc="lower center",
+                                    bbox_to_anchor=(0.5, 0.99), frameon=True,
+                                    fontsize=LEGEND_FONTSIZE, handlelength=2.6))
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     return path

@@ -124,7 +124,8 @@ def plot_one(scores, method, own_bw, other_bw, path, mismatches):
     if n_drawn:
         # 凡例は折れ線と共有の LEGEND_FONTSIZE に連動させない。28 - 2 = 26pt にすると
         # 6.6 インチ四方の図で凡例が曲線の半分を覆うので、以前の 20pt に固定する
-        ax.legend(loc="lower right", frameon=True, fontsize=ROC_LEGEND_FONTSIZE)
+        L.thicken_legend_lines(ax.legend(loc="lower right", frameon=True,
+                                         fontsize=ROC_LEGEND_FONTSIZE))
     else:
         ax.text(0.5, 0.5, "no data", transform=ax.transAxes, ha="center",
                 va="center", color="0.55")

@@ -101,8 +101,9 @@ def plot_grid(sweep, widths, ylim, path):
     handles = [Line2D([], [], color=OWN_LOAD_COLOR[L], linewidth=1.8,
                       marker=OWN_LOAD_MARKER[L], markersize=8,
                       markerfacecolor=PL.MARKER_FACE, label=f"{L}%") for L in LOADS]
-    fig.legend(handles=handles, ncol=len(handles), loc="lower center",
-               bbox_to_anchor=(0.5, 0.99), frameon=True, fontsize=PL.LEGEND_FONTSIZE)
+    PL.thicken_legend_lines(fig.legend(handles=handles, ncol=len(handles), loc="lower center",
+                                       bbox_to_anchor=(0.5, 0.99), frameon=True,
+                                       fontsize=PL.LEGEND_FONTSIZE))
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     return path
@@ -174,8 +175,9 @@ def plot_summary(mode, sweeps_by_load, widths, path, value_rows):
     handles += [Line2D([], [], color=PL.METHOD_COLOR[m], linestyle=REF_LINESTYLE[m],
                        linewidth=2.0, dash_capstyle=PL.DASH_CAPSTYLE,
                        label=PL.METHOD_LABEL[m]) for m in ("dper", "rssi")]
-    fig.legend(handles=handles, ncol=3, loc="lower center", bbox_to_anchor=(0.5, 0.99),
-               frameon=True, fontsize=PL.LEGEND_FONTSIZE)
+    PL.thicken_legend_lines(fig.legend(handles=handles, ncol=3, loc="lower center",
+                                       bbox_to_anchor=(0.5, 0.99), frameon=True,
+                                       fontsize=PL.LEGEND_FONTSIZE))
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
     return path
