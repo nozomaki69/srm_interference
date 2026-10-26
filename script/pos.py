@@ -40,8 +40,12 @@ NEIGHBOR_COLOR = "red"
 
 # 文字サイズ。以前は目盛り・軸タイトル・凡例を 25 で揃えていたが、論文で読めるよう
 # 大きくした。凡例は枠の右横に出すので、目盛りより一段小さくして横幅を抑える
-TICK_FONT_SIZE = 34
-LEGEND_FONT_SIZE = 32
+TICK_FONT_SIZE = 40      # 25 -> 34 -> 40
+LEGEND_FONT_SIZE = 38    # 25 -> 32 -> 38
+# 凡例の見本 (マーカーだけで線は無い) と文字の間を詰める。matplotlib の既定は
+# 見本の幅 2.0・間隔 0.8 (文字の高さ単位) で、マーカーだけだと左右に空きが目立つ
+LEGEND_HANDLE_LENGTH = 1.0
+LEGEND_HANDLE_TEXT_PAD = 0.3
 # 目盛りの間隔 [km]。横軸も固定する: 文字を大きくすると matplotlib が自動で
 # 2 km 刻みに間引いてしまうため
 X_TICK_STEP_KM = 1.0
@@ -109,7 +113,8 @@ def plot_positions(positions, pattern, seed, interf_label, out_dir):
     ax.yaxis.set_major_locator(MultipleLocator(Y_TICK_STEP_KM))
     # 凡例は枠の外 (右横) に 4行1列で出す。枠内だと端末に重なって隠れるため
     leg = ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), ncol=1,
-                    fontsize=LEGEND_FONT_SIZE)
+                    fontsize=LEGEND_FONT_SIZE, handlelength=LEGEND_HANDLE_LENGTH,
+                    handletextpad=LEGEND_HANDLE_TEXT_PAD)
     leg.get_frame().set_linewidth(1.8)
     # tight_layout() は枠外の凡例のぶん軸を縮めてしまうので使わず、
     # savefig の bbox_inches="tight" で凡例ごと切り出す

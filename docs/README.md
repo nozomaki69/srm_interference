@@ -317,7 +317,8 @@ AUC は「干渉ありのスコアの山」と「干渉なしのスコアの山�
 - **Seed は1つ**（既定 0。`--seed` で変更可）。1枚 = 帯域パターン1つで計 12 枚
 - 自PAN = PAN1、隣接PAN = PAN2。凡例は `Home-PAN Coordinator` /
   `Neighboring-PAN Coordinator` / `Home-PAN end device` / `Neighboring-PAN end device`（端末に重ならないよう枠の右横に 4行1列で置く）。
-  文字サイズは凡例 32・目盛り 34（以前はどちらも 25。論文で読めるよう大きくした）。
+  文字サイズは凡例 38・目盛り 40（以前はどちらも 25。論文で読めるよう大きくした）。
+  凡例の見本（マーカー）と文字の間は詰める（`handlelength` 2.0 → 1.0、`handletextpad` 0.8 → 0.3）。
   **軸タイトル（x [km] / y [km]）は入れない**（キャプションで説明する）。縦軸の目盛りは **1 km ごと**（−1 / 0 / 1）。横軸も 1 km ごとに固定する（文字を大きくすると自動で 2 km 刻みに間引かれるため）
   色は自PAN = 青、隣接PAN = 赤。コーディネータは四角、端末は丸、
   円は各PANの通信範囲（`MAXIMUM_COMMUNICATION_RANGE` を生成と同じく 0.1 km に丸めた値）
