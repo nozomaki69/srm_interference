@@ -23,6 +23,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.patches import Circle  # noqa: E402
+from matplotlib.ticker import MultipleLocator  # noqa: E402
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
@@ -37,8 +38,14 @@ LOAD_PERCENT = C.OFFERED_LOAD_PERCENTS[0]
 OWN_COLOR = "blue"
 NEIGHBOR_COLOR = "red"
 
-# 目盛り・軸タイトル・凡例の文字サイズ (すべて揃える)
-FONT_SIZE = 25
+# 文字サイズ。以前は目盛り・軸タイトル・凡例を 25 で揃えていたが、論文で読めるよう
+# 大きくした。凡例は枠の右横に出すので、目盛りより一段小さくして横幅を抑える
+TICK_FONT_SIZE = 34
+LEGEND_FONT_SIZE = 32
+# 目盛りの間隔 [km]。横軸も固定する: 文字を大きくすると matplotlib が自動で
+# 2 km 刻みに間引いてしまうため
+X_TICK_STEP_KM = 1.0
+Y_TICK_STEP_KM = 1.0
 
 
 def range_km(ch):
@@ -94,14 +101,15 @@ def plot_positions(positions, pattern, seed, interf_label, out_dir):
             markersize=8, alpha=0.5, label="Neighboring-PAN end device", linestyle="")
 
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("x [km]", fontsize=FONT_SIZE)
-    ax.set_ylabel("y [km]", fontsize=FONT_SIZE)
-    ax.tick_params(axis="both", labelsize=FONT_SIZE, width=3.0, which="major", length=20)
+    # 軸タイトル (x [km] / y [km]) は入れない。図のキャプションで説明する
+    ax.tick_params(axis="both", labelsize=TICK_FONT_SIZE, width=3.0, which="major", length=20)
     ax.set_xlim(-2, 3.5)
     ax.set_ylim(-1.5, 1.5)
+    ax.xaxis.set_major_locator(MultipleLocator(X_TICK_STEP_KM))
+    ax.yaxis.set_major_locator(MultipleLocator(Y_TICK_STEP_KM))
     # 凡例は枠の外 (右横) に 4行1列で出す。枠内だと端末に重なって隠れるため
     leg = ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), ncol=1,
-                    fontsize=FONT_SIZE)
+                    fontsize=LEGEND_FONT_SIZE)
     leg.get_frame().set_linewidth(1.8)
     # tight_layout() は枠外の凡例のぶん軸を縮めてしまうので使わず、
     # savefig の bbox_inches="tight" で凡例ごと切り出す
