@@ -125,7 +125,10 @@ y 軸の下端 (`choose_ylim()`) を AUC の点だけで決めていたので、
 - 行 = 自帯域、列 = 相手帯域 (`auc_grid.pdf` と同じ並び)。行・列の見出しは入れない
 - **1パネルは single-query と multi-query の2本だけ**。同じ条件の2本が隣り合うので、
   時間分割 (multi-query) でどれだけ落ちるかがそのまま読める
-- 色 = モード: **single-query 赤、multi-query 紫**。線は両方実線、マーカーは ○ / □
+- 色 = モード: **single-query 橙 (他の図の Proposed と同じ `#eb6834`)、multi-query 紫**。線は両方実線、マーカーは ○ / □
+  (以前は single-query を赤 `#d62839` にしていた)
+- 凡例の名前は **`single-query (proposed)`** / `multi-query` (single-query が論文の提案する測定方式のため)。
+  表付きの図の行見出しは従来どおり `single` / `multi`
 - 両モードの 95% 信頼区間の髭、白抜きの点、y 軸の決め方は他の図と同じ
 - 凡例はモードの2項目を図の上に1行
 

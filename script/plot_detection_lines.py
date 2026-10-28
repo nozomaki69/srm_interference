@@ -58,10 +58,12 @@ OUT_DIR_BY_MODE = {
 
 MODES = A.MEASUREMENT_MODES                         # ("simultaneous", "sequential")
 # 凡例に出す名前 (論文での呼び方。save ブランチと同じ)
-MODE_LABEL = {"simultaneous": "single-query", "sequential": "multi-query"}
+# single-query は論文の提案する測定方式なので "(proposed)" を付ける
+MODE_LABEL = {"simultaneous": "single-query (proposed)", "sequential": "multi-query"}
 # モード比較図 (手法ごとの 3x3 グリッド) での色とマーカー。1パネルは2本だけなので
 # 線は両方実線にし、色 (single 赤 / multi 紫) とマーカー (○ / □) で分ける。
-MODE_COLOR = {"simultaneous": "#d62839", "sequential": "#7b2cbf"}   # 赤 / 紫
+# single-query は他の図の Proposed (METHOD_COLOR["proposed"]) と同じ橙にそろえる
+MODE_COLOR = {"simultaneous": "#eb6834", "sequential": "#7b2cbf"}   # 橙 / 紫
 MODE_MARKER = {"simultaneous": "o", "sequential": "s"}
 
 # 信頼区間の髭 (エラーバー) の体裁
@@ -493,7 +495,7 @@ GRID_LINESTYLE = "-"
 TABLE_FONTSIZE = 13
 TABLE_HEIGHT_RATIO = 0.42   # パネルの高さに対する表の高さ
 # 表の行見出しは隣のパネルの表にはみ出さないよう短くする (凡例は正式名のまま)
-TABLE_ROW_LABEL = {"single-query": "single", "multi-query": "multi"}
+TABLE_ROW_LABEL = {MODE_LABEL["simultaneous"]: "single", MODE_LABEL["sequential"]: "multi"}
 
 
 def _draw_value_table(ax, series, row_order, xlim):
