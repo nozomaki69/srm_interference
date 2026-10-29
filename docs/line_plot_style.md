@@ -127,8 +127,8 @@ y 軸の下端 (`choose_ylim()`) を AUC の点だけで決めていたので、
   時間分割 (multi-query) でどれだけ落ちるかがそのまま読める
 - 色 = モード: **single-query 橙 (他の図の Proposed と同じ `#eb6834`)、multi-query 紫**。線は両方実線、マーカーは ○ / □
   (以前は single-query を赤 `#d62839` にしていた)
-- 凡例の名前は **`single-query (proposed)`** / `multi-query` (single-query が論文の提案する測定方式のため)。
-  表付きの図の行見出しは従来どおり `single` / `multi`
+- 凡例の名前は `single-query` / `multi-query`。表付きの図の行見出しは `single` / `multi`
+  (一時 `single-query (proposed)` にしたが、`(proposed)` は外した)
 - 両モードの 95% 信頼区間の髭、白抜きの点、y 軸の決め方は他の図と同じ
 - 凡例はモードの2項目を図の上に1行
 

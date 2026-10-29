@@ -58,8 +58,7 @@ OUT_DIR_BY_MODE = {
 
 MODES = A.MEASUREMENT_MODES                         # ("simultaneous", "sequential")
 # 凡例に出す名前 (論文での呼び方。save ブランチと同じ)
-# single-query は論文の提案する測定方式なので "(proposed)" を付ける
-MODE_LABEL = {"simultaneous": "single-query (proposed)", "sequential": "multi-query"}
+MODE_LABEL = {"simultaneous": "single-query", "sequential": "multi-query"}
 # モード比較図 (手法ごとの 3x3 グリッド) での色とマーカー。1パネルは2本だけなので
 # 線は両方実線にし、色 (single 赤 / multi 紫) とマーカー (○ / □) で分ける。
 # single-query は他の図の Proposed (METHOD_COLOR["proposed"]) と同じ橙にそろえる
